@@ -1,0 +1,12 @@
+#!/bin/sh
+# Проверки без Android SDK: слои, G.711/RTP, Digest/SDP и SIP-сценарий против скриптового сервера.
+set -e
+cd "$(dirname "$0")/.."
+SRC=app/src/main/java/ru/minisip
+OUT=$(mktemp -d)
+python3 tools/check_imports.py
+javac -d "$OUT" $(find jvmtest/stubs -name '*.java') $SRC/net/*.java $SRC/media/*.java $SRC/sip/*.java \
+      jvmtest/ru/minisip/media/*.java jvmtest/ru/minisip/sip/*.java
+java -cp "$OUT" ru.minisip.sip.DigestTest
+java -cp "$OUT" ru.minisip.media.MediaTest
+python3 jvmtest/fake_server.py "$OUT"

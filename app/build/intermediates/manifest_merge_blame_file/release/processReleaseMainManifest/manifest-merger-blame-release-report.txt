@@ -1,0 +1,74 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="ru.minisip"
+4    android:versionCode="1"
+5    android:versionName="0.1" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="27"
+9        android:targetSdkVersion="34" />
+10
+11    <uses-permission android:name="android.permission.INTERNET" />
+11-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:4:5-67
+11-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:4:22-64
+12    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+12-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:5:5-71
+12-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:5:22-68
+13    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+13-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:6:5-80
+13-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:6:22-77
+14    <uses-permission android:name="android.permission.WAKE_LOCK" />
+14-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:7:5-68
+14-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:7:22-65
+15    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+15-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:8:5-77
+15-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:8:22-74
+16    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+16-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:9:5-88
+16-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:9:22-85
+17    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+17-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:10:5-77
+17-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:10:22-74
+18
+19    <application
+19-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:12:5-32:19
+20        android:name="ru.minisip.app.App"
+20-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:13:9-32
+21        android:allowBackup="false"
+21-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:15:9-36
+22        android:extractNativeLibs="false"
+23        android:label="MiniSIP"
+23-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:14:9-32
+24        android:theme="@android:style/Theme.Material.Light.NoActionBar" >
+24-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:16:9-72
+25        <activity
+25-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:18:9-26:20
+26            android:name="ru.minisip.app.MainActivity"
+26-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:19:13-45
+27            android:exported="true"
+27-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:20:13-36
+28            android:launchMode="singleTask" >
+28-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:21:13-44
+29            <intent-filter>
+29-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:22:13-25:29
+30                <action android:name="android.intent.action.MAIN" />
+30-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:23:17-69
+30-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:23:25-66
+31
+32                <category android:name="android.intent.category.LAUNCHER" />
+32-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:24:17-77
+32-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:24:27-74
+33            </intent-filter>
+34        </activity>
+35
+36        <service
+36-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:28:9-31:58
+37            android:name="ru.minisip.app.CallService"
+37-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:29:13-44
+38            android:exported="false"
+38-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:30:13-37
+39            android:foregroundServiceType="microphone" />
+39-->/home/active/android/minisip/app/src/main/AndroidManifest.xml:31:13-55
+40    </application>
+41
+42</manifest>
