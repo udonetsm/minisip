@@ -21,7 +21,7 @@ public final class MainActivity extends Activity {
     private SharedPreferences prefs;
     private EditText server, login, pass, number;
     private TextView status;
-    private Button connect, call, answer, hang;
+    private Button connect, disconnect, call, hang;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -41,20 +41,19 @@ public final class MainActivity extends Activity {
 
         server = field(root, "Сервер (host или host:порт)", prefs.getString("server", ""),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        login = field(root, "Логин", prefs.getString("login", ""), InputType.TYPE_CLASS_TEXT);
-        pass = field(root, "Пароль", prefs.getString("pass", ""),
+        login = field(root, "Login", prefs.getString("login", ""), InputType.TYPE_CLASS_TEXT);
+        pass = field(root, "Password", prefs.getString("pass", ""),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        connect = button(root, "Подключиться", v -> doConnect());
-
+        connect = button(root, "Connect", v -> doConnect());
+        disconnect = button(root, "Disconnect", v -> doDisconnect());
         status = new TextView(this);
         status.setTextSize(18);
         status.setPadding(0, dp(24), 0, dp(24));
         root.addView(status);
 
-        number = field(root, "Номер", "", InputType.TYPE_CLASS_PHONE);
-        call = button(root, "Позвонить", v -> doCall());
-        answer = button(root, "Ответить", v -> app.answer());
-        hang = button(root, "Отбой", v -> app.hangup());
+        number = field(root, "Number", "", InputType.TYPE_CLASS_PHONE);
+        call = button(root, "Call", v -> doCall());
+        hang = button(root, "Discard", v -> app.hangup());
 
         ScrollView sv = new ScrollView(this);
         sv.addView(root);
@@ -106,6 +105,10 @@ public final class MainActivity extends Activity {
         app.connect(s, port, login.getText().toString().trim(), pass.getText().toString());
     }
 
+    private void doDisconnect() {
+        app.disconnect();
+    }
+
     private void doCall() {
         String n = number.getText().toString().trim();
         if (n.isEmpty()) return;
@@ -121,9 +124,9 @@ public final class MainActivity extends Activity {
         status.setText(app.status);
         boolean idle = app.state == App.IDLE;
         call.setVisibility(idle ? View.VISIBLE : View.GONE);
-        answer.setVisibility(app.state == App.INCOMING ? View.VISIBLE : View.GONE);
         hang.setVisibility(idle ? View.GONE : View.VISIBLE);
-        connect.setEnabled(idle);
+        connect.setEnabled(idle && !app.registered && !app.connecting);
+        disconnect.setEnabled(app.registered || app.connecting);
     }
 
     // ---------- мелочи вёрстки ----------

@@ -31,11 +31,6 @@ public final class SipTest {
                 }
             }
 
-            public void onIncoming(String from) {
-                System.out.println("EV incoming " + from);
-                sip.answer();
-            }
-
             public void onRinging() {
                 System.out.println("EV ringing");
                 if (ended == 2) sip.hangup();                 // третий вызов: отменяем до ответа

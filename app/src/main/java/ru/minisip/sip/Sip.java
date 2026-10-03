@@ -13,8 +13,6 @@ public interface Sip {
     interface Listener {
         default void onRegistered(boolean ok, String info) {}
 
-        default void onIncoming(String from) {}
-
         default void onRinging() {}
 
         default void onConnected() {}
@@ -28,11 +26,12 @@ public interface Sip {
     /** Открывает сокет и регистрируется на сервере; обновляет регистрацию сама. */
     void register(String host, int port, String user, String password);
 
+    /** Отменяет регистрацию и закрывает сокет. */
+    void unregister();
+
     void call(String number);
 
-    void answer();
-
-    /** Отмена / отбой / отклонение — по состоянию вызова. */
+    /** Отмена / отбой — по состоянию вызова. */
     void hangup();
 
     static Sip create(Udp signalling, Media media) {

@@ -23,7 +23,6 @@ import ru.minisip.net.Udp;
 final class SipImpl implements Sip {
 
     private static final SecureRandom RND = new SecureRandom();
-    private static final int RINGING = 1;     // входящий звонит, ждём answer()
     private static final int CONNECTED = 2;
 
     private final Udp udp;
@@ -56,16 +55,12 @@ final class SipImpl implements Sip {
     }
 
     private static final class Call {
-        boolean in;
         int state;
         String id, ltag, branch, uri, from, to, target, auth;
         int cseq, rtp;
         List<String> route = new ArrayList<>();
         String dh;          // куда слать запросы внутри диалога
         int dp;
-        Msg inv;            // входящий INVITE (для ответов)
-        String rip;         // медиа собеседника (из его SDP)
-        int rport, pt;
         boolean ringing;
         Tx tx;
     }
@@ -134,6 +129,27 @@ final class SipImpl implements Sip {
     }
 
     @Override
+    public void unregister() {
+        post(() -> {
+            cancelReg();
+            if (ip != null && user != null && host != null) {
+                regCseq++;
+                String aor = "<sip:" + user + "@" + host + ">";
+                String m = msg("REGISTER sip:" + host + " SIP/2.0", "", hdrs(
+                        "Via: " + via(branch()), "Max-Forwards: 70",
+                        "From: " + aor + ";tag=" + regTag, "To: " + aor,
+                        "Call-ID: " + regId, "CSeq: " + regCseq + " REGISTER",
+                        "Contact: " + contact(), "Expires: 0", "User-Agent: minisip"));
+                send(m, host, port);
+            }
+            if (call != null) hangup();
+            udp.close();
+            ip = null;
+            lport = 0;
+        });
+    }
+
+    @Override
     public void call(String number) {
         post(() -> {
             if (call != null) return;
@@ -164,42 +180,12 @@ final class SipImpl implements Sip {
     }
 
     @Override
-    public void answer() {
-        post(() -> {
-            Call k = call;
-            if (k == null || !k.in || k.state != RINGING) return;
-            int rtp = media.open();
-            if (rtp < 0 || !media.start(k.rip, k.rport, k.pt)) {
-                send(response(k.inv, 500, "Server Internal Error", k.ltag, null, ""), k.dh, k.dp);
-                end(k, "ошибка аудио");
-                return;
-            }
-            List<String> x = hdrs("Contact: " + contact(), "Content-Type: application/sdp");
-            for (String r : k.route) x.add("Record-Route: " + r);
-            String ok = response(k.inv, 200, "OK", k.ltag, x, Sdp.make(ip, rtp, k.pt));
-            k.state = CONNECTED;
-            // 200 повторяем, пока не придёт ACK
-            k.tx = new Tx(ok, k.dh, k.dp, () -> {
-                bye(k);
-                end(k, "нет ACK");
-            });
-            k.tx.start();
-            lis.onConnected();
-        });
-    }
-
-    @Override
     public void hangup() {
         post(() -> {
             Call k = call;
             if (k == null) return;
-            if (k.in && k.state == RINGING) {
-                send(response(k.inv, 486, "Busy Here", k.ltag, null, ""), k.dh, k.dp);
-                end(k, "отклонён");
-                return;
-            }
             if (k.state == CONNECTED) bye(k);
-            else if (!k.in) cancel(k);
+            else cancel(k);
             end(k, "завершён");
         });
     }
@@ -304,7 +290,7 @@ final class SipImpl implements Sip {
     private void onInviteResp(Msg m) {
         int c = m.status();
         Call k = call;
-        boolean mine = k != null && !k.in && k.id.equals(m.get("call-id")) && k.cseq == m.cseq();
+        boolean mine = k != null && k.id.equals(m.get("call-id")) && k.cseq == m.cseq();
         if (!mine) {
             stray(m);
             return;
@@ -387,10 +373,10 @@ final class SipImpl implements Sip {
         boolean same = k != null && k.id.equals(m.get("call-id"));
         switch (m.method()) {
             case "INVITE":
-                onInvite(m, h, p);
+                send(response(m, 486, "Busy Here", null, null, ""), h, p);
                 break;
             case "ACK":
-                if (same && k.in && k.tx != null) k.tx.stop();
+                if (same && k.tx != null) k.tx.stop();
                 break;
             case "BYE":
                 send(response(m, 200, "OK", null, null, ""), h, p);
@@ -398,10 +384,6 @@ final class SipImpl implements Sip {
                 break;
             case "CANCEL":
                 send(response(m, 200, "OK", null, null, ""), h, p);
-                if (same && k.in && k.state == RINGING) {
-                    send(response(k.inv, 487, "Request Terminated", k.ltag, null, ""), k.dh, k.dp);
-                    end(k, "пропущенный");
-                }
                 break;
             case "OPTIONS":
                 send(response(m, 200, "OK", null,
@@ -411,45 +393,6 @@ final class SipImpl implements Sip {
                 send(response(m, 405, "Method Not Allowed", null,
                         hdrs("Allow: INVITE, ACK, CANCEL, BYE, OPTIONS"), ""), h, p);
         }
-    }
-
-    private void onInvite(Msg m, String h, int p) {
-        Call k = call;
-        if (k != null) {
-            if (k.id.equals(m.get("call-id"))) {        // ретрансмит нашего же INVITE
-                if (k.in && k.state == RINGING) {
-                    send(response(m, 180, "Ringing", k.ltag, hdrs("Contact: " + contact()), ""), h, p);
-                }
-            } else {
-                send(response(m, 486, "Busy Here", null, null, ""), h, p);
-            }
-            return;
-        }
-        String[] s = Sdp.parse(m.body);
-        if (s == null) {
-            send(response(m, 488, "Not Acceptable Here", null, null, ""), h, p);
-            return;
-        }
-        Call n = new Call();
-        n.in = true;
-        n.state = RINGING;
-        n.id = m.get("call-id");
-        n.ltag = id();
-        n.inv = m;
-        n.dh = h;
-        n.dp = p;
-        n.rip = s[0];
-        n.rport = Integer.parseInt(s[1]);
-        n.pt = Integer.parseInt(s[2]);
-        n.from = m.get("to") + ";tag=" + n.ltag;        // наша сторона диалога
-        n.to = m.get("from");                           // собеседник (с его тегом)
-        String ct = m.get("contact");
-        n.target = ct != null ? Msg.uri(ct) : Msg.uri(m.get("from"));
-        n.route = new ArrayList<>(m.all("record-route"));
-        n.cseq = 100;
-        call = n;
-        send(response(m, 180, "Ringing", n.ltag, hdrs("Contact: " + contact()), ""), h, p);
-        lis.onIncoming(Msg.user(m.get("from")));
     }
 
     // ================= построение сообщений =================

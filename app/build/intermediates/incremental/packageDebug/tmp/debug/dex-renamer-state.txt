@@ -1,4 +1,4 @@
-#Sat Oct 03 18:01:50 MSK 2026
+#Sat Oct 03 18:51:42 MSK 2026
 base.0=/home/active/android/minisip/app/build/intermediates/dex/debug/mergeProjectDexDebug/0/classes.dex
 base.1=/home/active/android/minisip/app/build/intermediates/dex/debug/mergeProjectDexDebug/15/classes.dex
 base.2=/home/active/android/minisip/app/build/intermediates/dex/debug/mergeProjectDexDebug/3/classes.dex

@@ -2,8 +2,6 @@ package ru.minisip.app;
 
 import android.app.Application;
 import android.content.Intent;
-import android.media.Ringtone;
-import android.media.RingtoneManager;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -18,15 +16,16 @@ import ru.minisip.sip.Sip;
  */
 public final class App extends Application implements Sip.Listener {
 
-    static final int IDLE = 0, CALLING = 1, INCOMING = 2, TALK = 3;
+    static final int IDLE = 0, CALLING = 1, TALK = 2;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private Sip sip;
     private Screen screen;
-    private Ringtone ring;
 
     // состояние для UI; трогать только из главного потока
     int state = IDLE;
+    boolean registered = false;
+    boolean connecting = false;
     String status = "Не подключено";
     Runnable onChange;
 
@@ -41,22 +40,25 @@ public final class App extends Application implements Sip.Listener {
     // ---------- команды из UI (главный поток) ----------
 
     void connect(String host, int port, String user, String pass) {
+        registered = false;
+        connecting = true;
         status = "Подключение…";
         changed();
         sip.register(host, port, user, pass);
+    }
+
+    void disconnect() {
+        registered = false;
+        connecting = false;
+        status = "Отключено";
+        sip.unregister();
+        changed();
     }
 
     void dial(String number) {
         if (state != IDLE) return;
         begin(CALLING, "Вызов…");
         sip.call(number);
-    }
-
-    void answer() {
-        if (state != INCOMING) return;
-        stopRing();
-        begin(TALK, "Разговор");
-        sip.answer();
     }
 
     void hangup() {
@@ -76,7 +78,6 @@ public final class App extends Application implements Sip.Listener {
     private void finish(String text) {
         state = IDLE;
         status = text;
-        stopRing();
         screen.stop();
         stopService(new Intent(this, CallService.class));
         changed();
@@ -91,20 +92,9 @@ public final class App extends Application implements Sip.Listener {
     @Override
     public void onRegistered(boolean ok, String info) {
         main.post(() -> {
+            registered = ok;
+            connecting = false;
             status = ok ? "Подключено" : "Ошибка: " + info;
-            changed();
-        });
-    }
-
-    @Override
-    public void onIncoming(String from) {
-        main.post(() -> {
-            if (state != IDLE) return;
-            state = INCOMING;
-            status = "Входящий: " + from;
-            ring = RingtoneManager.getRingtone(this,
-                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE));
-            if (ring != null) ring.play();
             changed();
         });
     }
@@ -131,12 +121,5 @@ public final class App extends Application implements Sip.Listener {
     @Override
     public void onEnded(String reason) {
         main.post(() -> finish("Завершено: " + reason));
-    }
-
-    private void stopRing() {
-        if (ring != null) {
-            ring.stop();
-            ring = null;
-        }
     }
 }
