@@ -8,7 +8,9 @@ import android.net.Network;
 import android.net.LinkAddress;
 import android.net.NetworkCapabilities;
 import android.net.VpnService;
+import android.os.Build;
 import android.os.ParcelFileDescriptor;
+import android.os.Process;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -118,6 +120,40 @@ final class AndroidTun implements Tun {
             }
         }
         return null;
+    }
+
+    /**
+     * Нас вытеснил чужой VPN этого же профиля: нашей VPN-сети в системе уже нет, а чужая есть.
+     * VPN другого профиля (личный, пока мы в рабочем) нас вытеснить не может: у каждого профиля
+     * свой VPN, и мы его игнорируем. Профиль владельца сети узнаём по uid (uid / 100000); если система
+     * его не сообщает (Android до 12), чужая сеть учитывается только когда нашей уже нет, поэтому
+     * живой туннель из-за чужого личного VPN не закрывается.
+     */
+    @Override
+    @SuppressWarnings("deprecation")
+    public boolean otherVpn(String ip) {
+        ConnectivityManager cm = (ConnectivityManager) svc.getSystemService(Context.CONNECTIVITY_SERVICE);
+        int myProfile = Process.myUid() / 100000;
+        boolean oursPresent = false, foreign = false;
+        for (Network n : cm.getAllNetworks()) {
+            NetworkCapabilities nc = cm.getNetworkCapabilities(n);
+            LinkProperties lp = cm.getLinkProperties(n);
+            if (nc == null || lp == null || !nc.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue;
+            boolean ours = false;
+            for (LinkAddress la : lp.getLinkAddresses()) {
+                if (ip.equals(la.getAddress().getHostAddress())) ours = true;
+            }
+            if (ours) {
+                oursPresent = true;
+                continue;
+            }
+            if (Build.VERSION.SDK_INT >= 31) {
+                int owner = nc.getOwnerUid();
+                if (owner > 0 && owner / 100000 != myProfile) continue;   // VPN другого профиля
+            }
+            foreign = true;
+        }
+        return foreign && !oursPresent;
     }
 
     @Override

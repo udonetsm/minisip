@@ -14,28 +14,40 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Один сеанс VPN: рукопожатие IKEv2, интерфейс tun и перекачка пакетов tun <-> ESP/UDP 4500.
- * Потоки: "vpn" (рукопожатие, потом таймеры: keepalive и DPD), "vpn-rx" (сокет -> tun),
- * "vpn-tun" (tun -> сокет). Колбэки Vpn.Listener зовутся ровно один раз на onUp и один на onDown.
+ * Потоки: "vpn" (рукопожатие, потом таймеры: keepalive, DPD и ping), "vpn-rx" (сокет -> tun),
+ * "vpn-tun" (tun -> сокет). Колбэки Vpn.Listener зовутся: onUp один раз; затем либо onDown,
+ * либо (supervised) onReconnecting. После любого из двух сеанс мёртв: восстановление — новым Tunnel.
  */
 final class Tunnel {
 
     static final int MTU = 1400;       // 1500 минус IP/UDP/ESP-накладные с запасом
     /** Буфер приёма: ответ IKE_AUTH с цепочкой сертификатов легко больше 2 КБ (сервер шлёт его IP-фрагментами). */
     private static final int RX_BUF = 65535;
+    private static final int PING_ID = 0x4D53;
 
     // настраиваемое для проверок
     int ikePort = 500, natPort = 4500;
     int rto = 3000, tries = 4;         // ожидание ответа на один запрос и число попыток
     int keepMs = 20000, dpdMs = 30000, deadMs = 90000;
+    /** Ping через туннель: адрес (null — выключено), период и сколько потерянных подряд считается обрывом. */
+    String pingHost;
+    int pingMs = 2000, pingLoss = 5;
+    /**
+     * true — обрыв уже поднятого туннеля (или чужой VPN поверх) сообщается не сразу через onDown:
+     * если чужого VPN нет, зовётся onReconnecting, и дальше решает владелец (VpnImpl).
+     */
+    boolean supervised;
 
     private final Tun tun;
     private final Vpn.Listener ev;
     private final AtomicBoolean closed = new AtomicBoolean();
     private volatile boolean up;
     private volatile long lastRx;
+    private volatile int pongs;        // сколько ответов на наши ping пришло (пишет только поток приёма)
     private volatile byte[] dpdReq;    // неотвеченный DPD повторяем с тем же номером
     private volatile int dpdId = -1;
-    private DatagramSocket sock;
+    private volatile DatagramSocket sock;
+    private byte[] pingSrc, pingDst;
     private InetAddress srv;
     private Ike ike;
     private Esp esp;
@@ -56,9 +68,18 @@ final class Tunnel {
         main.start();
     }
 
-    /** Закрывает туннель по просьбе пользователя или системы. Можно звать из любого потока. */
+    /** Закрывает туннель по просьбе пользователя или системы (окончательно). Можно звать из любого потока. */
     void stop(String reason) {
         finish(reason);
+    }
+
+    /** Если сеанс закрыли, пока поток рукопожатия был занят, дальше идти нельзя. */
+    private void alive() throws IOException {
+        if (closed.get()) {
+            DatagramSocket s = sock;
+            if (s != null) s.close();
+            throw new IOException("disconnected");
+        }
     }
 
     // ================= рукопожатие =================
@@ -66,11 +87,13 @@ final class Tunnel {
     private void run(String host, String identity, String psk, String password, String ca, String apps) {
         try {
             srv = resolve(host);
+            alive();
             if (srv == null) {
                 finish("cannot resolve the server (IPv4 address needed)");
                 return;
             }
             sock = new DatagramSocket();
+            alive();
             if (!tun.protect(sock)) {
                 finish("cannot take the transport socket out of the VPN");
                 return;
@@ -114,9 +137,19 @@ final class Tunnel {
                 finish("login did not finish");
                 return;
             }
+            if (pingHost != null) {
+                pingSrc = InetAddress.getByName(ike.ip).getAddress();      // оба — числовые адреса, без DNS
+                pingDst = InetAddress.getByName(pingHost).getAddress();
+                if (pingSrc.length != 4 || pingDst.length != 4) pingHost = null;
+            }
+            alive();
             String name = tun.open(ike.ip, ike.dns, ike.routes, MTU, apps);
             if (name == null) {
                 finish("cannot create the tun interface");
+                return;
+            }
+            if (closed.get()) {                                       // закрыли, пока создавался интерфейс
+                tun.close();
                 return;
             }
             esp = ike.esp;
@@ -128,7 +161,7 @@ final class Tunnel {
             ev.onUp(name);
             timers();
         } catch (IOException | RuntimeException e) {
-            finish(closed.get() ? "disconnected" : "network error: " + e.getMessage());
+            lost(closed.get() ? "disconnected" : "network error: " + e.getMessage());
         }
     }
 
@@ -153,6 +186,7 @@ final class Tunnel {
     private byte[] exchange(byte[] req, int port, boolean marker, int id) throws IOException {
         byte[] buf = new byte[RX_BUF];
         for (int i = 0; i < tries; i++) {
+            alive();
             send(req, port, marker);
             long end = System.currentTimeMillis() + rto;
             for (long left; (left = end - System.currentTimeMillis()) > 0; ) {
@@ -201,12 +235,16 @@ final class Tunnel {
                     byte[] ip = esp.unwrap(buf, n);
                     if (ip != null) {
                         lastRx = System.currentTimeMillis();
+                        if (pong(ip)) {                              // ответ на наш ping в tun не отдаём
+                            pongs++;
+                            continue;
+                        }
                         tun.write(ip, 0, ip.length);
                     }
                 }
             }
         } catch (IOException | RuntimeException e) {
-            finish(closed.get() ? "disconnected" : "network error: " + e.getMessage());
+            lost(closed.get() ? "disconnected" : "network error: " + e.getMessage());
         }
     }
 
@@ -221,9 +259,9 @@ final class Tunnel {
                 byte[] pkt = esp.wrap(b, n);
                 sock.send(new DatagramPacket(pkt, pkt.length, srv, natPort));
             }
-            finish("disconnected");
+            lost("tunnel interface closed");
         } catch (IOException | RuntimeException e) {
-            finish(closed.get() ? "disconnected" : "tun error: " + e.getMessage());
+            lost(closed.get() ? "disconnected" : "tun error: " + e.getMessage());
         }
     }
 
@@ -253,22 +291,53 @@ final class Tunnel {
             }
         }
         send(ike.seal(Ike.INFO, true, x.id, new ArrayList<>()), natPort, true);   // пустой ответ (и на DPD)
-        if (gone) finish("server closed the tunnel");
+        if (gone) lost("server closed the tunnel");
     }
 
-    /** Поток "vpn" после подъёма: поддерживает NAT-привязку и проверяет, жив ли сервер. */
+    /**
+     * Поток "vpn" после подъёма: NAT-keepalive, DPD и ping. Ping идёт самим ESP (не через ОС),
+     * поэтому проверяет именно наш путь: сокет -> сервер -> 10.x -> обратно. Каждые pingMs
+     * оцениваем предыдущий ping: пришёл хоть один ответ — потерь 0, нет — +1. pingLoss подряд = обрыв.
+     */
     private void timers() {
-        long lastKeep = System.currentTimeMillis(), lastDpd = 0;
+        long lastKeep = System.currentTimeMillis(), lastDpd = 0, lastPing = 0;
+        int tick = Math.max(50, Math.min(1000, keepMs / 4));
+        if (pingHost != null) tick = Math.min(tick, Math.max(50, pingMs / 4));
+        int missed = 0, seen = pongs, seq = 0;
+        boolean pinged = false;
         try {
             while (!closed.get()) {
-                Thread.sleep(Math.max(50, Math.min(1000, keepMs / 4)));
+                Thread.sleep(tick);
                 long now = System.currentTimeMillis(), idle = now - lastRx;
                 if (now - lastKeep >= keepMs) {
                     sock.send(new DatagramPacket(new byte[]{(byte) 0xFF}, 1, srv, natPort));
                     lastKeep = now;
                 }
+                if (pingHost != null && now - lastPing >= pingMs) {
+                    if (pinged) {
+                        if (pongs != seen) {
+                            seen = pongs;
+                            missed = 0;
+                        } else {
+                            missed++;
+                        }
+                    }
+                    if (missed >= pingLoss) {
+                        lost("no ping replies from " + pingHost);
+                        return;
+                    }
+                    byte[] ip = echo(++seq);
+                    byte[] pkt = esp.wrap(ip, ip.length);
+                    try {
+                        sock.send(new DatagramPacket(pkt, pkt.length, srv, natPort));
+                    } catch (IOException e) {
+                        // нет сети: это обычная потеря ping, посчитается на следующем круге
+                    }
+                    pinged = true;
+                    lastPing = now;
+                }
                 if (idle >= deadMs) {
-                    finish("server does not respond");
+                    lost("server does not respond");
                     return;
                 }
                 if (dpdReq == null && idle >= dpdMs) {
@@ -285,12 +354,80 @@ final class Tunnel {
         } catch (InterruptedException e) {
             // закрыли снаружи
         } catch (IOException | RuntimeException e) {
-            finish(closed.get() ? "disconnected" : "network error: " + e.getMessage());
+            lost(closed.get() ? "disconnected" : "network error: " + e.getMessage());
         }
     }
 
-    /** Закрывает всё и сообщает onDown один раз, из какого бы потока ни позвали. */
+    // ================= ping =================
+
+    /** IPv4 + ICMP echo request, 8 байт данных. Источник — наш адрес внутри туннеля. */
+    private byte[] echo(int seq) {
+        byte[] p = new byte[36];
+        p[0] = 0x45;
+        Crypto.put16(p, 2, p.length);
+        Crypto.put16(p, 4, seq);
+        Crypto.put16(p, 6, 0x4000);                                  // DF
+        p[8] = 64;                                                   // TTL
+        p[9] = 1;                                                    // ICMP
+        System.arraycopy(pingSrc, 0, p, 12, 4);
+        System.arraycopy(pingDst, 0, p, 16, 4);
+        Crypto.put16(p, 10, checksum(p, 0, 20));
+        p[20] = 8;                                                   // echo request
+        Crypto.put16(p, 24, PING_ID);
+        Crypto.put16(p, 26, seq & 0xffff);
+        Crypto.put32(p, 28, System.nanoTime() >>> 10);
+        Crypto.put16(p, 22, checksum(p, 20, 16));
+        return p;
+    }
+
+    private static int checksum(byte[] b, int off, int len) {
+        long s = 0;
+        for (int i = 0; i < len; i += 2) {
+            s += ((b[off + i] & 0xff) << 8) | (i + 1 < len ? b[off + i + 1] & 0xff : 0);
+        }
+        while ((s >> 16) != 0) s = (s & 0xffff) + (s >> 16);
+        return (int) (~s & 0xffff);
+    }
+
+    /** Это echo reply на наш ping (от адреса, который мы пинговали)? */
+    private boolean pong(byte[] ip) {
+        byte[] dst = pingDst;
+        if (dst == null || ip.length < 28 || (ip[0] >> 4) != 4 || ip[9] != 1) return false;
+        int ihl = (ip[0] & 0x0f) * 4;
+        if (ihl < 20 || ip.length < ihl + 8 || ip[ihl] != 0 || Crypto.u16(ip, ihl + 4) != PING_ID) return false;
+        for (int i = 0; i < 4; i++) {
+            if (ip[12 + i] != dst[i]) return false;
+        }
+        return true;
+    }
+
+    // ================= завершение =================
+
+    /** Окончательное закрытие: onDown один раз, из какого бы потока ни позвали. */
     private void finish(String reason) {
+        end(reason, false);
+    }
+
+    /**
+     * Обрыв связи. Не supervised или туннель ещё не поднимался — это обычное закрытие. Иначе:
+     * есть другой VPN в системе — закрываемся окончательно (onDown); нет — onReconnecting.
+     */
+    private void lost(String reason) {
+        if (closed.get()) return;
+        if (!supervised || !up) {
+            finish(reason);
+            return;
+        }
+        boolean other = false;
+        try {
+            other = tun.otherVpn(ike.ip);
+        } catch (RuntimeException ignored) {
+        }
+        if (other) end("another VPN took over (" + reason + ")", false);
+        else end(reason, true);
+    }
+
+    private void end(String reason, boolean retry) {
         if (!closed.compareAndSet(false, true)) return;
         if (up) {                                                    // вежливо просим сервер закрыть SA
             try {
@@ -300,11 +437,13 @@ final class Tunnel {
             }
         }
         up = false;
-        if (sock != null) sock.close();
+        DatagramSocket s = sock;
+        if (s != null) s.close();
         tun.close();
         for (Thread t : new Thread[]{main, rx, tx}) {
             if (t != null && t != Thread.currentThread()) t.interrupt();
         }
-        ev.onDown(reason);
+        if (retry) ev.onReconnecting(reason);
+        else ev.onDown(reason);
     }
 }

@@ -3,6 +3,8 @@ package ru.minisip.app;
 import android.app.Activity;
 import android.app.Application;
 import android.content.Intent;
+import android.net.ConnectivityManager;
+import android.net.Network;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -37,6 +39,8 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     boolean vpnUp = false;
     boolean vpnConnecting = false;
     String vpnStatus = "VPN: disconnected";
+    /** SIP работал, когда VPN оборвался: после возврата (или окончательного отключения) переоткрыть. */
+    private boolean sipResume;
     Runnable onChange;
 
     /**
@@ -67,6 +71,31 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         screen = Screen.create(this);
         vpn = Vpn.create(this);
         vpn.setListener(this);
+        try {                                // смена основной сети системы: SIP-сокет надо переоткрыть
+            getSystemService(ConnectivityManager.class).registerDefaultNetworkCallback(
+                    new ConnectivityManager.NetworkCallback() {
+                        @Override
+                        public void onAvailable(Network n) {
+                            main.post(App.this::onNetwork);
+                        }
+                    });
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    /**
+     * Появилась новая основная сеть. Пока локального VPN нет, SIP идёт стеком системы, а его сокет
+     * и адрес в Via/Contact остались от старой сети: сам SipImpl заметит это лишь через ~2 минуты
+     * (таймаут обновления регистрации + повтор). Поэтому сразу открываем сокет заново. Звонок через
+     * сменившуюся сеть не спасти. Когда VPN поднят или поднимается, ничего не делаем: туннель
+     * сам следит за связью, а onUp перерегистрирует SIP.
+     */
+    private void onNetwork() {
+        if (sipHost == null || vpnUp || vpnConnecting) return;
+        if (state != IDLE) sip.hangup();
+        sipResume = true;                    // даже если регистрация уже упала сама
+        reregister();
+        changed();
     }
 
     // ---------- команды из UI (главный поток) ----------
@@ -74,6 +103,10 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     void connect(int page, String host, int port, String user, String pass) {
         if (!allowed(page)) return;
         lastPage = page;
+        if (!vpnUp) {                        // нет локального VPN: гарантированно системный стек
+            sipUdp.bind(null);
+            rtpUdp.bind(null);
+        }
         sipHost = host;
         sipPort = port;
         sipUser = user;
@@ -88,6 +121,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     void disconnect(int page) {
         if (lastPage != page) return;
         sipHost = null;
+        sipResume = false;
         registered = false;
         connecting = false;
         status = "Отключено";
@@ -125,7 +159,8 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
 
     /** SIP-регистрацию надо переоткрыть, чтобы она шла тем же путём, что и вызов. */
     private void reregister() {
-        if (sipHost == null || !(registered || connecting)) return;
+        if (sipHost == null || !(registered || connecting || sipResume)) return;
+        sipResume = false;
         registered = false;
         connecting = true;
         status = "Подключение…";
@@ -141,6 +176,27 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
             sipUdp.bind(iface);              // SIP и RTP идут строго через туннель
             rtpUdp.bind(iface);
             reregister();
+            changed();
+        });
+    }
+
+    /**
+     * VPN оборвался и переподключается (до ~2 минут). vpnUp остаётся true: сессия VPN ещё жива,
+     * кнопка Disconnect работает, чужие страницы заблокированы. Вызов уже не спасти, SIP-регистрация
+     * идёт в никуда: помечаем её на возобновление, сокеты остаются привязанными к туннелю.
+     */
+    @Override
+    public void onReconnecting(String reason) {
+        main.post(() -> {
+            if (!vpnUp) return;
+            vpnStatus = "VPN: reconnecting (" + reason + ")";
+            if (state != IDLE) sip.hangup();
+            sipUdp.bind(null);               // локальный VPN сейчас не работает: SIP и RTP идут стеком системы
+            rtpUdp.bind(null);
+            if (sipHost != null && (registered || connecting)) {
+                reregister();                // регистрация сразу уходит системным стеком
+                sipResume = true;            // а когда VPN вернётся, onUp переоткроет её уже через туннель
+            }
             changed();
         });
     }

@@ -15,6 +15,13 @@ public interface Vpn {
 
         /** Туннель не поднялся или упал; reason — причина для пользователя. */
         default void onDown(String reason) {}
+
+        /**
+         * Поднятый туннель оборвался (нет ответа на ping, смена сети), другого VPN в системе нет:
+         * идёт переподключение, не дольше ~2 минут. Закончится либо onUp (снова, возможно с другим
+         * iface), либо onDown. Вызов через упавший туннель уже не спасти.
+         */
+        default void onReconnecting(String reason) {}
     }
 
     void setListener(Listener l);

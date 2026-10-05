@@ -27,8 +27,11 @@ final class Esp {
         this.block = s.block();
     }
 
-    /** IP-пакет b[0..n) -> готовый пакет ESP (его кладут в UDP как есть). */
-    byte[] wrap(byte[] b, int n) {
+    /**
+     * IP-пакет b[0..n) -> готовый пакет ESP (его кладут в UDP как есть).
+     * synchronized: исходящее теперь зовут два потока (tun -> сокет и ping из таймеров), а номер общий.
+     */
+    synchronized byte[] wrap(byte[] b, int n) {
         int pad = (block - (n + 2) % block) % block;
         byte[] plain = new byte[n + pad + 2];
         System.arraycopy(b, 0, plain, 0, n);

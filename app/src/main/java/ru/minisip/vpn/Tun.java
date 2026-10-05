@@ -24,6 +24,14 @@ interface Tun {
 
     void write(byte[] b, int off, int len) throws IOException;
 
+    /**
+     * Есть ли в системе действующий VPN, который не наш. Наш узнаём по выданному нам адресу ip
+     * (имя интерфейса не годится: tun0 переиспользуется). В проверках на JVM по умолчанию «нет».
+     */
+    default boolean otherVpn(String ip) {
+        return false;
+    }
+
     /** Закрывает интерфейс; блокированный read должен вернуться. */
     void close();
 }
