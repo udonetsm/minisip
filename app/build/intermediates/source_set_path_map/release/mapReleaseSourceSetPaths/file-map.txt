@@ -1,7 +1,0 @@
-ru.minisip.app-pngs-0 /home/active/android/minisip/app/build/generated/res/pngs/release
-ru.minisip.app-resValues-1 /home/active/android/minisip/app/build/generated/res/resValues/release
-ru.minisip.app-packageReleaseResources-2 /home/active/android/minisip/app/build/intermediates/incremental/release/packageReleaseResources/merged.dir
-ru.minisip.app-packageReleaseResources-3 /home/active/android/minisip/app/build/intermediates/incremental/release/packageReleaseResources/stripped.dir
-ru.minisip.app-release-4 /home/active/android/minisip/app/build/intermediates/merged_res/release/mergeReleaseResources
-ru.minisip.app-main-5 /home/active/android/minisip/app/src/main/res
-ru.minisip.app-release-6 /home/active/android/minisip/app/src/release/res

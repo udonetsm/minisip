@@ -55,6 +55,11 @@ final class MediaImpl implements Media, Udp.Listener {
     }
 
     @Override
+    public void setSpeaker(boolean on) {
+        audio.setSpeaker(on);
+    }
+
+    @Override
     public synchronized void stop() {
         boolean wasRunning = run;
         run = false;

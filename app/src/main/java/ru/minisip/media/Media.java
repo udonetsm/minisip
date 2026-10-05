@@ -19,6 +19,12 @@ public interface Media {
     /** Останавливает всё и освобождает порт. Можно звать в любом состоянии. */
     void stop();
 
+    /**
+     * Куда идёт звук разговора: true — громкая связь (нижний динамик), false — разговорный (в ухо).
+     * Можно менять и во время вызова; выбор действует и на следующие вызовы.
+     */
+    default void setSpeaker(boolean on) {}
+
     static Media create(Udp rtpSocket, Context ctx) {
         return new MediaImpl(rtpSocket, new AndroidAudio(ctx));
     }

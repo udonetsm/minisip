@@ -21,9 +21,10 @@ ALLOWED = {
     "media": {"net"},
     "sip": {"net", "media"},
     "screen": set(),
-    "app": {"net", "media", "sip", "screen"},
+    "vpn": set(),
+    "app": {"net", "media", "sip", "screen", "vpn"},
 }
-IFACE = {"net": "Udp", "media": "Media", "sip": "Sip", "screen": "Screen"}
+IFACE = {"net": "Udp", "media": "Media", "sip": "Sip", "screen": "Screen", "vpn": "Vpn"}
 
 errors = []
 
@@ -63,7 +64,7 @@ if has_cycle():
 
 # --- 3: сигнатуры публичных интерфейсов ---
 OK_TYPES = {"void", "int", "long", "boolean", "String", "byte[]", "short[]", "Context",
-            "Listener", "Udp", "Media", "Sip", "Screen", "int...", "Object"}
+            "Listener", "Udp", "Media", "Sip", "Screen", "Vpn", "int...", "Object"}
 for pkg, name in IFACE.items():
     f = ROOT / pkg / f"{name}.java"
     src = re.sub(r"/\*.*?\*/", "", f.read_text(encoding="utf-8"), flags=re.S)

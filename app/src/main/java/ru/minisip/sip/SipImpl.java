@@ -197,8 +197,7 @@ final class SipImpl implements Sip {
         lport = udp.open(0, this::onPacket);
         ip = lport > 0 ? udp.localIp(host, port) : null;
         if (ip == null) {
-            lis.onRegistered(false, "нет сети или не найден сервер");
-            regTimer = ex.schedule(() -> guard(this::startReg), 20, TimeUnit.SECONDS);
+            lis.onRegistered(false, "нет сети или не найден сервер (" + udp.error() + ")");            regTimer = ex.schedule(() -> guard(this::startReg), 20, TimeUnit.SECONDS);
             return;
         }
         regId = id() + "@" + ip;

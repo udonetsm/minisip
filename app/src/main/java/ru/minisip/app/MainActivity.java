@@ -1,155 +1,135 @@
 package ru.minisip.app;
 
 import android.Manifest;
-import android.app.Activity;
-import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
+import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
-import android.text.InputType;
-import android.view.View;
-import android.widget.Button;
-import android.widget.EditText;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.TextView;
+import android.view.ViewGroup;
+import android.widget.FrameLayout;
 
-/** Весь интерфейс собран в коде: ни одного xml-ресурса. */
-public final class MainActivity extends Activity {
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentActivity;
+import androidx.viewpager2.adapter.FragmentStateAdapter;
+import androidx.viewpager2.widget.ViewPager2;
 
-    private App app;
-    private SharedPreferences prefs;
-    private EditText server, login, pass, number;
-    private TextView status;
-    private Button connect, disconnect, call, hang;
+/**
+ * Пустая главная активити: на ней лежит лента страниц-фрагментов (SettingsFragment).
+ * Сами страницы чуть меньше экрана, по краям видна активити под ними.
+ * <p>
+ * Страниц столько, сколько создано. Листать нельзя, пока страница одна. Если на последней странице
+ * настроена АТС (сервер и логин), справа появляется ещё одна: стоит на неё перелистнуть, и она
+ * создаётся. Так же и дальше: новая страница создаёт следующую, только когда в ней самой настроена АТС.
+ * Интерфейс собран в коде: ни одного xml-ресурса.
+ */
+public final class MainActivity extends AppCompatActivity {
+
+    static final int REQ_VPN = 2;
+    private static final int PAGER_ID = 0x4d530001;       // постоянный id: по нему ViewPager2 сохраняет страницу
+
+    private ViewPager2 pager;
+    private Pages pages;
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        app = (App) getApplication();
-        prefs = getSharedPreferences("cfg", MODE_PRIVATE);
 
         // экран можно зажигать поверх блокировки (датчик приближения будит телефон у лица)
         setShowWhenLocked(true);
         setTurnScreenOn(true);
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        int pad = dp(16);
-        root.setPadding(pad, pad, pad, pad);
+        pager = new ViewPager2(this);
+        pager.setId(PAGER_ID);
+        pages = new Pages(this);
+        pager.setAdapter(pages);
+        pager.setUserInputEnabled(pages.getItemCount() > 1);   // одна страница — листать нечего
+        pager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
+            @Override
+            public void onPageSelected(int position) {
+                // перелистнули на следующую, ещё не созданную страницу: она создаётся
+                if (position >= PageStore.count(MainActivity.this)) {
+                    PageStore.setCount(MainActivity.this, position + 1);
+                    pagesChanged();
+                }
+            }
+        });
+
+        FrameLayout root = new FrameLayout(this);
         root.setFitsSystemWindows(true);
+        root.addView(pager, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        setContentView(root);
 
-        server = field(root, "Сервер (host или host:порт)", prefs.getString("server", ""),
-                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        login = field(root, "Login", prefs.getString("login", ""), InputType.TYPE_CLASS_TEXT);
-        pass = field(root, "Password", prefs.getString("pass", ""),
-                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        connect = button(root, "Connect", v -> doConnect());
-        disconnect = button(root, "Disconnect", v -> doDisconnect());
-        status = new TextView(this);
-        status.setTextSize(18);
-        status.setPadding(0, dp(24), 0, dp(24));
-        root.addView(status);
-
-        number = field(root, "Number", "", InputType.TYPE_CLASS_PHONE);
-        call = button(root, "Call", v -> doCall());
-        hang = button(root, "Discard", v -> app.hangup());
-
-        ScrollView sv = new ScrollView(this);
-        sv.addView(root);
-        setContentView(sv);
-
-        if (Build.VERSION.SDK_INT >= 33) {
-            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO,
-                    Manifest.permission.POST_NOTIFICATIONS}, 1);
-        } else {
-            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 1);
-        }
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        app.onChange = this::render;
-        render();
-    }
-
-    @Override
-    protected void onPause() {
-        app.onChange = null;
-        super.onPause();
-    }
-
-    private void doConnect() {
-        String s = server.getText().toString().trim();
-        int port = 5060;
-        int c = s.lastIndexOf(':');
-        if (c > 0) {
-            try {
-                port = Integer.parseInt(s.substring(c + 1));
-                s = s.substring(0, c);
-            } catch (NumberFormatException e) {
-                status.setText("Неверный порт");
-                return;
+        if (b == null) {
+            if (Build.VERSION.SDK_INT >= 33) {
+                requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO,
+                        Manifest.permission.POST_NOTIFICATIONS}, 1);
+            } else {
+                requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 1);
             }
         }
-        if (s.isEmpty() || login.getText().length() == 0) {
-            status.setText("Укажите сервер и логин");
-            return;
+    }
+
+    /** Настройки или число страниц изменились: пересчитать, сколько страниц можно листать. */
+    void pagesChanged() {
+        // не сразу: изменение могло прийти посреди расчёта экрана, а RecyclerView этого не любит
+        pager.post(() -> {
+            pages.refresh();
+            pager.setUserInputEnabled(pages.getItemCount() > 1);
+        });
+    }
+
+    /** Ответ на системный запрос согласия на VPN: отдаём его странице, с которой запрос ушёл. */
+    @Override
+    @SuppressWarnings("deprecation")
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQ_VPN) return;
+        boolean ok = resultCode == RESULT_OK;
+        // ViewPager2 кладёт страницу с тегом "f" + номер позиции; нажать кнопку можно только на текущей
+        Fragment f = getSupportFragmentManager().findFragmentByTag("f" + pager.getCurrentItem());
+        if (f instanceof SettingsFragment) {
+            ((SettingsFragment) f).onVpnConsent(ok);
+        } else if (!ok) {
+            ((App) getApplication()).vpnDenied(pager.getCurrentItem());
         }
-        prefs.edit()
-                .putString("server", server.getText().toString().trim())
-                .putString("login", login.getText().toString().trim())
-                .putString("pass", pass.getText().toString())
-                .apply();
-        app.connect(s, port, login.getText().toString().trim(), pass.getText().toString());
     }
 
-    private void doDisconnect() {
-        app.disconnect();
-    }
+    /** Лента страниц: созданные плюс, если в последней настроена АТС, одна пустая справа. */
+    private static final class Pages extends FragmentStateAdapter {
+        private final FragmentActivity host;
+        private int count;
 
-    private void doCall() {
-        String n = number.getText().toString().trim();
-        if (n.isEmpty()) return;
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 1);
-            status.setText("Нужен доступ к микрофону");
-            return;
+        Pages(FragmentActivity host) {
+            super(host);
+            this.host = host;
+            this.count = slots();
         }
-        app.dial(n);
-    }
 
-    private void render() {
-        status.setText(app.status);
-        boolean idle = app.state == App.IDLE;
-        call.setVisibility(idle ? View.VISIBLE : View.GONE);
-        hang.setVisibility(idle ? View.GONE : View.VISIBLE);
-        connect.setEnabled(idle && !app.registered && !app.connecting);
-        disconnect.setEnabled(app.registered || app.connecting);
-    }
+        private int slots() {
+            int n = PageStore.count(host);
+            return n + (PageStore.configured(host, n - 1) ? 1 : 0);
+        }
 
-    // ---------- мелочи вёрстки ----------
+        void refresh() {
+            int now = slots();
+            if (now == count) return;
+            int old = count;
+            count = now;
+            if (now > old) notifyItemRangeInserted(old, now - old);
+            else notifyItemRangeRemoved(now, old - now);
+        }
 
-    private int dp(int v) {
-        return (int) (v * getResources().getDisplayMetrics().density);
-    }
+        @Override
+        public int getItemCount() {
+            return count;
+        }
 
-    private EditText field(LinearLayout parent, String hint, String value, int type) {
-        EditText e = new EditText(this);
-        e.setHint(hint);
-        e.setText(value);
-        e.setInputType(type);
-        e.setSingleLine(true);
-        parent.addView(e);
-        return e;
-    }
-
-    private Button button(LinearLayout parent, String text, View.OnClickListener l) {
-        Button x = new Button(this);
-        x.setText(text);
-        x.setOnClickListener(l);
-        parent.addView(x);
-        return x;
+        @NonNull
+        @Override
+        public Fragment createFragment(int position) {
+            return SettingsFragment.create(position);
+        }
     }
 }

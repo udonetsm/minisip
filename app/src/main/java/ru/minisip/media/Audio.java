@@ -10,4 +10,7 @@ interface Audio {
     void write(short[] buf, int n);
 
     void stop();
+
+    /** Вывод звука: true — громкая связь, false — разговорный динамик. Допустимо и во время разговора. */
+    default void setSpeaker(boolean on) {}
 }
