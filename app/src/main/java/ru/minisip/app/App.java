@@ -165,6 +165,11 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     void dial(int page, String number) {
         if (state != IDLE || !allowed(page)) return;
         lastPage = page;
+        if (!registered) {
+            status = "Ошибка: нет сети";
+            changed();
+            return;
+        }
         begin(CALLING, "Вызов…");
         sip.call(number);
     }

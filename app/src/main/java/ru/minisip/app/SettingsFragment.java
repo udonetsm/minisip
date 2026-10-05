@@ -299,7 +299,7 @@ public final class SettingsFragment extends Fragment {
         vpnStatus.setText(mine ? app.vpnStatus : other ? busy : "VPN: disconnected");
         call.setVisibility(idle ? View.VISIBLE : View.GONE);
         hang.setVisibility(idle ? View.GONE : View.VISIBLE);
-        call.setEnabled(!other);
+        call.setEnabled(!other && reg);
         audioBtn.setEnabled(!other);
         audioBtn.setText("Источник вывода: " + (prefs.getBoolean("speaker", false)
                 ? "медиадинамик (громкая связь)" : "разговорный динамик"));
