@@ -31,7 +31,7 @@ final class Tunnel {
     int keepMs = 20000, dpdMs = 30000, deadMs = 90000;
     /** Ping через туннель: адрес (null — выключено), период и сколько потерянных подряд считается обрывом. */
     String pingHost;
-    int pingMs = 2000, pingLoss = 5;
+    int pingMs = 2000, pingLoss = 3;
     /**
      * true — обрыв уже поднятого туннеля (или чужой VPN поверх) сообщается не сразу через onDown:
      * если чужого VPN нет, зовётся onReconnecting, и дальше решает владелец (VpnImpl).

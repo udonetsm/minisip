@@ -190,7 +190,6 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         main.post(() -> {
             if (!vpnUp) return;
             vpnStatus = "VPN: reconnecting (" + reason + ")";
-            if (state != IDLE) sip.hangup();
             sipUdp.bind(null);               // локальный VPN сейчас не работает: SIP и RTP идут стеком системы
             rtpUdp.bind(null);
             if (sipHost != null && (registered || connecting)) {
@@ -204,6 +203,32 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     @Override
     public void onDown(String reason) {
         main.post(() -> {
+            boolean isTakeover = reason != null &&
+                    (reason.toLowerCase().contains("taken over") || reason.toLowerCase().contains("another vpn"));
+
+            if (isTakeover) {
+                if (state != IDLE) sip.hangup();
+                sipHost = null;
+                sipResume = false;
+                registered = false;
+                connecting = false;
+                status = "Отключено";
+                sip.unregister();
+
+                vpnUp = false;
+                vpnConnecting = false;
+                vpnStatus = "VPN: disconnected (" + reason + ")";
+                vpn.disconnect();
+
+                sipUdp.bind(null);
+                rtpUdp.bind(null);
+                sipUdp.close();
+                rtpUdp.close();
+
+                changed();
+                return;
+            }
+
             boolean was = vpnUp;
             vpnConnecting = false;
             vpnUp = false;
