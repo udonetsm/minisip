@@ -23,7 +23,7 @@ final class VpnImpl implements Vpn {
     static volatile VpnImpl live;
 
     /** Куда пингуем через туннель. */
-    private static final String PING_HOST = "10.3.143.97";
+    private static final String PING_HOST = "10.160.1.254";
     /** Сколько после обрыва пробуем переподключиться, потом onDown. */
     private static final long GIVE_UP_MS = 120_000;
 
