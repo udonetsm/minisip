@@ -34,31 +34,86 @@ final class AndroidAudio implements Audio {
 
             int rb = AudioRecord.getMinBufferSize(RATE,
                     AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-            rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, RATE,
-                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
-                    Math.max(rb, 3200) * 2);
-            if (rec.getState() != AudioRecord.STATE_INITIALIZED) {
+            int bufRec = Math.max(rb, 3200) * 2;
+
+            AudioRecord r = null;
+            for (int i = 0; i < 5; i++) {
+                try {
+                    r = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, RATE,
+                            AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                            bufRec);
+                    if (r.getState() == AudioRecord.STATE_INITIALIZED) break;
+                    r.release();
+                    r = null;
+                } catch (Exception ignored) {
+                }
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException ignored) {
+                }
+            }
+            if (r == null) {
+                stop();
+                return false;
+            }
+            rec = r;
+
+            int tb = AudioTrack.getMinBufferSize(RATE,
+                    AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
+            int bufTrk = Math.max(tb, 1600) * 2;
+
+            AudioTrack t = null;
+            for (int i = 0; i < 5; i++) {
+                try {
+                    t = new AudioTrack.Builder()
+                            .setAudioAttributes(new AudioAttributes.Builder()
+                                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                    .build())
+                            .setAudioFormat(new AudioFormat.Builder()
+                                    .setSampleRate(RATE)
+                                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                                    .build())
+                            .setBufferSizeInBytes(bufTrk)
+                            .setTransferMode(AudioTrack.MODE_STREAM)
+                            .build();
+                    if (t.getState() == AudioTrack.STATE_INITIALIZED) break;
+                    t.release();
+                    t = null;
+                } catch (Exception ignored) {
+                }
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException ignored) {
+                }
+            }
+            if (t == null) {
+                stop();
+                return false;
+            }
+            trk = t;
+
+            boolean started = false;
+            for (int i = 0; i < 5; i++) {
+                try {
+                    rec.startRecording();
+                    if (rec.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) {
+                        started = true;
+                        break;
+                    }
+                } catch (Exception ignored) {
+                }
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException ignored) {
+                }
+            }
+            if (!started) {
                 stop();
                 return false;
             }
 
-            int tb = AudioTrack.getMinBufferSize(RATE,
-                    AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
-            trk = new AudioTrack.Builder()
-                    .setAudioAttributes(new AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                            .build())
-                    .setAudioFormat(new AudioFormat.Builder()
-                            .setSampleRate(RATE)
-                            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                            .build())
-                    .setBufferSizeInBytes(Math.max(tb, 1600) * 2)
-                    .setTransferMode(AudioTrack.MODE_STREAM)
-                    .build();
-
-            rec.startRecording();
             trk.play();
             return true;
         } catch (RuntimeException e) {   // нет разрешения, устройство занято и т.п.

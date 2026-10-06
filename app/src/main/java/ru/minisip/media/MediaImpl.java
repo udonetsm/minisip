@@ -40,7 +40,15 @@ final class MediaImpl implements Media, Udp.Listener {
 
     @Override
     public synchronized boolean start(String host, int port, int payload) {
-        if (run || (payload != 0 && payload != 8)) return false;
+        if (payload != 0 && payload != 8) return false;
+        if (run) {
+            if (host != null && port > 0) {
+                rhost = host;
+                rport = port;
+            }
+            pt = payload;
+            return true;
+        }
         if (!audio.start()) return false;
         rhost = host;
         rport = port;

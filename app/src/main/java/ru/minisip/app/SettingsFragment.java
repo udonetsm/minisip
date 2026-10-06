@@ -26,6 +26,7 @@ import androidx.fragment.app.Fragment;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
+import com.google.android.material.color.MaterialColors;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
@@ -88,38 +89,45 @@ public final class SettingsFragment extends Fragment {
         int pad = dp(16);
         col.setPadding(pad, pad, pad, pad);
 
-        title(col, "SIP", 0);
-        server = field(col, "Сервер", "host или host:порт", prefs.getString("server", ""),
+        // --- Блок 1: Настройка АТС сервера ---
+        LinearLayout sipBlock = createBlock(col);
+        title(sipBlock, "SIP server settings", 0);
+        server = field(sipBlock, "Server", "host или host:порт", prefs.getString("server", ""),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI, false);
-        login = field(col, "Login", null, prefs.getString("login", ""), InputType.TYPE_CLASS_TEXT, false);
-        pass = field(col, "Password", null, prefs.getString("pass", ""),
+        login = field(sipBlock, "Login", null, prefs.getString("login", ""), InputType.TYPE_CLASS_TEXT, false);
+        pass = field(sipBlock, "Password", null, prefs.getString("pass", ""),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD, true);
-        connect = button(col, "Connect", false, v -> doConnect());
-        disconnect = button(col, "Disconnect", true, v -> app.disconnect(page));
-        status = body(col, dp(16));
+        connect = button(sipBlock, "Connect", false, v -> doConnect());
+        disconnect = button(sipBlock, "Disconnect", true, v -> app.disconnect(page));
+        status = body(sipBlock, dp(8));
 
-        number = field(col, "Number", null, "", InputType.TYPE_CLASS_PHONE, false);
-        call = button(col, "Call", false, v -> doCall());
-        hang = button(col, "Discard", true, v -> app.hangup(page));
-        audioBtn = button(col, "Источник вывода", true, v -> pickOutput());
+        // --- Блок 2: Номер телефона и источник звука ---
+        LinearLayout callBlock = createBlock(col);
+        title(callBlock, "Number and voice source", 0);
+        number = field(callBlock, "Number", null, "", InputType.TYPE_CLASS_PHONE, false);
+        call = button(callBlock, "Call", false, v -> doCall());
+        hang = button(callBlock, "Discard", true, v -> app.hangup(page));
+        audioBtn = button(callBlock, "Voice source", true, v -> pickOutput());
 
-        title(col, "VPN (IKEv2)", dp(32));
-        vpnServer = field(col, "VPN server", "host или IPv4", prefs.getString("vpnServer", ""),
+        // --- Блок 3: Настройка VPN ---
+        LinearLayout vpnBlock = createBlock(col);
+        title(vpnBlock, "VPN settings (IKEv2)", 0);
+        vpnServer = field(vpnBlock, "VPN server", "host или IPv4", prefs.getString("vpnServer", ""),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI, false);
-        vpnLogin = field(col, "VPN login", "например user@example.org", prefs.getString("vpnLogin", ""),
+        vpnLogin = field(vpnBlock, "VPN login", "например user@example.org", prefs.getString("vpnLogin", ""),
                 InputType.TYPE_CLASS_TEXT, false);
-        vpnPass = field(col, "VPN password", null, prefs.getString("vpnPass", ""),
+        vpnPass = field(vpnBlock, "VPN password", null, prefs.getString("vpnPass", ""),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD, true);
-        vpnKey = field(col, "VPN pre-shared key", "пусто — вход по логину и паролю", prefs.getString("vpnKey", ""),
+        vpnKey = field(vpnBlock, "VPN pre-shared key", "пусто — вход по логину и паролю", prefs.getString("vpnKey", ""),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD, true);
-        vpnCa = field(col, "VPN CA certificate (PEM)", "пусто — системное хранилище", prefs.getString("vpnCa", ""),
+        vpnCa = field(vpnBlock, "VPN CA certificate (PEM)", "пусто — системное хранилище", prefs.getString("vpnCa", ""),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE, false);
         vpnCa.setSingleLine(false);
         vpnCa.setMaxLines(4);
-        vpnAppsBtn = button(col, "VPN apps", true, v -> pickApps());
-        vpnConnect = button(col, "VPN connect", false, v -> doVpnConnect());
-        vpnDisconnect = button(col, "VPN disconnect", true, v -> app.vpnDisconnect(page));
-        vpnStatus = body(col, dp(16));
+        vpnAppsBtn = button(vpnBlock, "VPN apps", true, v -> pickApps());
+        vpnConnect = button(vpnBlock, "VPN connect", false, v -> doVpnConnect());
+        vpnDisconnect = button(vpnBlock, "VPN disconnect", true, v -> app.vpnDisconnect(page));
+        vpnStatus = body(vpnBlock, dp(8));
 
         // всё, что набрано, сразу запоминается: страницы-копии одной настройки не расходятся
         save(server, "server");
@@ -345,6 +353,31 @@ public final class SettingsFragment extends Fragment {
     }
 
     // ---------- мелочи вёрстки ----------
+
+    private LinearLayout createBlock(LinearLayout parent) {
+        Context ctx = parent.getContext();
+        MaterialCardView card = new MaterialCardView(ctx);
+        card.setRadius(dp(16));
+        card.setCardElevation(dp(0));
+        card.setStrokeWidth(dp(1));
+        card.setStrokeColor(MaterialColors.getColor(card,
+                com.google.android.material.R.attr.colorOutlineVariant, 0x33000000));
+
+        LinearLayout container = new LinearLayout(ctx);
+        container.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(16);
+        container.setPadding(pad, pad, pad, pad);
+
+        card.addView(container, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(16);
+        parent.addView(card, lp);
+
+        return container;
+    }
 
     private static String text(TextInputEditText e) {
         return e.getText() == null ? "" : e.getText().toString();

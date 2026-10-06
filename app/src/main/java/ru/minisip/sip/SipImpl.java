@@ -298,6 +298,10 @@ final class SipImpl implements Sip {
             k.tx.stop();
             if ((c == 180 || c == 183) && !k.ringing) {
                 k.ringing = true;
+                String[] s = Sdp.parse(m.body);
+                if (s != null) {
+                    media.start(s[0], Integer.parseInt(s[1]), Integer.parseInt(s[2]));
+                }
                 lis.onRinging();
             }
             return;
