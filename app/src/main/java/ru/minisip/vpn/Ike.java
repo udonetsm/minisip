@@ -19,7 +19,7 @@ import java.util.List;
  * Не потокобезопасен: handshake ведёт один поток, потом входящие разбирает другой.
  */
 final class Ike {
-
+    static final int N_MOBIKE_SUPPORTED = 16396, N_UPDATE_SA_ADDRESSES = 16400;
     // типы payload
     static final int SA = 33, KE = 34, IDI = 35, IDR = 36, CERT = 37, AUTH = 39, NONCE = 40,
             NOTIFY = 41, DELETE = 42, TSI = 44, TSR = 45, SK = 46, CP = 47, EAP = 48;
@@ -63,7 +63,7 @@ final class Ike {
     Esp esp;
     long spiOut;           // SPI, с которым шлём мы; сервер его же присылает в Delete
     private int nextId = 1;                     // 0 занят под IKE_SA_INIT, AUTH = 1, дальше DPD и Delete
-
+    boolean mobike; 
     private final byte[] identity, psk;
     private final String password, host;
     private final List<java.security.cert.X509Certificate> ownRoots;   // свои корни из настроек или null
@@ -452,6 +452,7 @@ final class Ike {
         l.add(new Pl(IDI, myId));
         if (!eap) l.add(authPayload(psk));
         l.add(new Pl(CP, cp));
+        l.add(notify(N_MOBIKE_SUPPORTED, new byte[0]));
         l.add(new Pl(SA, saEsp(spi)));
         l.add(new Pl(TSI, ts()));
         l.add(new Pl(TSR, ts()));
@@ -598,6 +599,9 @@ final class Ike {
                 case CP: cp = p.body; break;
                 case SA: sa = parseSa(p.body, 3); break;
                 case TSR: tsr = p.body; break;
+                case NOTIFY:
+                    if (p.body.length >= 4 && u16(p.body, 2) == N_MOBIKE_SUPPORTED) mobike = true;
+                    break;
                 default: break;
             }
         }
@@ -634,5 +638,17 @@ final class Ike {
         spiOut = u32(sa.spi, 0);
         esp = new Esp(c, out, in, spiOut, spiIn);
         return null;
+    }
+
+    /** Тело запроса INFORMATIONAL для смены пути (MOBIKE). Адрес источника в хеше «неверный», как и в INIT:
+     *  сервер продолжает считать нас за NAT и шлёт ESP внутри UDP 4500 на адрес, с которого пришёл запрос. */
+    List<Pl> mobikeUpdate(byte[] srv, int port) {
+        byte[] p = new byte[2];
+        put16(p, 0, port);
+        List<Pl> l = new ArrayList<>();
+        l.add(notify(N_UPDATE_SA_ADDRESSES, new byte[0]));
+        l.add(notify(N_NAT_SRC, Crypto.sha1(spiI, spiR, new byte[4], new byte[2])));
+        l.add(notify(N_NAT_DST, Crypto.sha1(spiI, spiR, srv, p)));
+        return l;
     }
 }

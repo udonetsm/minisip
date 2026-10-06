@@ -15,9 +15,12 @@ import java.util.Objects;
 
 /**
  * Следит за сетью под VPN (не VPN, с интернетом). «Отпечаток» сети: какая сеть лучшая и её IPv4-адреса.
- * mark() запоминает отпечаток; если потом он поменялся (другая сеть, пропала, новый адрес),
- * через DEBOUNCE_MS зовётся onChange. Требует ACCESS_NETWORK_STATE (он уже нужен AndroidTun).
- * Лучшая сеть: проверенная (VALIDATED) выше непроверенной, дальше Ethernet > Wi-Fi > мобильная.
+ * Сети чужих VPN (в том числе из другого профиля) игнорируются: берутся только сети без TRANSPORT_VPN.
+ *
+ * onChange зовётся через DEBOUNCE_MS, если:
+ *  - отпечаток отличается от запомненного mark() (другая сеть, новый адрес, сеть пропала), или
+ *  - сеть вернулась после пропадания (даже если отпечаток тот же: NAT-привязка могла умереть).
+ * После вызова слушатель смотрит online() и sameAsMarked() и решает, что делать.
  */
 final class NetWatch {
 
@@ -26,6 +29,7 @@ final class NetWatch {
     private final ConnectivityManager cm;
     private final Handler h = new Handler(Looper.getMainLooper());
     private volatile String marked;
+    private volatile boolean offline;
     private Runnable onChange;
     private ConnectivityManager.NetworkCallback cb;
 
@@ -36,7 +40,11 @@ final class NetWatch {
             synchronized (NetWatch.this) {
                 r = onChange;
             }
-            if (r != null && !Objects.equals(key(), marked)) r.run();
+            if (r == null) return;
+            String k = key();
+            boolean was = offline;
+            offline = k == null;
+            if (!Objects.equals(k, marked) || (k != null && was)) r.run();
         }
     };
 
@@ -49,6 +57,7 @@ final class NetWatch {
         stop();
         this.onChange = onChange;
         marked = key();
+        offline = marked == null;
         cb = new ConnectivityManager.NetworkCallback() {
             @Override
             public void onAvailable(Network n) {
@@ -88,11 +97,22 @@ final class NetWatch {
             }
         }
         marked = null;
+        offline = false;
     }
 
-    /** Текущая сеть становится исходной (зовут перед каждой попыткой подключения). */
+    /** Текущая сеть становится исходной (зовут перед каждой попыткой подключения и миграцией). */
     void mark() {
         marked = key();
+    }
+
+    /** Есть ли сейчас хоть какая-то сеть с интернетом (кроме VPN). */
+    boolean online() {
+        return key() != null;
+    }
+
+    /** Сеть та же, на которой мы запомнили состояние. */
+    boolean sameAsMarked() {
+        return Objects.equals(key(), marked);
     }
 
     private void poke() {

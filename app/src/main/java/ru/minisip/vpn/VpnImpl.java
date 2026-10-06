@@ -4,46 +4,52 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.net.VpnService;
+import android.util.Log;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
  * Связывает публичный интерфейс, системный сервис и Tunnel.
- * connect() запускает TunService; когда система его создала, сервис зовёт serviceReady(),
- * и только тогда стартует Tunnel (ему нужен сам сервис: protect() и Builder).
  *
- * Смена сети (NetWatch) или обрыв поднятого туннеля (Tunnel.onReconnecting): текущий Tunnel закрывается
- * (сокеты, tun), через SETTLE_MS идёт новая попытка. Не вышло: паузы 2, 2, 4, 4, 8, 8, 2, 2, ... секунд
- * и так без конца, пока не получится. Конец только в двух случаях: disconnect() или нас вытеснил чужой VPN
- * (onRevoke либо чужой VPN в профиле перед очередной попыткой) — тогда всё сбрасывается и onDown.
- * Все вызовы слушателя идут под замком VpnImpl, чтобы порядок событий не путался.
+ * Принципы живучести:
+ *  1. Первый подъём и переподключение идут одним циклом recover(): сетевые сбои повторяются
+ *     (паузы 2, 2, 4, 4, 8, 8 с по кругу), конец только при disconnect(), onRevoke() нашего же
+ *     экземпляра сервиса или фатальной ошибке (неверный пароль, сертификат, алгоритмы).
+ *  2. Нет сети — не тратим попытки: ждём её появления.
+ *  3. Смена сети при согласованном MOBIKE: туннель и tun остаются, меняется только сокет.
+ *     Без MOBIKE или при неудаче — полное переподключение.
+ *  4. Чужие VPN (в том числе в другом профиле) на нас не влияют: Android держит VPN отдельно на
+ *     каждого пользователя/профиль, а наши сети ищем только среди NOT_VPN. Вытеснение — только
+ *     onRevoke() текущего экземпляра TunService.
+ * Все вызовы слушателя идут под замком VpnImpl.
  */
 final class VpnImpl implements Vpn {
+
+    private static final String TAG = "MiniSIP-VPN";
 
     /** Сервис создаёт система, поэтому находит владельца через статическую ссылку. */
     static volatile VpnImpl live;
 
-    /** Куда пингуем через туннель. */
-    private static final String PING_HOST = "10.160.1.254";
-    /** Пауза перед первой попыткой: старый интерфейс успевает исчезнуть из системы. */
+    /** Пауза перед первой попыткой после обрыва: старый интерфейс успевает исчезнуть. */
     private static final long SETTLE_MS = 700;
     /** Паузы после неудачной попытки; по кругу. */
     private static final long[] BACKOFF_MS = {2000, 2000, 4000, 4000, 8000, 8000};
     /** Сколько ждём одну попытку целиком (рукопожатие). */
     private static final long ATTEMPT_MS = 30_000;
+    /** Период необязательного ping через туннель (если задан healthcheckIp). */
+    private static final int PING_MS = 10_000;
 
     private final Context ctx;
     private final NetWatch watch;
     private volatile Listener lis = new Listener() {};
     private Tunnel tunnel;                 // действующий (или поднимающийся) сеанс; null — сеанса нет
-    private TunService svc;                // живой сервис: нужен для новых попыток
-    private String host, identity, psk, password, ca, apps, healthcheckIp;   // параметры последнего connect()
-    private String lastIp;                 // адрес, выданный нам сервером (по нему ищем чужой VPN)
+    private TunService svc;                // живой экземпляр сервиса сеанса
+    private String host, identity, psk, password, ca, apps, healthcheckIp;
     private boolean running;               // connect() был, disconnect()/сброса ещё не было
     private boolean want;                  // connect() был, сервис ещё не ответил
-    private int gen;                       // меняется при connect/disconnect/revoke/смене сети: отменяет восстановление
-    private Thread recovery;               // поток переподключения; null — не идёт
+    private int gen;                       // меняется при connect/disconnect/revoke/рестарте: отменяет циклы
+    private Thread recovery;               // поток подъёма/переподключения; null — не идёт
 
     VpnImpl(Context ctx) {
         this.ctx = ctx.getApplicationContext();
@@ -65,14 +71,15 @@ final class VpnImpl implements Vpn {
     }
 
     @Override
-    public synchronized void connect(String host, String identity, String password, String psk, String ca, String apps, String healthcheckIp) {
+    public synchronized void connect(String host, String identity, String password, String psk, String ca,
+                                     String apps, String healthcheckIp) {
         gen++;
         Thread r = recovery;
         recovery = null;
         if (r != null) r.interrupt();
         Tunnel old = tunnel;
         tunnel = null;
-        if (old != null) old.stop("replaced");            // свой туннель заменяем новым (его события молчат)
+        if (old != null) old.stop("replaced");
         this.host = host;
         this.identity = identity;
         this.password = password;
@@ -80,7 +87,6 @@ final class VpnImpl implements Vpn {
         this.ca = ca;
         this.apps = apps;
         this.healthcheckIp = healthcheckIp;
-        this.lastIp = null;
         running = true;
         want = true;
         ctx.startService(new Intent(ctx, TunService.class));
@@ -93,32 +99,83 @@ final class VpnImpl implements Vpn {
     }
 
     /** Из TunService.onStartCommand. false — запускать нечего, сервис можно гасить. */
-    synchronized boolean serviceReady(TunService svc) {
+    synchronized boolean serviceReady(TunService s) {
         if (!want) return false;
         want = false;
-        this.svc = svc;
+        this.svc = s;
+        Log.i(TAG, "service ready, starting connection to " + host + ", online=" + watch.online());
         watch.start(this::networkChanged);
-        launch(new Guard(false));
+        startRecovery(0, false);
         return true;
     }
 
-    /** Нас вытеснили: другое VPN-приложение или пользователь отключил VPN в системе. */
-    synchronized void revoked(TunService svc) {
-        cancel("VPN was taken over by another app");
+    /**
+     * Система отозвала VPN у экземпляра сервиса s. Реагируем только если это ТЕКУЩИЙ экземпляр:
+     * onRevoke от старого, уже заменённого экземпляра (мы сами пересоздаём сервис) сеанс не трогает.
+     */
+    synchronized void revoked(TunService s) {
+        Log.i(TAG, "onRevoke from " + System.identityHashCode(s) + ", current "
+                + (svc == null ? "none" : String.valueOf(System.identityHashCode(svc))));
+        if (s != svc) return;
+        cancel("VPN was revoked by the system or another app");
     }
 
-    /** Сеть под VPN сменилась: рвём текущее соединение и подключаемся заново (с нуля, не продолжая старое). */
+    // ---------------------------------------------------------------- сеть
+
+    /** Сеть под VPN изменилась (другая, пропала, вернулась). Под замком. */
     private synchronized void networkChanged() {
+        Log.i(TAG, "networkChanged: running=" + running + " want=" + want + " svc=" + (svc != null)
+                + " tunnel=" + (tunnel != null ? "up=" + tunnel.isUp() + " mobike=" + tunnel.mobike() : "none"));
         if (!running || want || svc == null) return;
+        boolean on = watch.online();
+        Tunnel t = tunnel;
+        if (t != null) t.setOnline(on);
+        if (!on) {
+            Log.i(TAG, "network lost: waiting");
+            return;                                       // живой туннель ждёт; цикл подъёма сам ждёт сеть
+        }
+        if (t != null && t.isUp()) {
+            if (t.mobike()) {
+                final int g = gen;
+                watch.mark();
+                Log.i(TAG, "network changed: MOBIKE update");
+                t.migrate(ok -> onMigrated(t, g, ok));
+            } else if (watch.sameAsMarked()) {
+                t.nudge();                                // та же сеть вернулась: проверить, жив ли путь
+            } else {
+                restart("network changed");
+            }
+        } else {
+            restart("network changed");                   // идёт подъём или цикл: начинаем заново
+        }
+    }
+
+    private synchronized void onMigrated(Tunnel t, int g, boolean ok) {
+        if (g != gen || tunnel != t) return;
+        if (ok) {
+            Log.i(TAG, "MOBIKE update done");
+            String f = t.iface();
+            if (f != null) lis.onUp(f);                   // App перепривяжет сокеты
+        } else {
+            Log.i(TAG, "MOBIKE update failed: full reconnect");
+            restart("network changed");
+        }
+    }
+
+    // ---------------------------------------------------------------- управление сеансом
+
+    /** Полное переподключение с нуля (старый Tunnel молчит). Под замком. */
+    private void restart(String reason) {
+        Log.i(TAG, "restart: " + reason);
         gen++;
         Thread r = recovery;
         recovery = null;
         if (r != null) r.interrupt();
         Tunnel t = tunnel;
         tunnel = null;
-        if (t != null) t.stop("network changed");         // его события молчат: он уже не владелец
-        lis.onReconnecting("network changed", 1);
-        startRecovery();
+        if (t != null) t.stop(reason);
+        lis.onReconnecting(reason, 1);
+        startRecovery(SETTLE_MS, false);
     }
 
     /** Останавливает сеанс и восстановление, сообщает onDown (под замком). */
@@ -127,7 +184,7 @@ final class VpnImpl implements Vpn {
         Thread r = recovery;
         recovery = null;
         Tunnel t = tunnel;
-        if (r != null) {                   // идёт переподключение: у попытки свои молчаливые события
+        if (r != null) {
             r.interrupt();
             tunnel = null;
             if (t != null) t.stop(reason);
@@ -142,10 +199,10 @@ final class VpnImpl implements Vpn {
         }
     }
 
-    /** Чужой VPN вытеснил нас, пока шло переподключение: всё в исходное состояние. Под замком. */
+    /** Окончательный конец (фатальная ошибка): всё в исходное состояние. Под замком. */
     private void abandon(String reason) {
         gen++;
-        recovery = null;                   // это сам поток переподключения, он сейчас выйдет
+        recovery = null;
         Tunnel t = tunnel;
         tunnel = null;
         if (t != null) t.stop(reason);
@@ -154,60 +211,70 @@ final class VpnImpl implements Vpn {
         lis.onDown(reason);
     }
 
-    /** Забывает всё о соединении: слежение, параметры (в том числе пароль), адрес, сервис. Под замком. */
     private void clear() {
         running = false;
         want = false;
         watch.stop();
         host = identity = password = psk = ca = apps = healthcheckIp = null;
-        lastIp = null;
         svc = null;
     }
 
     private Tunnel launch(Guard g) {
         Tunnel t = new Tunnel(new AndroidTun(svc), g);
         t.supervised = true;
-        t.pingHost = (healthcheckIp != null && !healthcheckIp.trim().isEmpty()) ? healthcheckIp.trim() : PING_HOST;
+        String hc = healthcheckIp == null ? "" : healthcheckIp.trim();
+        t.pingHost = hc.isEmpty() ? null : hc;           // по умолчанию ping выключен: живость решает DPD
+        t.pingMs = PING_MS;
+        t.log = m -> Log.i(TAG, m);
         g.owner = t;
         tunnel = t;
-        watch.mark();                      // сеть, на которой начинаем: если она сменится — начнём заново
+        watch.mark();
         t.start(host, identity, psk, password, ca, apps);
         return t;
     }
 
-    private void startRecovery() {         // под замком
+    private void startRecovery(long firstWait, boolean unused) {   // под замком
         final int g = gen;
-        Thread t = new Thread(() -> recover(g), "vpn-recover");
+        final long w = firstWait;
+        Thread t = new Thread(() -> recover(g, w), "vpn-recover");
         t.setDaemon(true);
         recovery = t;
         t.start();
     }
 
     /**
-     * Переподключение: первая попытка через SETTLE_MS, дальше после каждой неудачи паузы 2, 2, 4, 4, 8, 8 с по кругу.
-     * Конца по времени нет. Перед каждой попыткой смотрим, не занял ли место чужой VPN нашего профиля
-     * (establish() вытеснил бы его): тогда всё сбрасываем и onDown.
+     * Цикл подъёма. Нет сети — ждём, попытки не тратим. Сетевая неудача — пауза и снова.
+     * Фатальная (пароль, сертификат, алгоритмы, tun) — конец с onDown.
      */
-    private void recover(int g) {
-        long wait = SETTLE_MS;
+    private void recover(int g, long firstWait) {
+        long wait = firstWait;
         int step = 0;
         int attempts = 1;
         try {
             for (;;) {
-                Thread.sleep(wait);
-                Guard gd = new Guard(true);
+                if (wait > 0) Thread.sleep(wait);
+                boolean told = false;
+                while (!watch.online()) {
+                    synchronized (this) {
+                        if (g != gen) return;
+                        if (!told) {
+                            told = true;
+                            lis.onReconnecting("waiting for network", attempts);
+                        }
+                    }
+                    Thread.sleep(500);
+                }
+                Guard gd = new Guard();
                 Tunnel t;
                 synchronized (this) {
                     if (g != gen) return;
-                    if (lastIp != null && new AndroidTun(svc).otherVpn(lastIp)) {
-                        abandon("another VPN took over");
-                        return;
-                    }
-                    lis.onReconnecting("reconnecting", attempts);
+                    if (attempts > 1) lis.onReconnecting("reconnecting", attempts);
                     t = launch(gd);
                 }
                 boolean finished = gd.done.await(ATTEMPT_MS, TimeUnit.MILLISECONDS);
-                if (finished && gd.ok) {                       // поднялись: onUp уже ушёл слушателю
+                Log.i(TAG, "attempt " + attempts + ": finished=" + finished + " ok=" + gd.ok
+                        + " retryable=" + gd.retryable + " why=" + gd.why);
+                if (finished && gd.ok) {
                     synchronized (this) {
                         if (recovery == Thread.currentThread()) recovery = null;
                     }
@@ -215,7 +282,11 @@ final class VpnImpl implements Vpn {
                 }
                 synchronized (this) {
                     if (g != gen) return;
-                    if (tunnel == t) tunnel = null;            // дальше его события молчат
+                    if (tunnel == t) tunnel = null;
+                    if (finished && !gd.retryable) {       // фатально: повторять бессмысленно
+                        abandon(gd.why == null ? "connection failed" : gd.why);
+                        return;
+                    }
                 }
                 t.stop("timeout");
                 attempts++;
@@ -230,51 +301,49 @@ final class VpnImpl implements Vpn {
     /** Пропускает события только от действующего сеанса: старые, заменённые, молчат. */
     private final class Guard implements Listener {
         volatile Tunnel owner;
-        final boolean attempt;                     // попытка переподключения, а не первый подъём
         final CountDownLatch done = new CountDownLatch(1);
         volatile boolean ok;                       // дошла до onUp
-        volatile String why;                       // почему сеанс закрылся
-
-        Guard(boolean attempt) {
-            this.attempt = attempt;
-        }
+        volatile boolean retryable;                // неудача сетевая, можно повторять
+        volatile String why;
 
         @Override
         public void onUp(String iface) {
+            Log.i(TAG, "tunnel up: " + iface);
             synchronized (VpnImpl.this) {
                 if (tunnel != owner) return;
                 ok = true;
-                String ip = owner.ip();
-                if (ip != null) lastIp = ip;
-                lis.onUp(iface);                   // и при повторном подъёме: App перепривяжет сокеты
+                lis.onUp(iface);
             }
             done.countDown();
         }
 
         @Override
         public void onDown(String reason) {
+            Log.i(TAG, "tunnel down: " + reason + " (wasUp=" + ok + ")");
             why = reason;
+            Tunnel o = owner;
+            retryable = o != null && o.retryable;
             synchronized (VpnImpl.this) {
-                if (tunnel == owner) {
+                if (tunnel == owner && ok) {       // поднятый сеанс закрыт окончательно
                     tunnel = null;
-                    if (!attempt || ok) {          // неудачная попытка молчит: решает цикл переподключения
-                        ctx.stopService(new Intent(ctx, TunService.class));
-                        clear();                   // до onDown: слушатель может сразу позвать connect()
-                        lis.onDown(reason);
-                    }
+                    ctx.stopService(new Intent(ctx, TunService.class));
+                    clear();
+                    lis.onDown(reason);
                 }
+                // неудачная попытка молчит: решает цикл recover()
             }
             done.countDown();
         }
 
-        /** Поднятый сеанс оборвался, чужого VPN нет: запускаем переподключение. */
+        /** Поднятый сеанс оборвался: переподключаемся. */
         @Override
         public void onReconnecting(String reason) {
+            Log.i(TAG, "tunnel lost: " + reason);
             synchronized (VpnImpl.this) {
                 if (tunnel != owner) return;
                 tunnel = null;
                 lis.onReconnecting(reason, 1);
-                startRecovery();
+                startRecovery(SETTLE_MS, false);
             }
         }
     }

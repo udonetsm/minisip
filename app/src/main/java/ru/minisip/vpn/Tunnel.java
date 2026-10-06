@@ -10,43 +10,68 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Один сеанс VPN: рукопожатие IKEv2, интерфейс tun и перекачка пакетов tun <-> ESP/UDP 4500.
- * Потоки: "vpn" (рукопожатие, потом таймеры: keepalive, DPD и ping), "vpn-rx" (сокет -> tun),
- * "vpn-tun" (tun -> сокет). Колбэки Vpn.Listener зовутся: onUp один раз; затем либо onDown,
- * либо (supervised) onReconnecting. После любого из двух сеанс мёртв: восстановление — новым Tunnel.
+ * Потоки: "vpn" (рукопожатие, потом таймеры: keepalive, DPD), "vpn-rx" (сокет -> tun),
+ * "vpn-tun" (tun -> сокет), "vpn-mobike" (смена пути при смене сети).
+ *
+ * Правила живучести:
+ *  - сбой отправки UDP (нет сети) — это потеря пакета, а не обрыв (sendQuiet);
+ *  - пока сети нет (setOnline(false)), счётчики тишины стоят; когда она вернулась — сразу проверка;
+ *  - обрыв решает только DPD (и ошибки tun/сервера); необязательный ping лишь ускоряет DPD;
+ *  - при смене сети с MOBIKE (RFC 4555) меняется только сокет, IKE SA, ESP и tun остаются.
  */
 final class Tunnel {
 
-    static final int MTU = 1400;       // 1500 минус IP/UDP/ESP-накладные с запасом
-    /** Буфер приёма: ответ IKE_AUTH с цепочкой сертификатов легко больше 2 КБ (сервер шлёт его IP-фрагментами). */
+    /** Результат миграции пути. */
+    interface Done {
+        void done(boolean ok);
+    }
+
+    static final int MTU = 1400;
     private static final int RX_BUF = 65535;
     private static final int PING_ID = 0x4D53;
 
     // настраиваемое для проверок
     int ikePort = 500, natPort = 4500;
-    int rto = 3000, tries = 4;         // ожидание ответа на один запрос и число попыток
+    int rto = 3000, tries = 4;
     int keepMs = 20000, dpdMs = 30000, deadMs = 90000;
-    /** Ping через туннель: адрес (null — выключено), период и сколько потерянных подряд считается обрывом. */
+    /** Необязательный ping через туннель: адрес (null — выключено). Промахи только запускают DPD. */
     String pingHost;
-    int pingMs = 2000, pingLoss = 3;
-    /**
-     * true — обрыв уже поднятого туннеля (или чужой VPN поверх) сообщается не сразу через onDown:
-     * если чужого VPN нет, зовётся onReconnecting, и дальше решает владелец (VpnImpl).
-     */
+    int pingMs = 10000, pingLoss = 3;
+    /** true — обрыв поднятого туннеля сообщается через onReconnecting, решает владелец (VpnImpl). */
     boolean supervised;
+    /** Причина неудачи до подъёма сетевая (имеет смысл повторить), а не из-за настроек/пароля. */
+    volatile boolean retryable;
+
+    /** Диагностика: если задан, сюда раз в 10 с идёт сводка счётчиков. */
+    interface Log {
+        void d(String s);
+    }
+
+    volatile Log log;
+    private volatile long txPk, rxEsp, rxIke, txFail;
+    private volatile String lastSendErr = "";
 
     private final Tun tun;
     private final Vpn.Listener ev;
     private final AtomicBoolean closed = new AtomicBoolean();
     private volatile boolean up;
+    private volatile boolean online = true;
+    private volatile boolean kick;
     private volatile long lastRx;
-    private volatile int pongs;        // сколько ответов на наши ping пришло (пишет только поток приёма)
-    private volatile byte[] dpdReq;    // неотвеченный DPD повторяем с тем же номером
+    private volatile int pongs;
+    private volatile byte[] dpdReq;
     private volatile int dpdId = -1;
+    private volatile int migId = -1;
+    private volatile CountDownLatch migLatch;
     private volatile DatagramSocket sock;
+    private volatile String iface;
+    private final Object migLock = new Object();
     private byte[] pingSrc, pingDst;
     private InetAddress srv;
     private Ike ike;
@@ -67,21 +92,54 @@ final class Tunnel {
         main.setDaemon(true);
         main.start();
     }
-    
-    String ip() { Ike k = ike; return k == null ? null : k.ip; }
 
-    /** Закрывает туннель по просьбе пользователя или системы (окончательно). Можно звать из любого потока. */
+    String ip() {
+        Ike k = ike;
+        return k == null ? null : k.ip;
+    }
+
+    String iface() {
+        return iface;
+    }
+
+    boolean isUp() {
+        return up && !closed.get();
+    }
+
+    /** Сервер согласовал MOBIKE: смену сети можно пережить без пересоздания туннеля. */
+    boolean mobike() {
+        Ike k = ike;
+        return up && !closed.get() && k != null && k.mobike;
+    }
+
+    /** Есть ли сеть под VPN. Пока нет — не считаем тишину обрывом. Когда вернулась — проверяем путь. */
+    void setOnline(boolean on) {
+        boolean was = online;
+        online = on;
+        if (on && !was) kick = true;
+    }
+
+    /** Проверить путь сейчас: keepalive и DPD вне очереди. */
+    void nudge() {
+        kick = true;
+    }
+
+    /** Окончательное закрытие по просьбе пользователя или системы. Из любого потока. */
     void stop(String reason) {
         finish(reason);
     }
 
-    /** Если сеанс закрыли, пока поток рукопожатия был занят, дальше идти нельзя. */
     private void alive() throws IOException {
         if (closed.get()) {
             DatagramSocket s = sock;
             if (s != null) s.close();
             throw new IOException("disconnected");
         }
+    }
+
+    private void fail(String reason, boolean canRetry) {
+        retryable = canRetry;
+        finish(reason);
     }
 
     // ================= рукопожатие =================
@@ -91,71 +149,72 @@ final class Tunnel {
             srv = resolve(host);
             alive();
             if (srv == null) {
-                finish("cannot resolve the server (IPv4 address needed)");
+                fail("cannot resolve the server (IPv4 address needed)", true);
                 return;
             }
             sock = new DatagramSocket();
             alive();
             if (!tun.protect(sock)) {
-                finish("cannot take the transport socket out of the VPN");
+                fail("cannot take the transport socket out of the VPN", false);
                 return;
             }
             ike = new Ike(identity, psk, password, ca, host);
             String bad = ike.check();
             if (bad != null) {
-                finish(bad);
+                fail(bad, false);
                 return;
             }
 
             byte[] r = null;
             int rc = 1;
-            for (int round = 0; round < 2 && rc == 1; round++) {          // второй раунд — с cookie
+            for (int round = 0; round < 2 && rc == 1; round++) {
                 r = exchange(ike.initRequest(srv.getAddress(), ikePort), ikePort, false, 0);
                 if (r == null) {
-                    finish("server does not respond");
+                    fail("server does not respond", true);
                     return;
                 }
                 rc = ike.onInit(r);
             }
             if (rc != 0) {
-                finish(rc < 0 ? ike.error : "server keeps asking for a cookie");
+                fail(rc < 0 ? ike.error : "server keeps asking for a cookie", false);
                 return;
             }
             byte[] req = ike.authRequest();
-            for (int round = 0; req != null && round < 8; round++) {   // EAP — несколько обменов подряд
+            for (int round = 0; req != null && round < 8; round++) {
                 r = exchange(req, natPort, true, ike.curId);
                 if (r == null) {
-                    finish("server does not answer IKE_AUTH");
+                    fail("server does not answer IKE_AUTH", true);
                     return;
                 }
                 String err = ike.onAuth(r);
                 if (err != null) {
-                    finish(err);
+                    fail(err, false);
                     return;
                 }
                 req = ike.next;
             }
             if (ike.esp == null) {
-                finish("login did not finish");
+                fail("login did not finish", false);
                 return;
             }
             if (pingHost != null) {
-                pingSrc = InetAddress.getByName(ike.ip).getAddress();      // оба — числовые адреса, без DNS
+                pingSrc = InetAddress.getByName(ike.ip).getAddress();
                 pingDst = InetAddress.getByName(pingHost).getAddress();
                 if (pingSrc.length != 4 || pingDst.length != 4) pingHost = null;
             }
             alive();
             String name = tun.open(ike.ip, ike.dns, ike.routes, MTU, apps);
             if (name == null) {
-                finish("cannot create the tun interface");
+                fail("cannot create the tun interface", false);
                 return;
             }
-            if (closed.get()) {                                       // закрыли, пока создавался интерфейс
+            if (closed.get()) {
                 tun.close();
                 return;
             }
+            iface = name;
             esp = ike.esp;
-            sock.setSoTimeout(0);                                    // дальше приём без таймаута
+            sock.setSoTimeout(0);
             lastRx = System.currentTimeMillis();
             rx = daemon(this::rxLoop, "vpn-rx");
             tx = daemon(this::txLoop, "vpn-tun");
@@ -163,6 +222,7 @@ final class Tunnel {
             ev.onUp(name);
             timers();
         } catch (IOException | RuntimeException e) {
+            retryable = true;
             lost(closed.get() ? "disconnected" : "network error: " + e.getMessage());
         }
     }
@@ -184,7 +244,6 @@ final class Tunnel {
         return t;
     }
 
-    /** Отправляет запрос и ждёт ответ с тем же номером; повторяет до tries раз. null — тишина. */
     private byte[] exchange(byte[] req, int port, boolean marker, int id) throws IOException {
         byte[] buf = new byte[RX_BUF];
         for (int i = 0; i < tries; i++) {
@@ -215,51 +274,85 @@ final class Tunnel {
     }
 
     private void send(byte[] msg, int port, boolean marker) throws IOException {
-        byte[] d = marker ? Crypto.cat(new byte[4], msg) : msg;     // у IKE на 4500 впереди 4 нулевых байта
+        byte[] d = marker ? Crypto.cat(new byte[4], msg) : msg;
         sock.send(new DatagramPacket(d, d.length, srv, port));
+    }
+
+    /** Отправка, которая не рвёт туннель: нет сети — это обычная потеря UDP-пакета. */
+    private void sendQuiet(byte[] d, int port) {
+        DatagramSocket s = sock;
+        if (s == null) return;
+        try {
+            s.send(new DatagramPacket(d, d.length, srv, port));
+        } catch (IOException | RuntimeException e) {
+            txFail++;
+            lastSendErr = String.valueOf(e);
+        }
+    }
+
+    private void sendQuietIke(byte[] msg) {
+        sendQuiet(Crypto.cat(new byte[4], msg), natPort);
     }
 
     // ================= рабочий режим =================
 
-    /** Сокет -> tun: ESP разворачиваем, сообщения IKE обрабатываем, keepalive игнорируем. */
+    /** Сокет -> tun. Переживает подмену сокета при миграции MOBIKE. */
     private void rxLoop() {
         byte[] buf = new byte[RX_BUF];
-        try {
-            while (!closed.get()) {
-                DatagramPacket p = new DatagramPacket(buf, buf.length);
-                sock.receive(p);
+        while (!closed.get()) {
+            DatagramSocket s = sock;
+            DatagramPacket p = new DatagramPacket(buf, buf.length);
+            try {
+                s.receive(p);
+            } catch (IOException | RuntimeException e) {
+                if (closed.get()) return;
+                if (s != sock) continue;                     // сокет подменили при миграции
+                if (s.isClosed()) {
+                    lost("network error: " + e.getMessage());
+                    return;
+                }
+                try {
+                    Thread.sleep(200);                       // временный сбой чтения: не рвём
+                } catch (InterruptedException ie) {
+                    return;
+                }
+                continue;
+            }
+            try {
                 int n = p.getLength();
                 if (!p.getAddress().equals(srv) || n < 4) continue;
-                if (n == 1) continue;
                 if (Crypto.u32(buf, 0) == 0) {
                     onIke(Arrays.copyOfRange(buf, 4, n));
                 } else {
                     byte[] ip = esp.unwrap(buf, n);
                     if (ip != null) {
                         lastRx = System.currentTimeMillis();
-                        if (pong(ip)) {                              // ответ на наш ping в tun не отдаём
+                        rxEsp++;
+                        if (pong(ip)) {
                             pongs++;
                             continue;
                         }
                         tun.write(ip, 0, ip.length);
                     }
                 }
+            } catch (IOException | RuntimeException e) {
+                lost(closed.get() ? "disconnected" : "tun error: " + e.getMessage());
+                return;
             }
-        } catch (IOException | RuntimeException e) {
-            lost(closed.get() ? "disconnected" : "network error: " + e.getMessage());
         }
     }
 
-    /** tun -> сокет: каждый IPv4-пакет приложения заворачиваем в ESP. */
+    /** tun -> сокет: каждый IPv4-пакет заворачиваем в ESP. Сбой отправки — потеря пакета. */
     private void txLoop() {
         byte[] b = new byte[2048];
         try {
             while (!closed.get()) {
                 int n = tun.read(b);
                 if (n < 0) break;
-                if (n < 20 || (b[0] >> 4) != 4) continue;            // только IPv4
+                if (n < 20 || (b[0] >> 4) != 4) continue;
                 byte[] pkt = esp.wrap(b, n);
-                sock.send(new DatagramPacket(pkt, pkt.length, srv, natPort));
+                sendQuiet(pkt, natPort);
+                txPk++;
             }
             lost("tunnel interface closed");
         } catch (IOException | RuntimeException e) {
@@ -267,19 +360,21 @@ final class Tunnel {
         }
     }
 
-    /** Сообщение IKE от сервера: ответ на наш DPD, его DPD, удаление, попытка перегенерации ключей. */
-    private void onIke(byte[] m) throws IOException {
+    /** Сообщение IKE от сервера: ответ на наш DPD/MOBIKE, его DPD, удаление, попытка перегенерации. */
+    private void onIke(byte[] m) {
         Ike.Rx x = ike.open(m);
         if (x == null) return;
         lastRx = System.currentTimeMillis();
+        rxIke++;
         if (x.response) {
             if (x.id == dpdId) dpdReq = null;
+            CountDownLatch l = migLatch;
+            if (x.id == migId && l != null) l.countDown();
             return;
         }
-        if (x.exch == Ike.CHILD) {                                   // перегенерацию ключей не умеем
-            List<Ike.Pl> no = Collections.singletonList(
-                    Ike.notify(Ike.N_NO_ADDITIONAL_SAS, new byte[0]));
-            send(ike.seal(Ike.CHILD, true, x.id, no), natPort, true);
+        if (x.exch == Ike.CHILD) {
+            List<Ike.Pl> no = Collections.singletonList(Ike.notify(Ike.N_NO_ADDITIONAL_SAS, new byte[0]));
+            sendQuietIke(ike.seal(Ike.CHILD, true, x.id, no));
             return;
         }
         if (x.exch != Ike.INFO) return;
@@ -287,22 +382,22 @@ final class Tunnel {
         for (Ike.Pl p : x.pl) {
             if (p.type != Ike.DELETE || p.body.length < 4) continue;
             int proto = p.body[0] & 0xff, size = p.body[1] & 0xff, cnt = Crypto.u16(p.body, 2);
-            if (proto == 1) gone = true;                              // удалён весь IKE SA
+            if (proto == 1) gone = true;
             for (int i = 0; proto == 3 && size == 4 && i < cnt && 4 + 4 * i + 4 <= p.body.length; i++) {
                 if (Crypto.u32(p.body, 4 + 4 * i) == ike.spiOut) gone = true;
             }
         }
-        send(ike.seal(Ike.INFO, true, x.id, new ArrayList<>()), natPort, true);   // пустой ответ (и на DPD)
+        sendQuietIke(ike.seal(Ike.INFO, true, x.id, new ArrayList<>()));
         if (gone) lost("server closed the tunnel");
     }
 
     /**
-     * Поток "vpn" после подъёма: NAT-keepalive, DPD и ping. Ping идёт самим ESP (не через ОС),
-     * поэтому проверяет именно наш путь: сокет -> сервер -> 10.x -> обратно. Каждые pingMs
-     * оцениваем предыдущий ping: пришёл хоть один ответ — потерь 0, нет — +1. pingLoss подряд = обрыв.
+     * Поток "vpn" после подъёма: NAT-keepalive, DPD и необязательный ping.
+     * Нет сети — стоим. Сеть вернулась — keepalive и DPD вне очереди.
+     * Обрыв — только когда сервер молчит deadMs при живой сети.
      */
     private void timers() {
-        long lastKeep = System.currentTimeMillis(), lastDpd = 0, lastPing = 0;
+        long lastKeep = System.currentTimeMillis(), lastDpd = 0, lastPing = 0, lastStat = 0;
         int tick = Math.max(50, Math.min(1000, keepMs / 4));
         if (pingHost != null) tick = Math.min(tick, Math.max(50, pingMs / 4));
         int missed = 0, seen = pongs, seq = 0;
@@ -310,34 +405,52 @@ final class Tunnel {
         try {
             while (!closed.get()) {
                 Thread.sleep(tick);
-                long now = System.currentTimeMillis(), idle = now - lastRx;
+                long now = System.currentTimeMillis();
+                if (now - lastStat >= 10000) {
+                    lastStat = now;
+                    Log l = log;
+                    if (l != null) {
+                        l.d("stats: txEsp=" + txPk + " rxEsp=" + rxEsp + " rxIke=" + rxIke
+                                + " sendFail=" + txFail + (txFail > 0 ? " lastErr=" + lastSendErr : "")
+                                + " idleRx=" + (now - lastRx) / 1000 + "s online=" + online
+                                + " dpdPending=" + (dpdReq != null));
+                    }
+                }
+                if (!online) {                               // сети нет: тишина не считается
+                    lastRx = now;
+                    dpdReq = null;
+                    pinged = false;
+                    continue;
+                }
+                if (kick) {
+                    kick = false;
+                    lastKeep = 0;
+                    dpdReq = null;
+                    lastRx = Math.min(lastRx, now - dpdMs);  // пусть DPD спросит сервер сразу
+                }
                 if (now - lastKeep >= keepMs) {
-                    sock.send(new DatagramPacket(new byte[]{(byte) 0xFF}, 1, srv, natPort));
+                    sendQuiet(new byte[]{(byte) 0xFF}, natPort);
                     lastKeep = now;
                 }
                 if (pingHost != null && now - lastPing >= pingMs) {
                     if (pinged) {
-                        if (pongs != seen) {
+                        if (pongs != seen || lastRx > lastPing) {
                             seen = pongs;
                             missed = 0;
                         } else {
                             missed++;
                         }
                     }
-                    if (missed >= pingLoss) {
-                        lost("no ping replies from " + pingHost);
-                        return;
+                    if (missed >= pingLoss) {                // подозрение: не рвём, а просим DPD
+                        missed = 0;
+                        lastRx = Math.min(lastRx, now - dpdMs);
                     }
                     byte[] ip = echo(++seq);
-                    byte[] pkt = esp.wrap(ip, ip.length);
-                    try {
-                        sock.send(new DatagramPacket(pkt, pkt.length, srv, natPort));
-                    } catch (IOException e) {
-                        // нет сети: это обычная потеря ping, посчитается на следующем круге
-                    }
+                    sendQuiet(esp.wrap(ip, ip.length), natPort);
                     pinged = true;
                     lastPing = now;
                 }
+                long idle = now - lastRx;
                 if (idle >= deadMs) {
                     lost("server does not respond");
                     return;
@@ -349,32 +462,83 @@ final class Tunnel {
                 }
                 byte[] d = dpdReq;
                 if (d != null && now - lastDpd >= Math.max(100, dpdMs / 6)) {
-                    sock.send(new DatagramPacket(d, d.length, srv, natPort));
+                    sendQuiet(d, natPort);
                     lastDpd = now;
                 }
             }
         } catch (InterruptedException e) {
             // закрыли снаружи
-        } catch (IOException | RuntimeException e) {
-            lost(closed.get() ? "disconnected" : "network error: " + e.getMessage());
+        } catch (RuntimeException e) {
+            lost(closed.get() ? "disconnected" : "internal error: " + e.getMessage());
+        }
+    }
+
+    // ================= MOBIKE =================
+
+    /**
+     * Смена сети без пересоздания туннеля (RFC 4555): новый защищённый сокет, UPDATE_SA_ADDRESSES
+     * с нового пути. Асинхронно; done.done(true) — сервер подтвердил, false — полное переподключение.
+     */
+    void migrate(Done done) {
+        Thread t = new Thread(() -> {
+            boolean ok = doMigrate();
+            if (!closed.get()) done.done(ok);
+        }, "vpn-mobike");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private boolean doMigrate() {
+        synchronized (migLock) {
+            if (closed.get() || !up || ike == null || !ike.mobike) return false;
+            CountDownLatch l = new CountDownLatch(1);
+            try {
+                DatagramSocket ns = new DatagramSocket();
+                if (!tun.protect(ns)) {
+                    ns.close();
+                    return false;
+                }
+                DatagramSocket old = sock;
+                sock = ns;                                    // дальше ESP и keepalive идут новым путём
+                if (old != null) old.close();                 // rxLoop подхватит новый сокет
+                migId = ike.nextId();
+                migLatch = l;
+                byte[] req = Crypto.cat(new byte[4],
+                        ike.seal(Ike.INFO, false, migId, ike.mobikeUpdate(srv.getAddress(), natPort)));
+                for (int i = 0; i < 5 && !closed.get(); i++) {
+                    sendQuiet(req, natPort);
+                    if (l.await(2000, TimeUnit.MILLISECONDS)) {
+                        lastRx = System.currentTimeMillis();
+                        dpdReq = null;
+                        return true;
+                    }
+                }
+                return false;
+            } catch (IOException | RuntimeException e) {
+                return false;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            } finally {
+                migLatch = null;
+            }
         }
     }
 
     // ================= ping =================
 
-    /** IPv4 + ICMP echo request, 8 байт данных. Источник — наш адрес внутри туннеля. */
     private byte[] echo(int seq) {
         byte[] p = new byte[36];
         p[0] = 0x45;
         Crypto.put16(p, 2, p.length);
         Crypto.put16(p, 4, seq);
-        Crypto.put16(p, 6, 0x4000);                                  // DF
-        p[8] = 64;                                                   // TTL
-        p[9] = 1;                                                    // ICMP
+        Crypto.put16(p, 6, 0x4000);
+        p[8] = 64;
+        p[9] = 1;
         System.arraycopy(pingSrc, 0, p, 12, 4);
         System.arraycopy(pingDst, 0, p, 16, 4);
         Crypto.put16(p, 10, checksum(p, 0, 20));
-        p[20] = 8;                                                   // echo request
+        p[20] = 8;
         Crypto.put16(p, 24, PING_ID);
         Crypto.put16(p, 26, seq & 0xffff);
         Crypto.put32(p, 28, System.nanoTime() >>> 10);
@@ -391,7 +555,6 @@ final class Tunnel {
         return (int) (~s & 0xffff);
     }
 
-    /** Это echo reply на наш ping (от адреса, который мы пинговали)? */
     private boolean pong(byte[] ip) {
         byte[] dst = pingDst;
         if (dst == null || ip.length < 28 || (ip[0] >> 4) != 4 || ip[9] != 1) return false;
@@ -405,14 +568,14 @@ final class Tunnel {
 
     // ================= завершение =================
 
-    /** Окончательное закрытие: onDown один раз, из какого бы потока ни позвали. */
     private void finish(String reason) {
         end(reason, false);
     }
 
     /**
-     * Обрыв связи. Не supervised или туннель ещё не поднимался — это обычное закрытие. Иначе:
-     * есть другой VPN в системе — закрываемся окончательно (onDown); нет — onReconnecting.
+     * Обрыв связи. Не supervised или туннель ещё не поднимался — обычное закрытие (onDown).
+     * Иначе onReconnecting, дальше решает VpnImpl. Чужие VPN не учитываются: вытеснение
+     * определяет только onRevoke текущего сервиса.
      */
     private void lost(String reason) {
         if (closed.get()) return;
@@ -420,18 +583,12 @@ final class Tunnel {
             finish(reason);
             return;
         }
-        boolean other = false;
-        try {
-            other = tun.otherVpn(ike.ip);
-        } catch (RuntimeException ignored) {
-        }
-        if (other) end("another VPN took over (" + reason + ")", false);
-        else end(reason, true);
+        end(reason, true);
     }
 
     private void end(String reason, boolean retry) {
         if (!closed.compareAndSet(false, true)) return;
-        if (up) {                                                    // вежливо просим сервер закрыть SA
+        if (up) {
             try {
                 List<Ike.Pl> del = Collections.singletonList(new Ike.Pl(Ike.DELETE, new byte[]{1, 0, 0, 0}));
                 send(ike.seal(Ike.INFO, false, ike.nextId(), del), natPort, true);
