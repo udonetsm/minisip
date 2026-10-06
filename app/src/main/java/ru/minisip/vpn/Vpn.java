@@ -18,10 +18,10 @@ public interface Vpn {
 
         /**
          * Поднятый туннель оборвался (нет ответа на ping, смена сети), другого VPN в системе нет:
-         * идёт переподключение, не дольше ~2 минут. Закончится либо onUp (снова, возможно с другим
-         * iface), либо onDown. Вызов через упавший туннель уже не спасти.
+         * идёт переподключение. attempt — номер текущей попытки (1, 2, ...).
          */
-        default void onReconnecting(String reason) {}
+        default void onReconnecting(String reason, int attempt) {}
+        default void onReconnecting(String reason) { onReconnecting(reason, 1); }
     }
 
     void setListener(Listener l);
@@ -46,7 +46,11 @@ public interface Vpn {
      * apps — имена пакетов через пробел или перевод строки: их трафик тоже пойдёт через туннель.
      * Само приложение всегда включено; остальная система идёт напрямую.
      */
-    void connect(String host, String login, String password, String psk, String ca, String apps);
+    void connect(String host, String login, String password, String psk, String ca, String apps, String healthcheckIp);
+
+    default void connect(String host, String login, String password, String psk, String ca, String apps) {
+        connect(host, login, password, psk, ca, apps, null);
+    }
 
     /** Закрывает туннель и интерфейс. Можно звать в любом состоянии. */
     void disconnect();

@@ -38,6 +38,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     String status = "Не подключено";
     boolean vpnUp = false;
     boolean vpnConnecting = false;
+    int vpnAttempts = 0;
     String vpnStatus = "VPN: disconnected";
     /** SIP работал, когда VPN оборвался: после возврата (или окончательного отключения) переоткрыть. */
     private boolean sipResume;
@@ -136,24 +137,38 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         return vpn.consent(a, requestCode);
     }
 
-    void vpnConnect(int page, String host, String login, String password, String psk, String ca, String apps) {
+    void vpnConnect(int page, String host, String login, String password, String psk, String ca, String apps, String healthcheckIp) {
         if (state != IDLE || vpnUp || vpnConnecting || !allowed(page)) return;
         lastPage = page;
         vpnConnecting = true;
         vpnStatus = "VPN: connecting...";
         changed();
-        vpn.connect(host, login, password, psk, ca, apps);
+        vpn.connect(host, login, password, psk, ca, apps, healthcheckIp);
+    }
+
+    void vpnConnect(int page, String host, String login, String password, String psk, String ca, String apps) {
+        vpnConnect(page, host, login, password, psk, ca, apps, null);
     }
 
     void vpnDisconnect(int page) {
         if (lastPage != page) return;
+        vpnAttempts = 0;
         vpn.disconnect();
     }
 
     void vpnDenied(int page) {
         if (!allowed(page)) return;
         lastPage = page;
+        vpnAttempts = 0;
         vpnStatus = "VPN: permission denied";
+        changed();
+    }
+
+    void vpnError(int page, String error) {
+        if (!allowed(page)) return;
+        lastPage = page;
+        vpnAttempts = 0;
+        vpnStatus = error;
         changed();
     }
 
@@ -172,6 +187,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         main.post(() -> {
             vpnConnecting = false;
             vpnUp = true;
+            vpnAttempts = 0;                 // сброс счетчика в 0 при успешном реконнекте
             vpnStatus = "VPN: connected (" + iface + ")";
             sipUdp.bind(iface);              // SIP и RTP идут строго через туннель
             rtpUdp.bind(iface);
@@ -180,16 +196,13 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         });
     }
 
-    /**
-     * VPN оборвался и переподключается (до ~2 минут). vpnUp остаётся true: сессия VPN ещё жива,
-     * кнопка Disconnect работает, чужие страницы заблокированы. Вызов уже не спасти, SIP-регистрация
-     * идёт в никуда: помечаем её на возобновление, сокеты остаются привязанными к туннелю.
-     */
     @Override
-    public void onReconnecting(String reason) {
+    public void onReconnecting(String reason, int attempt) {
         main.post(() -> {
             if (!vpnUp) return;
-            vpnStatus = "VPN: reconnecting (" + reason + ")";
+            vpnAttempts = attempt;
+            String attStr = attempt > 99 ? ">99" : String.valueOf(attempt);
+            vpnStatus = "VPN: reconnecting (попытка " + attStr + ")";
             sipUdp.bind(null);               // локальный VPN сейчас не работает: SIP и RTP идут стеком системы
             rtpUdp.bind(null);
             if (sipHost != null && (registered || connecting)) {
@@ -203,6 +216,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     @Override
     public void onDown(String reason) {
         main.post(() -> {
+            vpnAttempts = 0;                 // сброс счетчика в 0 при отключении от VPN
             boolean isTakeover = reason != null &&
                     (reason.toLowerCase().contains("taken over") || reason.toLowerCase().contains("another vpn"));
 

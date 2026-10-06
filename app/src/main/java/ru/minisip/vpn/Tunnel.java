@@ -67,6 +67,8 @@ final class Tunnel {
         main.setDaemon(true);
         main.start();
     }
+    
+    String ip() { Ike k = ike; return k == null ? null : k.ip; }
 
     /** Закрывает туннель по просьбе пользователя или системы (окончательно). Можно звать из любого потока. */
     void stop(String reason) {

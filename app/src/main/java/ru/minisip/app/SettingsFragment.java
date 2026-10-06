@@ -31,6 +31,8 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
 
+import java.net.Inet4Address;
+import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -58,9 +60,10 @@ public final class SettingsFragment extends Fragment {
     private int page;                  // номер страницы; от него зависят и настройки, и право на подключение
     private boolean loading;           // поля заполняются из настроек: изменения не сохранять заново
 
-    private TextInputEditText server, login, pass, number, vpnServer, vpnLogin, vpnPass, vpnKey, vpnCa;
+    private TextInputEditText server, login, pass, number, vpnServer, vpnLogin, vpnPass, vpnKey, vpnCa, vpnHealthcheck;
     private TextView status, vpnStatus;
-    private MaterialButton connect, disconnect, call, hang, audioBtn, vpnConnect, vpnDisconnect, vpnAppsBtn;
+    private MaterialButton connect, disconnect, call, hang, audioBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnAdvancedBtn;
+    private LinearLayout vpnSpoilerContainer;
 
     /** Одна и та же ссылка нужна, чтобы в onPause снимать только свой колбэк. */
     private final Runnable renderer = this::render;
@@ -118,12 +121,29 @@ public final class SettingsFragment extends Fragment {
                 InputType.TYPE_CLASS_TEXT, false);
         vpnPass = field(vpnBlock, "VPN password", null, prefs.getString("vpnPass", ""),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD, true);
-        vpnKey = field(vpnBlock, "VPN pre-shared key", "пусто — вход по логину и паролю", prefs.getString("vpnKey", ""),
+
+        // Спойлер дополнительных настроек VPN
+        vpnSpoilerContainer = new LinearLayout(ctx);
+        vpnSpoilerContainer.setOrientation(LinearLayout.VERTICAL);
+        vpnSpoilerContainer.setVisibility(View.GONE);
+
+        vpnKey = field(vpnSpoilerContainer, "VPN pre-shared key", "пусто — вход по логину и паролю", prefs.getString("vpnKey", ""),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD, true);
-        vpnCa = field(vpnBlock, "VPN CA certificate (PEM)", "пусто — системное хранилище", prefs.getString("vpnCa", ""),
+        vpnCa = field(vpnSpoilerContainer, "VPN CA certificate (PEM)", "пусто — системное хранилище", prefs.getString("vpnCa", ""),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE, false);
         vpnCa.setSingleLine(false);
         vpnCa.setMaxLines(4);
+        vpnHealthcheck = field(vpnSpoilerContainer, "Healthcheck address", "IP или домен для проверки связности", prefs.getString("vpnHealthcheck", "10.160.1.254"),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI, false);
+
+        vpnAdvancedBtn = button(vpnBlock, "Дополнительные настройки ▼", true, v -> {
+            boolean show = vpnSpoilerContainer.getVisibility() == View.GONE;
+            vpnSpoilerContainer.setVisibility(show ? View.VISIBLE : View.GONE);
+            vpnAdvancedBtn.setText(show ? "Дополнительные настройки ▲" : "Дополнительные настройки ▼");
+        });
+
+        vpnBlock.addView(vpnSpoilerContainer);
+
         vpnAppsBtn = button(vpnBlock, "VPN apps", true, v -> pickApps());
         vpnConnect = button(vpnBlock, "VPN connect", false, v -> doVpnConnect());
         vpnDisconnect = button(vpnBlock, "VPN disconnect", true, v -> app.vpnDisconnect(page));
@@ -138,6 +158,7 @@ public final class SettingsFragment extends Fragment {
         save(vpnPass, "vpnPass");
         save(vpnKey, "vpnKey");
         save(vpnCa, "vpnCa");
+        save(vpnHealthcheck, "vpnHealthcheck");
 
         NestedScrollView scroll = new NestedScrollView(ctx);
         scroll.setFillViewport(true);
@@ -160,9 +181,10 @@ public final class SettingsFragment extends Fragment {
     @Override
     public void onDestroyView() {
         super.onDestroyView();
-        server = login = pass = number = vpnServer = vpnLogin = vpnPass = vpnKey = vpnCa = null;
+        server = login = pass = number = vpnServer = vpnLogin = vpnPass = vpnKey = vpnCa = vpnHealthcheck = null;
         status = vpnStatus = null;
-        connect = disconnect = call = hang = audioBtn = vpnConnect = vpnDisconnect = vpnAppsBtn = null;
+        connect = disconnect = call = hang = audioBtn = vpnConnect = vpnDisconnect = vpnAppsBtn = vpnAdvancedBtn = null;
+        vpnSpoilerContainer = null;
     }
 
     @Override
@@ -176,6 +198,7 @@ public final class SettingsFragment extends Fragment {
         load(vpnPass, "vpnPass");
         load(vpnKey, "vpnKey");
         load(vpnCa, "vpnCa");
+        load(vpnHealthcheck, "vpnHealthcheck");
         app.onChange = renderer;     // событиями App живёт только видимая страница
         render();
     }
@@ -242,8 +265,46 @@ public final class SettingsFragment extends Fragment {
     }
 
     private void vpnStart() {
-        app.vpnConnect(page, text(vpnServer).trim(), text(vpnLogin).trim(), text(vpnPass), text(vpnKey),
-                text(vpnCa), prefs.getString("vpnApps", ""));
+        save(vpnHealthcheck, "vpnHealthcheck");
+        String hc = text(vpnHealthcheck).trim();
+        if (hc.isEmpty()) hc = "10.160.1.254";
+
+        if (isIpv4(hc)) {
+            app.vpnConnect(page, text(vpnServer).trim(), text(vpnLogin).trim(), text(vpnPass), text(vpnKey),
+                    text(vpnCa), prefs.getString("vpnApps", ""), hc);
+            return;
+        }
+
+        final String domain = hc;
+        vpnStatus.setText("VPN: определение IP для healthcheck...");
+        new Thread(() -> {
+            String resolvedIp = null;
+            try {
+                InetAddress[] addrs = InetAddress.getAllByName(domain);
+                for (InetAddress a : addrs) {
+                    if (a instanceof Inet4Address) {
+                        resolvedIp = a.getHostAddress();
+                        break;
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+            final String finalIp = resolvedIp;
+            if (getActivity() != null) {
+                getActivity().runOnUiThread(() -> {
+                    if (finalIp == null) {
+                        app.vpnError(page, "VPN: не удалось определить IP для healthcheck (" + domain + ")");
+                        return;
+                    }
+                    app.vpnConnect(page, text(vpnServer).trim(), text(vpnLogin).trim(), text(vpnPass), text(vpnKey),
+                            text(vpnCa), prefs.getString("vpnApps", ""), finalIp);
+                });
+            }
+        }).start();
+    }
+
+    private static boolean isIpv4(String s) {
+        return s != null && s.matches("^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$");
     }
 
     /** Список приложений с галочками: их трафик пойдёт через VPN. MiniSIP включён всегда. */

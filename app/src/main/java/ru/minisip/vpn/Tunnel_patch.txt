@@ -1,0 +1,3 @@
+Добавить в класс Tunnel (рядом с другими методами):
+
+    String ip() { Ike k = ike; return k == null ? null : k.ip; }

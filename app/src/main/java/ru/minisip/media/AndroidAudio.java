@@ -3,6 +3,7 @@ package ru.minisip.media;
 import android.content.Context;
 import android.media.AudioAttributes;
 import android.media.AudioDeviceInfo;
+import android.media.AudioFocusRequest;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
@@ -18,6 +19,7 @@ final class AndroidAudio implements Audio {
     private final AudioManager am;
     private AudioRecord rec;
     private AudioTrack trk;
+    private AudioFocusRequest focusReq;
     private int prevMode = -1;
     private volatile boolean speaker;        // выбранный вывод: громкая связь или в ухо
 
@@ -29,6 +31,7 @@ final class AndroidAudio implements Audio {
     public boolean start() {
         try {
             prevMode = am.getMode();
+            requestFocus();
             am.setMode(AudioManager.MODE_IN_COMMUNICATION);
             route();
 
@@ -180,11 +183,43 @@ final class AndroidAudio implements Audio {
         }
         rec = null;
         trk = null;
+        abandonFocus();
         if (prevMode >= 0) {
             if (Build.VERSION.SDK_INT >= 31) am.clearCommunicationDevice();
             else am.setSpeakerphoneOn(false);
             am.setMode(prevMode);
             prevMode = -1;
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private synchronized void requestFocus() {
+        if (Build.VERSION.SDK_INT >= 26) {
+            if (focusReq == null) {
+                focusReq = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+                        .setAudioAttributes(new AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .build())
+                        .setAcceptsDelayedFocusGain(false)
+                        .setOnAudioFocusChangeListener(focus -> {})
+                        .build();
+                am.requestAudioFocus(focusReq);
+            }
+        } else {
+            am.requestAudioFocus(focus -> {}, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private void abandonFocus() {
+        if (Build.VERSION.SDK_INT >= 26) {
+            if (focusReq != null) {
+                am.abandonAudioFocusRequest(focusReq);
+                focusReq = null;
+            }
+        } else {
+            am.abandonAudioFocus(focus -> {});
         }
     }
 }
