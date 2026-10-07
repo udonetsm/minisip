@@ -1,5 +1,7 @@
 package ru.minisip.vpn;
 
+import android.util.Log;
+
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -19,10 +21,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Потоки: "vpn" (рукопожатие, потом таймеры: keepalive, DPD), "vpn-rx" (сокет -> tun),
  * "vpn-tun" (tun -> сокет), "vpn-mobike" (смена пути при смене сети).
  *
+ * Два режима (поле strict, меняется на лету):
+ *  - strict (АТС подключена; VpnImpl держит wake lock): watchdog рвёт туннель, если за wdMs
+ *    после отправки не пришло ни одного ESP. Нужен быстрый отклик для телефонии.
+ *  - обычный VPN (strict = false): watchdog лишь запускает DPD, а настоящий обрыв определяется
+ *    только по deadMs тишины.
+ * В обоих режимах есть детектор сна: если поток таймеров не работал дольше 5 с (CPU спал),
+ * тишина за это время не считается обрывом: таймеры пересчитываются, сразу идут keepalive и DPD.
+ *
  * Правила живучести:
  *  - сбой отправки UDP (нет сети) — это потеря пакета, а не обрыв (sendQuiet);
  *  - пока сети нет (setOnline(false)), счётчики тишины стоят; когда она вернулась — сразу проверка;
- *  - обрыв решает только DPD (и ошибки tun/сервера); необязательный ping лишь ускоряет DPD;
  *  - при смене сети с MOBIKE (RFC 4555) меняется только сокет, IKE SA, ESP и tun остаются.
  */
 final class Tunnel {
@@ -35,6 +44,7 @@ final class Tunnel {
     static final int MTU = 1400;
     private static final int RX_BUF = 65535;
     private static final int PING_ID = 0x4D53;
+    private static final String TAG = "MiniSIP-VPN";
 
     // настраиваемое для проверок
     int ikePort = 500, natPort = 4500;
@@ -47,6 +57,8 @@ final class Tunnel {
     boolean supervised;
     /** Причина неудачи до подъёма сетевая (имеет смысл повторить), а не из-за настроек/пароля. */
     volatile boolean retryable;
+    /** true — АТС подключена: жёсткий watchdog. false — обычный VPN: watchdog только запускает DPD. */
+    volatile boolean strict;
 
     /** Диагностика: если задан, сюда раз в 10 с идёт сводка счётчиков. */
     interface Log {
@@ -54,9 +66,6 @@ final class Tunnel {
     }
 
     volatile Log log;
-
-    private volatile long lastTunRead = 0;  // время последнего успешного read()
-    private volatile Thread txLoopThread = null;
 
     private volatile long txPk, rxEsp, rxIke, txFail;
     private volatile String lastSendErr = "";
@@ -220,7 +229,6 @@ final class Tunnel {
             esp = ike.esp;
             sock.setSoTimeout(0);
             lastRx = System.currentTimeMillis();
-            lastTunRead = System.currentTimeMillis();  // ← ДОБАВИТЬ ЭТУ СТРОКУ
             rx = daemon(this::rxLoop, "vpn-rx");
             tx = daemon(this::txLoop, "vpn-tun");
             up = true;
@@ -301,19 +309,19 @@ final class Tunnel {
 
     // ================= рабочий режим =================
 
-        private void rxLoop() {
+    private void rxLoop() {
         byte[] buf = new byte[RX_BUF];
         long lastLog = System.currentTimeMillis();
-        int lastRxEsp = 0;
+        long lastRxEsp = 0;
         try {
             while (!closed.get()) {
                 long now = System.currentTimeMillis();
-                if (now - lastLog >= 10000) {  // логируем каждые 10 сек
+                if (now - lastLog >= 10000) {
                     Log l = log;
-                    if (l != null) l.d("rxLoop alive: rxEsp=" + rxEsp + " (delta=" + (rxEsp - lastRxEsp) + 
-                            "), rxIke=" + rxIke + ", online=" + online);
+                    if (l != null) l.d("rxLoop alive: rxEsp=" + rxEsp + " (delta=" + (rxEsp - lastRxEsp)
+                            + "), rxIke=" + rxIke + ", online=" + online);
                     lastLog = now;
-                    lastRxEsp = (int) rxEsp;
+                    lastRxEsp = rxEsp;
                 }
                 DatagramSocket s = sock;
                 if (s == null || s.isClosed()) {
@@ -369,31 +377,16 @@ final class Tunnel {
         }
     }
 
-
     private void txLoop() {
         byte[] b = new byte[2048];
         try {
             while (!closed.get()) {
-                long readStart = System.currentTimeMillis();
                 int n = tun.read(b);
-                long readTime = System.currentTimeMillis() - readStart;
-
-                // обновляем время для watchdog
-                lastTunRead = System.currentTimeMillis();
-
-                // логируем долгие чтения
-                if (readTime > 5000) {
-                    Log l = log;
-                    if (l != null) l.d("txLoop: tun.read() blocked for " + readTime + "ms, got " + n + " bytes");
-                }
-
                 if (n < 0) {
                     lost("tunnel interface closed");
                     break;
                 }
-
                 if (n < 20 || (b[0] >> 4) != 4) continue;
-
                 byte[] pkt = esp.wrap(b, n);
                 sendQuiet(pkt, natPort);
                 txPk++;
@@ -406,17 +399,19 @@ final class Tunnel {
         }
     }
 
-
     /** Сообщение IKE от сервера: ответ на наш DPD/MOBIKE, его DPD, удаление, попытка перегенерации. */
     private void onIke(byte[] m) {
         Ike.Rx x = ike.open(m);
         if (x == null) return;
         lastRx = System.currentTimeMillis();
         rxIke++;
+        Log l = log;
+        if (l != null) l.d("IKE from server: exch=" + x.exch + " resp=" + x.response
+                + " id=" + x.id + " payloads=" + x.pl.size());
         if (x.response) {
             if (x.id == dpdId) dpdReq = null;
-            CountDownLatch l = migLatch;
-            if (x.id == migId && l != null) l.countDown();
+            CountDownLatch latch = migLatch;
+            if (x.id == migId && latch != null) latch.countDown();
             return;
         }
         if (x.exch == Ike.CHILD) {
@@ -439,16 +434,19 @@ final class Tunnel {
     }
 
     /**
-     * Поток "vpn" после подъёма: NAT-keepalive, DPD, необязательный ping и WATCHDOG.
+     * Поток "vpn" после подъёма: NAT-keepalive, DPD, необязательный ping и watchdog «шлём, а ответов нет».
      * Нет сети — стоим. Сеть вернулась — keepalive и DPD вне очереди.
-     * Обрыв — только когда сервер молчит deadMs при живой сети.
-     *
-     * НОВОЕ: Watchdog следит, чтобы txLoop не зависала на tun.read() более 30 сек.
-     * Если зависла — разрываем туннель и переподключаемся.
+     * Обрыв — когда сервер молчит deadMs при живой сети (а в strict-режиме ещё и по watchdog).
      */
     private void timers() {
         long lastKeep = System.currentTimeMillis(), lastDpd = 0, lastPing = 0, lastStat = 0;
-        long lastWatchdog = System.currentTimeMillis();  // ← НОВОЕ
+        long lastWatchdog = System.currentTimeMillis();
+        long prevTick = lastWatchdog;
+        long wdRx = rxEsp, wdTx = txPk, wdPendingSince = 0;
+        final long wdMs = 10000;   // сколько ждать ответа на ушедший пакет
+        final long sleepGapMs = 5000;
+        final long graceMs = 15000;   // после сна столько ждём ответа сервера, потом обрыв по deadMs
+        long graceUntil = 0;
         int tick = Math.max(50, Math.min(1000, keepMs / 4));
         if (pingHost != null) tick = Math.min(tick, Math.max(50, pingMs / 4));
         int missed = 0, seen = pongs, seq = 0;
@@ -458,25 +456,54 @@ final class Tunnel {
                 Thread.sleep(tick);
                 long now = System.currentTimeMillis();
 
-                // ================= WATCHDOG: проверяем txLoop =================
-                if (now - lastWatchdog >= 5000) {  // проверяем каждые 5 сек
-                    lastWatchdog = now;
-                    long timeSinceLastRead = now - lastTunRead;
-
+                // ===== ДЕТЕКТОР СНА: поток стоял дольше sleepGapMs (CPU спал) =====
+                // Тишина за это время ничего не доказывает: счётчики пересчитываем, а путь
+                // проверяем сразу (keepalive + DPD). Настоящий обрыв определится через deadMs.
+                if (now - prevTick > sleepGapMs) {
                     Log l = log;
-                    if (l != null && timeSinceLastRead > 0) {
-                        l.d("watchdog: txLoop lastRead=" + timeSinceLastRead + "ms ago, up=" + up);
-                    }
+                    if (l != null) l.d("resume after " + (now - prevTick) / 1000 + "s (strict=" + strict + ")");
+                    lastRx = Math.min(lastRx, now - dpdMs);   // DPD стартует сразу
+                    // окно на ответ даётся один раз; повторные пробуждения его не продлевают
+                    if (graceUntil <= now) graceUntil = now + graceMs;
+                    dpdReq = null;
+                    wdRx = rxEsp;
+                    wdTx = txPk;
+                    wdPendingSince = 0;
+                    lastWatchdog = now;
+                    lastKeep = 0;
+                    lastPing = now;
+                    pinged = false;
+                    missed = 0;
+                }
+                prevTick = now;
 
-                    // если txLoop не читал из TUN больше 30 сек и туннель живой
-                    if (timeSinceLastRead > 30000 && up && !closed.get()) {
-                        if (l != null) l.d("WATCHDOG ALARM: txLoop blocked on tun.read() for " +
-                                timeSinceLastRead + "ms");
-                        try {
-                            tun.close();  // попытаемся разбудить fd
-                        } catch (Exception ignored) {}
-                        lost("txLoop: tun.read() timeout — TUN interface stuck");
-                        return;
+                // ===== WATCHDOG: ушёл пакет, а ответного ESP нет wdMs =====
+                // Отсчёт идёт от первого пакета без ответа. В простое не срабатывает.
+                if (now - lastWatchdog >= 2000) {
+                    lastWatchdog = now;
+                    long rxNow = rxEsp, txNow = txPk;
+                    if (rxNow != wdRx) {              // ответ пришёл
+                        wdRx = rxNow;
+                        wdTx = txNow;
+                        wdPendingSince = 0;
+                    } else if (txNow != wdTx) {       // ушло новое, ответа нет
+                        wdTx = txNow;
+                        if (wdPendingSince == 0) wdPendingSince = now;
+                    }
+                    if (!up || !online) wdPendingSince = 0;
+                    if (wdPendingSince != 0 && now - wdPendingSince >= wdMs) {
+                        Log l = log;
+                        long silent = (now - wdPendingSince) / 1000;
+                        if (strict) {
+                            if (l != null) l.d("WATCHDOG(strict): no ESP back for " + silent
+                                    + "s after send; " + esp.drops());
+                            lost("no ESP replies while sending");
+                            return;
+                        }
+                        // обычный VPN: не рвём, а просим DPD проверить путь; решит deadMs
+                        if (l != null) l.d("WATCHDOG(soft): no ESP back for " + silent + "s; start DPD");
+                        wdPendingSince = 0;
+                        lastRx = Math.min(lastRx, now - dpdMs);
                     }
                 }
 
@@ -488,7 +515,8 @@ final class Tunnel {
                         l.d("stats: txEsp=" + txPk + " rxEsp=" + rxEsp + " rxIke=" + rxIke
                                 + " sendFail=" + txFail + (txFail > 0 ? " lastErr=" + lastSendErr : "")
                                 + " idleRx=" + (now - lastRx) / 1000 + "s online=" + online
-                                + " dpdPending=" + (dpdReq != null));
+                                + " strict=" + strict
+                                + " dpdPending=" + (dpdReq != null) + " " + esp.drops());
                     }
                 }
 
@@ -508,7 +536,7 @@ final class Tunnel {
                     lastRx = Math.min(lastRx, now - dpdMs);
                 }
 
-                // ================= KEEPALIVE: отправляем пустой UDP пакет каждые 20 сек =================
+                // ================= KEEPALIVE =================
                 if (now - lastKeep >= keepMs) {
                     sendQuiet(new byte[]{(byte) 0xFF}, natPort);
                     lastKeep = now;
@@ -537,20 +565,17 @@ final class Tunnel {
                 // ================= DPD: Dead Peer Detection =================
                 long idle = now - lastRx;
 
-                // если сервер совсем молчит deadMs → разрываем
-                if (idle >= deadMs) {
+                if (idle >= deadMs && now >= graceUntil) {
                     lost("server does not respond");
                     return;
                 }
 
-                // если сервер молчит dpdMs → запускаем DPD запрос
                 if (dpdReq == null && idle >= dpdMs) {
                     dpdId = ike.nextId();
                     dpdReq = Crypto.cat(new byte[4], ike.seal(Ike.INFO, false, dpdId, new ArrayList<>()));
                     lastDpd = 0;
                 }
 
-                // отправляем DPD запрос каждые dpdMs/6 (~5 сек)
                 byte[] d = dpdReq;
                 if (d != null && now - lastDpd >= Math.max(100, dpdMs / 6)) {
                     sendQuiet(d, natPort);
@@ -679,6 +704,8 @@ final class Tunnel {
 
     private void end(String reason, boolean retry) {
         if (!closed.compareAndSet(false, true)) return;
+        android.util.Log.w(TAG, "Tunnel.end reason=" + reason + " retry=" + retry
+                + " thread=" + Thread.currentThread().getName(), new Throwable());
         if (up) {
             try {
                 List<Ike.Pl> del = Collections.singletonList(new Ike.Pl(Ike.DELETE, new byte[]{1, 0, 0, 0}));

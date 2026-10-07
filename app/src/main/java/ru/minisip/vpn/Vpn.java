@@ -23,8 +23,12 @@ public interface Vpn {
         default void onReconnecting(String reason, int attempt) {}
         default void onReconnecting(String reason) { onReconnecting(reason, 1); }
     }
+    
+    default void setStrict(boolean on) {}
 
     void setListener(Listener l);
+    /** true — подключена АТС: wake lock и жёсткий watchdog. false — обычный VPN. */
+
 
     /**
      * Проверяет согласие пользователя на VPN. true — согласие уже есть.

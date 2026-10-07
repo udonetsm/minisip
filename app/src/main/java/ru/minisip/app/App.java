@@ -138,6 +138,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     }
 
     void vpnConnect(int page, String host, String login, String password, String psk, String ca, String apps, String healthcheckIp) {
+        vpn.setStrict(true);
         if (state != IDLE || vpnUp || vpnConnecting || !allowed(page)) return;
         lastPage = page;
         vpnConnecting = true;
@@ -297,9 +298,9 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     }
 
     private void changed() {
+        vpn.setStrict(true);
         if (onChange != null) onChange.run();
     }
-
     // ---------- события SIP (поток "sip" -> главный поток) ----------
 
     @Override

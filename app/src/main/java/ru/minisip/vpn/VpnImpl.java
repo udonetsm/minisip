@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.net.VpnService;
+import android.os.PowerManager;
 import android.util.Log;
 
 import java.util.concurrent.CountDownLatch;
@@ -22,6 +23,8 @@ import java.util.concurrent.TimeUnit;
  *  4. Чужие VPN (в том числе в другом профиле) на нас не влияют: Android держит VPN отдельно на
  *     каждого пользователя/профиль, а наши сети ищем только среди NOT_VPN. Вытеснение — только
  *     onRevoke() текущего экземпляра TunService.
+ *  5. Два режима (setStrict): АТС подключена — держим PARTIAL_WAKE_LOCK, пока VPN запущен, и
+ *     Tunnel рвёт связь жёстким watchdog'ом; АТС нет — обычный VPN без wake lock, обрыв по DPD.
  * Все вызовы слушателя идут под замком VpnImpl.
  */
 final class VpnImpl implements Vpn {
@@ -48,6 +51,8 @@ final class VpnImpl implements Vpn {
     private String host, identity, psk, password, ca, apps, healthcheckIp;
     private boolean running;               // connect() был, disconnect()/сброса ещё не было
     private boolean want;                  // connect() был, сервис ещё не ответил
+    private boolean strict;                // АТС подключена: wake lock и жёсткий watchdog
+    private PowerManager.WakeLock wl;
     private int gen;                       // меняется при connect/disconnect/revoke/рестарте: отменяет циклы
     private Thread recovery;               // поток подъёма/переподключения; null — не идёт
 
@@ -70,6 +75,39 @@ final class VpnImpl implements Vpn {
         return false;
     }
 
+    /**
+     * Режим работы. true — АТС подключена: пока VPN запущен, держим wake lock, а Tunnel жёстко
+     * следит за ответами. false — обычный VPN: без wake lock, обрыв определяет DPD (deadMs).
+     * Можно звать в любой момент и сколько угодно раз.
+     */
+    @Override
+    public synchronized void setStrict(boolean on) {
+        if (strict == on) return;
+        strict = on;
+        Log.i(TAG, "mode: " + (on ? "PBX (wake lock, strict watchdog)" : "plain VPN (soft watchdog)"));
+        Tunnel t = tunnel;
+        if (t != null) t.strict = on;
+        updateWake();
+    }
+
+    /** Wake lock нужен, пока VPN запущен и подключена АТС. Под замком. */
+    private void updateWake() {
+        if (running && strict) {
+            if (wl == null) {
+                wl = ctx.getSystemService(PowerManager.class)
+                        .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "minisip:vpn");
+                wl.setReferenceCounted(false);
+            }
+            if (!wl.isHeld()) {
+                wl.acquire();
+                Log.i(TAG, "wake lock acquired");
+            }
+        } else if (wl != null && wl.isHeld()) {
+            wl.release();
+            Log.i(TAG, "wake lock released");
+        }
+    }
+
     @Override
     public synchronized void connect(String host, String identity, String password, String psk, String ca,
                                      String apps, String healthcheckIp) {
@@ -89,6 +127,7 @@ final class VpnImpl implements Vpn {
         this.healthcheckIp = healthcheckIp;
         running = true;
         want = true;
+        updateWake();
         ctx.startService(new Intent(ctx, TunService.class));
     }
 
@@ -104,6 +143,7 @@ final class VpnImpl implements Vpn {
         want = false;
         this.svc = s;
         Log.i(TAG, "service ready, starting connection to " + host + ", online=" + watch.online());
+        updateWake();
         watch.start(this::networkChanged);
         startRecovery(0, false);
         return true;
@@ -214,6 +254,7 @@ final class VpnImpl implements Vpn {
     private void clear() {
         running = false;
         want = false;
+        updateWake();                       // VPN остановлен: wake lock не нужен (strict остаётся как есть)
         watch.stop();
         host = identity = password = psk = ca = apps = healthcheckIp = null;
         svc = null;
@@ -222,6 +263,7 @@ final class VpnImpl implements Vpn {
     private Tunnel launch(Guard g) {
         Tunnel t = new Tunnel(new AndroidTun(svc), g);
         t.supervised = true;
+        t.strict = strict;
         String hc = healthcheckIp == null ? "" : healthcheckIp.trim();
         t.pingHost = hc.isEmpty() ? null : hc;           // по умолчанию ping выключен: живость решает DPD
         t.pingMs = PING_MS;

@@ -19,6 +19,13 @@ final class Esp {
     private long top;                         // наибольший принятый номер
     private long window;                      // бит i = принят номер (top - i)
 
+    // диагностика: сколько входящих отброшено и почему
+    volatile int dropSpi, dropReplay, dropIcv, dropFmt;
+
+    String drops() {
+        return "dropSpi=" + dropSpi + " dropReplay=" + dropReplay + " dropIcv=" + dropIcv + " dropFmt=" + dropFmt;
+    }
+
     Esp(Crypto.Suite s, Crypto.Box out, Crypto.Box in, long spiOut, long spiIn) {
         this.out = out;
         this.in = in;
@@ -46,14 +53,15 @@ final class Esp {
 
     /** Пакет ESP -> IP-пакет. null: чужой SPI, повтор, подделка, не IPv4 или мусор. */
     byte[] unwrap(byte[] p, int n) {
-        if (n < HEAD + out.overhead() || Crypto.u32(p, 0) != spiIn) return null;
+        if (n < HEAD + out.overhead()) { dropFmt++; return null; }
+        if (Crypto.u32(p, 0) != spiIn) { dropSpi++; return null; }
         long s = Crypto.u32(p, 4);
-        if (replayed(s)) return null;                 // дёшево отбрасываем до расшифровки
+        if (replayed(s)) { dropReplay++; return null; }   // дёшево отбрасываем до расшифровки
         byte[] plain = in.open(Arrays.copyOf(p, n), HEAD);
-        if (plain == null || plain.length < 2) return null;
+        if (plain == null || plain.length < 2) { dropIcv++; return null; }
         accept(s);                                    // номер засчитываем только после проверки ICV
         int pad = plain[plain.length - 2] & 0xff;
-        if (plain[plain.length - 1] != IPV4 || pad + 2 > plain.length) return null;
+        if (plain[plain.length - 1] != IPV4 || pad + 2 > plain.length) { dropFmt++; return null; }
         return Arrays.copyOf(plain, plain.length - 2 - pad);
     }
 
