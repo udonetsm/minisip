@@ -7,6 +7,11 @@ import android.os.Bundle;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
+import android.content.SharedPreferences;
+import android.net.Uri;
+import android.os.PowerManager;
+import android.provider.Settings;
+
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.fragment.app.Fragment;
@@ -78,6 +83,33 @@ public final class MainActivity extends AppCompatActivity {
             pages.refresh();
             pager.setUserInputEnabled(pages.getItemCount() > 1);
         });
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, @NonNull String[] perms, @NonNull int[] res) {
+        super.onRequestPermissionsResult(code, perms, res);
+        if (code == 1) askBatteryOnce();
+    }
+
+    private void askBatteryOnce() {
+        SharedPreferences sp = getSharedPreferences("app", MODE_PRIVATE);
+        if (sp.getBoolean("batteryAsked", false)) return;
+        sp.edit().putBoolean("batteryAsked", true).apply();
+        requestIgnoreBatteryOptimizations();
+    }
+
+    private void requestIgnoreBatteryOptimizations() {
+        PowerManager pm = getSystemService(PowerManager.class);
+        if (pm.isIgnoringBatteryOptimizations(getPackageName())) return;   // уже разрешено
+
+        try {
+            Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:" + getPackageName()));
+            startActivity(i);                    // системный диалог «Разрешить / Запретить»
+        } catch (android.content.ActivityNotFoundException e) {
+            // запасной вариант: общий список настроек оптимизации батареи
+            startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+        }
     }
 
     /** Ответ на системный запрос согласия на VPN: отдаём его странице, с которой запрос ушёл. */
