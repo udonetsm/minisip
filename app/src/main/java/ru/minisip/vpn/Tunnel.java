@@ -54,6 +54,10 @@ final class Tunnel {
     }
 
     volatile Log log;
+
+    private volatile long lastTunRead = 0;  // время последнего успешного read()
+    private volatile Thread txLoopThread = null;
+
     private volatile long txPk, rxEsp, rxIke, txFail;
     private volatile String lastSendErr = "";
 
@@ -216,6 +220,7 @@ final class Tunnel {
             esp = ike.esp;
             sock.setSoTimeout(0);
             lastRx = System.currentTimeMillis();
+            lastTunRead = System.currentTimeMillis();  // ← ДОБАВИТЬ ЭТУ СТРОКУ
             rx = daemon(this::rxLoop, "vpn-rx");
             tx = daemon(this::txLoop, "vpn-tun");
             up = true;
@@ -296,69 +301,111 @@ final class Tunnel {
 
     // ================= рабочий режим =================
 
-    /** Сокет -> tun. Переживает подмену сокета при миграции MOBIKE. */
-    private void rxLoop() {
+        private void rxLoop() {
         byte[] buf = new byte[RX_BUF];
-        while (!closed.get()) {
-            DatagramSocket s = sock;
-            DatagramPacket p = new DatagramPacket(buf, buf.length);
-            try {
-                s.receive(p);
-            } catch (IOException | RuntimeException e) {
-                if (closed.get()) return;
-                if (s != sock) continue;                     // сокет подменили при миграции
-                if (s.isClosed()) {
-                    lost("network error: " + e.getMessage());
-                    return;
+        long lastLog = System.currentTimeMillis();
+        int lastRxEsp = 0;
+        try {
+            while (!closed.get()) {
+                long now = System.currentTimeMillis();
+                if (now - lastLog >= 10000) {  // логируем каждые 10 сек
+                    Log l = log;
+                    if (l != null) l.d("rxLoop alive: rxEsp=" + rxEsp + " (delta=" + (rxEsp - lastRxEsp) + 
+                            "), rxIke=" + rxIke + ", online=" + online);
+                    lastLog = now;
+                    lastRxEsp = (int) rxEsp;
+                }
+                DatagramSocket s = sock;
+                if (s == null || s.isClosed()) {
+                    Thread.sleep(100);
+                    continue;
+                }
+                DatagramPacket p = new DatagramPacket(buf, buf.length);
+                try {
+                    s.receive(p);
+                } catch (IOException e) {
+                    if (closed.get()) return;
+                    if (s != sock) continue;
+                    if (s.isClosed()) {
+                        lost("rxLoop: socket closed");
+                        return;
+                    }
+                    try {
+                        Thread.sleep(200);
+                    } catch (InterruptedException ie) {
+                        return;
+                    }
+                    continue;
                 }
                 try {
-                    Thread.sleep(200);                       // временный сбой чтения: не рвём
-                } catch (InterruptedException ie) {
+                    int n = p.getLength();
+                    if (!p.getAddress().equals(srv) || n < 4) continue;
+                    if (Crypto.u32(buf, 0) == 0) {
+                        onIke(Arrays.copyOfRange(buf, 4, n));
+                    } else {
+                        byte[] ip = esp.unwrap(buf, n);
+                        if (ip != null) {
+                            lastRx = System.currentTimeMillis();
+                            rxEsp++;
+                            if (pong(ip)) {
+                                pongs++;
+                                continue;
+                            }
+                            tun.write(ip, 0, ip.length);
+                        }
+                    }
+                } catch (IOException e) {
+                    lost("rxLoop: tun.write() failed: " + e.getMessage());
+                    return;
+                } catch (RuntimeException e) {
+                    lost("rxLoop: RuntimeException: " + e.getMessage());
                     return;
                 }
-                continue;
             }
-            try {
-                int n = p.getLength();
-                if (!p.getAddress().equals(srv) || n < 4) continue;
-                if (Crypto.u32(buf, 0) == 0) {
-                    onIke(Arrays.copyOfRange(buf, 4, n));
-                } else {
-                    byte[] ip = esp.unwrap(buf, n);
-                    if (ip != null) {
-                        lastRx = System.currentTimeMillis();
-                        rxEsp++;
-                        if (pong(ip)) {
-                            pongs++;
-                            continue;
-                        }
-                        tun.write(ip, 0, ip.length);
-                    }
-                }
-            } catch (IOException | RuntimeException e) {
-                lost(closed.get() ? "disconnected" : "tun error: " + e.getMessage());
-                return;
-            }
+        } catch (InterruptedException e) {
+            // Thread.sleep interrupted
+        } catch (RuntimeException e) {
+            lost("rxLoop: unexpected RuntimeException: " + e.getMessage());
         }
     }
 
-    /** tun -> сокет: каждый IPv4-пакет заворачиваем в ESP. Сбой отправки — потеря пакета. */
+
     private void txLoop() {
         byte[] b = new byte[2048];
         try {
             while (!closed.get()) {
+                long readStart = System.currentTimeMillis();
                 int n = tun.read(b);
-                if (n < 0) break;
+                long readTime = System.currentTimeMillis() - readStart;
+
+                // обновляем время для watchdog
+                lastTunRead = System.currentTimeMillis();
+
+                // логируем долгие чтения
+                if (readTime > 5000) {
+                    Log l = log;
+                    if (l != null) l.d("txLoop: tun.read() blocked for " + readTime + "ms, got " + n + " bytes");
+                }
+
+                if (n < 0) {
+                    lost("tunnel interface closed");
+                    break;
+                }
+
                 if (n < 20 || (b[0] >> 4) != 4) continue;
+
                 byte[] pkt = esp.wrap(b, n);
                 sendQuiet(pkt, natPort);
                 txPk++;
             }
             lost("tunnel interface closed");
-        } catch (IOException | RuntimeException e) {
-            lost(closed.get() ? "disconnected" : "tun error: " + e.getMessage());
+        } catch (IOException e) {
+            lost(closed.get() ? "disconnected" : "txLoop: " + e.getMessage());
+        } catch (RuntimeException e) {
+            lost(closed.get() ? "disconnected" : "txLoop: " + e.getMessage());
         }
     }
+
 
     /** Сообщение IKE от сервера: ответ на наш DPD/MOBIKE, его DPD, удаление, попытка перегенерации. */
     private void onIke(byte[] m) {
@@ -392,12 +439,16 @@ final class Tunnel {
     }
 
     /**
-     * Поток "vpn" после подъёма: NAT-keepalive, DPD и необязательный ping.
+     * Поток "vpn" после подъёма: NAT-keepalive, DPD, необязательный ping и WATCHDOG.
      * Нет сети — стоим. Сеть вернулась — keepalive и DPD вне очереди.
      * Обрыв — только когда сервер молчит deadMs при живой сети.
+     *
+     * НОВОЕ: Watchdog следит, чтобы txLoop не зависала на tun.read() более 30 сек.
+     * Если зависла — разрываем туннель и переподключаемся.
      */
     private void timers() {
         long lastKeep = System.currentTimeMillis(), lastDpd = 0, lastPing = 0, lastStat = 0;
+        long lastWatchdog = System.currentTimeMillis();  // ← НОВОЕ
         int tick = Math.max(50, Math.min(1000, keepMs / 4));
         if (pingHost != null) tick = Math.min(tick, Math.max(50, pingMs / 4));
         int missed = 0, seen = pongs, seq = 0;
@@ -406,6 +457,30 @@ final class Tunnel {
             while (!closed.get()) {
                 Thread.sleep(tick);
                 long now = System.currentTimeMillis();
+
+                // ================= WATCHDOG: проверяем txLoop =================
+                if (now - lastWatchdog >= 5000) {  // проверяем каждые 5 сек
+                    lastWatchdog = now;
+                    long timeSinceLastRead = now - lastTunRead;
+
+                    Log l = log;
+                    if (l != null && timeSinceLastRead > 0) {
+                        l.d("watchdog: txLoop lastRead=" + timeSinceLastRead + "ms ago, up=" + up);
+                    }
+
+                    // если txLoop не читал из TUN больше 30 сек и туннель живой
+                    if (timeSinceLastRead > 30000 && up && !closed.get()) {
+                        if (l != null) l.d("WATCHDOG ALARM: txLoop blocked on tun.read() for " +
+                                timeSinceLastRead + "ms");
+                        try {
+                            tun.close();  // попытаемся разбудить fd
+                        } catch (Exception ignored) {}
+                        lost("txLoop: tun.read() timeout — TUN interface stuck");
+                        return;
+                    }
+                }
+
+                // ================= СТАТИСТИКА =================
                 if (now - lastStat >= 10000) {
                     lastStat = now;
                     Log l = log;
@@ -416,22 +491,30 @@ final class Tunnel {
                                 + " dpdPending=" + (dpdReq != null));
                     }
                 }
-                if (!online) {                               // сети нет: тишина не считается
+
+                // ================= СЕТЬ: если её нет — ничего не делаем =================
+                if (!online) {
                     lastRx = now;
                     dpdReq = null;
                     pinged = false;
                     continue;
                 }
+
+                // ================= СЕТЬ ВЕРНУЛАСЬ: сбросить таймеры =================
                 if (kick) {
                     kick = false;
                     lastKeep = 0;
                     dpdReq = null;
-                    lastRx = Math.min(lastRx, now - dpdMs);  // пусть DPD спросит сервер сразу
+                    lastRx = Math.min(lastRx, now - dpdMs);
                 }
+
+                // ================= KEEPALIVE: отправляем пустой UDP пакет каждые 20 сек =================
                 if (now - lastKeep >= keepMs) {
                     sendQuiet(new byte[]{(byte) 0xFF}, natPort);
                     lastKeep = now;
                 }
+
+                // ================= PING: необязательный healthcheck через туннель =================
                 if (pingHost != null && now - lastPing >= pingMs) {
                     if (pinged) {
                         if (pongs != seen || lastRx > lastPing) {
@@ -441,7 +524,7 @@ final class Tunnel {
                             missed++;
                         }
                     }
-                    if (missed >= pingLoss) {                // подозрение: не рвём, а просим DPD
+                    if (missed >= pingLoss) {
                         missed = 0;
                         lastRx = Math.min(lastRx, now - dpdMs);
                     }
@@ -450,16 +533,24 @@ final class Tunnel {
                     pinged = true;
                     lastPing = now;
                 }
+
+                // ================= DPD: Dead Peer Detection =================
                 long idle = now - lastRx;
+
+                // если сервер совсем молчит deadMs → разрываем
                 if (idle >= deadMs) {
                     lost("server does not respond");
                     return;
                 }
+
+                // если сервер молчит dpdMs → запускаем DPD запрос
                 if (dpdReq == null && idle >= dpdMs) {
                     dpdId = ike.nextId();
                     dpdReq = Crypto.cat(new byte[4], ike.seal(Ike.INFO, false, dpdId, new ArrayList<>()));
                     lastDpd = 0;
                 }
+
+                // отправляем DPD запрос каждые dpdMs/6 (~5 сек)
                 byte[] d = dpdReq;
                 if (d != null && now - lastDpd >= Math.max(100, dpdMs / 6)) {
                     sendQuiet(d, natPort);
