@@ -154,13 +154,13 @@ final class SipImpl implements Sip {
         post(() -> {
             if (call != null) return;
             if (ip == null) {
-                lis.onEnded("нет сети");
+                lis.onEnded("no network");
                 return;
             }
             String n = number.trim().replace("#", "%23");
             int rtp = media.open();
             if (rtp < 0) {
-                lis.onEnded("нет свободного RTP-порта");
+                lis.onEnded("no free RTP port");
                 return;
             }
             Call k = new Call();
@@ -174,7 +174,7 @@ final class SipImpl implements Sip {
             k.dh = host;
             k.dp = port;
             call = k;
-            k.tx = new Tx(invite(k), host, port, () -> end(k, "нет ответа"));
+            k.tx = new Tx(invite(k), host, port, () -> end(k, "no answer"));
             k.tx.start();
         });
     }
@@ -186,7 +186,7 @@ final class SipImpl implements Sip {
             if (k == null) return;
             if (k.state == CONNECTED) bye(k);
             else cancel(k);
-            end(k, "завершён");
+            end(k, "ended");
         });
     }
 
@@ -197,7 +197,8 @@ final class SipImpl implements Sip {
         lport = udp.open(0, this::onPacket);
         ip = lport > 0 ? udp.localIp(host, port) : null;
         if (ip == null) {
-            lis.onRegistered(false, "нет сети или не найден сервер (" + udp.error() + ")");            regTimer = ex.schedule(() -> guard(this::startReg), 20, TimeUnit.SECONDS);
+            lis.onRegistered(false, "no network or server not found (" + udp.error() + ")");
+            regTimer = ex.schedule(() -> guard(this::startReg), 20, TimeUnit.SECONDS);
             return;
         }
         regId = id() + "@" + ip;
@@ -225,7 +226,7 @@ final class SipImpl implements Sip {
                 "From: " + aor + ";tag=" + regTag, "To: " + aor,
                 "Call-ID: " + regId, "CSeq: " + regCseq + " REGISTER",
                 "Contact: " + contact(), "Expires: 120", "User-Agent: minisip", auth));
-        regTx = new Tx(m, host, port, () -> regFail("сервер не отвечает", true));
+        regTx = new Tx(m, host, port, () -> regFail("server not responding", true));
         regTx.start();
     }
 
@@ -236,7 +237,7 @@ final class SipImpl implements Sip {
         if (c == 401 || c == 407) {
             String a = regAuth ? null : authHeader(m, "REGISTER", "sip:" + host);
             if (a == null) {
-                regFail("неверный логин или пароль", false);
+                regFail("invalid login or password", false);
                 return;
             }
             regAuth = true;
@@ -315,13 +316,13 @@ final class SipImpl implements Sip {
             send(ackFail(m), host, port);
             String a = k.auth != null ? null : authHeader(m, "INVITE", k.uri);
             if (a == null) {
-                end(k, "ошибка авторизации");
+                end(k, "authentication error");
                 return;
             }
             k.auth = a;
             k.cseq++;
             k.branch = branch();
-            k.tx = new Tx(invite(k), host, port, () -> end(k, "нет ответа"));
+            k.tx = new Tx(invite(k), host, port, () -> end(k, "no answer"));
             k.tx.start();
         } else if (c >= 300) {
             send(ackFail(m), host, port);
@@ -339,7 +340,7 @@ final class SipImpl implements Sip {
                     && media.start(s[0], Integer.parseInt(s[1]), Integer.parseInt(s[2]));
             if (!ok) {
                 bye(k);
-                end(k, "ошибка медиа");
+                end(k, "media error");
                 return;
             }
             k.state = CONNECTED;
@@ -383,7 +384,7 @@ final class SipImpl implements Sip {
                 break;
             case "BYE":
                 send(response(m, 200, "OK", null, null, ""), h, p);
-                if (same) end(k, "собеседник завершил");
+                if (same) end(k, "remote party ended call");
                 break;
             case "CANCEL":
                 send(response(m, 200, "OK", null, null, ""), h, p);

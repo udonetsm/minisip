@@ -18,11 +18,11 @@ public final class CallService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         NotificationManager nm = getSystemService(NotificationManager.class);
         nm.createNotificationChannel(
-                new NotificationChannel(CHANNEL, "Вызов", NotificationManager.IMPORTANCE_LOW));
+                new NotificationChannel(CHANNEL, "Call", NotificationManager.IMPORTANCE_LOW));
         Notification n = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.sym_call_outgoing)
                 .setContentTitle("MiniSIP")
-                .setContentText("Идёт вызов")
+                .setContentText("Call in progress")
                 .setOngoing(true)
                 .build();
         if (Build.VERSION.SDK_INT >= 29) {

@@ -1,10 +1,14 @@
 package ru.minisip.app;
 
 import android.Manifest;
+import android.content.ActivityNotFoundException;
+import android.content.Context;
 import android.content.Intent;
+import android.graphics.Typeface;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.ViewGroup;
+import android.widget.Button;
 import android.widget.FrameLayout;
 
 import android.content.SharedPreferences;
@@ -13,11 +17,14 @@ import android.os.PowerManager;
 import android.provider.Settings;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentActivity;
 import androidx.viewpager2.adapter.FragmentStateAdapter;
 import androidx.viewpager2.widget.ViewPager2;
+
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 /**
  * Пустая главная активити: на ней лежит лента страниц-фрагментов (SettingsFragment).
@@ -50,12 +57,25 @@ public final class MainActivity extends AppCompatActivity {
         pager.setAdapter(pages);
         pager.setUserInputEnabled(pages.getItemCount() > 1);   // одна страница — листать нечего
         pager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
+            private boolean isAsking = false;
+
             @Override
             public void onPageSelected(int position) {
-                // перелистнули на следующую, ещё не созданную страницу: она создаётся
-                if (position >= PageStore.count(MainActivity.this)) {
-                    PageStore.setCount(MainActivity.this, position + 1);
-                    pagesChanged();
+                int currentCount = PageStore.count(MainActivity.this);
+                if (position >= currentCount && !isAsking) {
+                    isAsking = true;
+                    showCustomConfirmDialog(MainActivity.this,
+                            "Create New Card",
+                            "Are you sure you want to create another settings card?",
+                            () -> {
+                                isAsking = false;
+                                PageStore.setCount(MainActivity.this, position + 1);
+                                pagesChanged();
+                            },
+                            () -> {
+                                isAsking = false;
+                                pager.setCurrentItem(currentCount - 1, true);
+                            });
                 }
             }
         });
@@ -85,6 +105,50 @@ public final class MainActivity extends AppCompatActivity {
         });
     }
 
+    /** Диалог с кнопками Yes и No (No — синяя, Yes — тусклая и на 20% прозрачная). */
+    static void showCustomConfirmDialog(Context ctx, String title, String message,
+                                        Runnable onYes, Runnable onNo) {
+        AlertDialog dialog = new MaterialAlertDialogBuilder(ctx)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton("Yes", (d, w) -> {
+                    if (onYes != null) onYes.run();
+                })
+                .setNegativeButton("No", (d, w) -> {
+                    if (onNo != null) onNo.run();
+                })
+                .setOnCancelListener(d -> {
+                    if (onNo != null) onNo.run();
+                })
+                .create();
+
+        dialog.show();
+
+        Button noBtn = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+        if (noBtn != null) {
+            noBtn.setTextColor(0xFF2196F3); // Синяя кнопка No
+            noBtn.setTypeface(null, Typeface.BOLD);
+        }
+
+        Button yesBtn = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        if (yesBtn != null) {
+            yesBtn.setTextColor(0xFF888888); // Тусклая кнопка Yes
+            yesBtn.setAlpha(0.80f);          // На 20% прозрачная
+        }
+    }
+
+    /** Вызывается из SettingsFragment при подтверждённом удалении страницы. */
+    void pageDeleted(int pageToDelete) {
+        PageStore.deletePage(this, pageToDelete);
+        pager.post(() -> {
+            pages = new Pages(this);
+            pager.setAdapter(pages);
+            int next = Math.max(0, pageToDelete - 1);
+            pager.setCurrentItem(next, false);
+            pager.setUserInputEnabled(pages.getItemCount() > 1);
+        });
+    }
+
     @Override
     public void onRequestPermissionsResult(int code, @NonNull String[] perms, @NonNull int[] res) {
         super.onRequestPermissionsResult(code, perms, res);
@@ -106,7 +170,7 @@ public final class MainActivity extends AppCompatActivity {
             Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
                     Uri.parse("package:" + getPackageName()));
             startActivity(i);                    // системный диалог «Разрешить / Запретить»
-        } catch (android.content.ActivityNotFoundException e) {
+        } catch (ActivityNotFoundException e) {
             // запасной вариант: общий список настроек оптимизации батареи
             startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
         }

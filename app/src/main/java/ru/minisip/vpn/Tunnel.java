@@ -52,7 +52,7 @@ final class Tunnel {
     int keepMs = 20000, dpdMs = 30000, deadMs = 90000;
     /** Необязательный ping через туннель: адрес (null — выключено). Промахи только запускают DPD. */
     String pingHost;
-    int pingMs = 10000, pingLoss = 3;
+    int pingMs = 2000, pingLoss = 6;
     /** true — обрыв поднятого туннеля сообщается через onReconnecting, решает владелец (VpnImpl). */
     boolean supervised;
     /** Причина неудачи до подъёма сетевая (имеет смысл повторить), а не из-за настроек/пароля. */

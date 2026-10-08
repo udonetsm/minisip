@@ -35,11 +35,11 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     int state = IDLE;
     boolean registered = false;
     boolean connecting = false;
-    String status = "Не подключено";
+    String status = "🔴 Disconnected";
     boolean vpnUp = false;
     boolean vpnConnecting = false;
     int vpnAttempts = 0;
-    String vpnStatus = "VPN: disconnected";
+    String vpnStatus = "🔴 VPN: disconnected";
     /** SIP работал, когда VPN оборвался: после возврата (или окончательного отключения) переоткрыть. */
     private boolean sipResume;
     Runnable onChange;
@@ -114,7 +114,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         sipPass = pass;
         registered = false;
         connecting = true;
-        status = "Подключение…";
+        status = "🟡 Connecting...";
         changed();
         sip.register(host, port, user, pass);
     }
@@ -125,7 +125,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         sipResume = false;
         registered = false;
         connecting = false;
-        status = "Отключено";
+        status = "🔴 Disconnected";
         sip.unregister();
         changed();
     }
@@ -142,7 +142,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         if (state != IDLE || vpnUp || vpnConnecting || !allowed(page)) return;
         lastPage = page;
         vpnConnecting = true;
-        vpnStatus = "VPN: connecting...";
+        vpnStatus = "🟡 VPN: connecting...";
         changed();
         vpn.connect(host, login, password, psk, ca, apps, healthcheckIp);
     }
@@ -161,7 +161,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         if (!allowed(page)) return;
         lastPage = page;
         vpnAttempts = 0;
-        vpnStatus = "VPN: permission denied";
+        vpnStatus = "🔴 VPN: permission denied";
         changed();
     }
 
@@ -169,7 +169,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         if (!allowed(page)) return;
         lastPage = page;
         vpnAttempts = 0;
-        vpnStatus = error;
+        vpnStatus = error.startsWith("🔴") || error.startsWith("🟡") || error.startsWith("🟢") ? error : "🔴 " + error;
         changed();
     }
 
@@ -179,7 +179,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         sipResume = false;
         registered = false;
         connecting = true;
-        status = "Подключение…";
+        status = "🟡 Connecting...";
         sip.register(sipHost, sipPort, sipUser, sipPass);
     }
 
@@ -189,7 +189,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
             vpnConnecting = false;
             vpnUp = true;
             vpnAttempts = 0;                 // сброс счетчика в 0 при успешном реконнекте
-            vpnStatus = "VPN: connected (" + iface + ")";
+            vpnStatus = "🟢 VPN: connected (" + iface + ")";
             sipUdp.bind(iface);              // SIP и RTP идут строго через туннель
             rtpUdp.bind(iface);
             reregister();
@@ -203,7 +203,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
             if (!vpnUp) return;
             vpnAttempts = attempt;
             String attStr = attempt > 99 ? ">99" : String.valueOf(attempt);
-            vpnStatus = "VPN: reconnecting (попытка " + attStr + ")";
+            vpnStatus = "🟡 VPN: reconnecting (attempt " + attStr + ")";
             sipUdp.bind(null);               // локальный VPN сейчас не работает: SIP и RTP идут стеком системы
             rtpUdp.bind(null);
             if (sipHost != null && (registered || connecting)) {
@@ -227,12 +227,12 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
                 sipResume = false;
                 registered = false;
                 connecting = false;
-                status = "Отключено";
+                status = "🔴 Disconnected";
                 sip.unregister();
 
                 vpnUp = false;
                 vpnConnecting = false;
-                vpnStatus = "VPN: disconnected (" + reason + ")";
+                vpnStatus = "🔴 VPN: disconnected (" + reason + ")";
                 vpn.disconnect();
 
                 sipUdp.bind(null);
@@ -247,7 +247,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
             boolean was = vpnUp;
             vpnConnecting = false;
             vpnUp = false;
-            vpnStatus = "VPN: disconnected (" + reason + ")";
+            vpnStatus = "🔴 VPN: disconnected (" + reason + ")";
             sipUdp.bind(null);               // обратно на основной стек системы
             rtpUdp.bind(null);
             if (was) {
@@ -262,11 +262,11 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         if (state != IDLE || !allowed(page)) return;
         lastPage = page;
         if (!registered) {
-            status = "Ошибка: нет сети";
+            status = "🔴 Error: no network";
             changed();
             return;
         }
-        begin(CALLING, "Вызов…");
+        begin(CALLING, "🟡 Calling...");
         sip.call(number);
     }
 
@@ -291,7 +291,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
 
     private void finish(String text) {
         state = IDLE;
-        status = text;
+        status = text.startsWith("🔴") || text.startsWith("🟡") || text.startsWith("🟢") ? text : "🔴 " + text;
         screen.stop();
         stopService(new Intent(this, CallService.class));
         changed();
@@ -308,7 +308,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         main.post(() -> {
             registered = ok;
             connecting = false;
-            status = ok ? "Подключено" : "Ошибка: " + info;
+            status = ok ? "🟢 Connected" : "🔴 Error: " + info;
             changed();
         });
     }
@@ -317,7 +317,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     public void onRinging() {
         main.post(() -> {
             if (state == CALLING) {
-                status = "Идёт вызов…";
+                status = "🟡 Calling...";
                 changed();
             }
         });
@@ -327,13 +327,13 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     public void onConnected() {
         main.post(() -> {
             state = TALK;
-            status = "Разговор";
+            status = "🟢 Call in progress";
             changed();
         });
     }
 
     @Override
     public void onEnded(String reason) {
-        main.post(() -> finish("Завершено: " + reason));
+        main.post(() -> finish("Ended: " + reason));
     }
 }
