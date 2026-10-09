@@ -37,9 +37,9 @@ final class VpnImpl implements Vpn {
     /** Пауза перед первой попыткой после обрыва: старый интерфейс успевает исчезнуть. */
     private static final long SETTLE_MS = 700;
     /** Паузы после неудачной попытки; по кругу. */
-    private static final long[] BACKOFF_MS = {2000, 2000, 4000, 4000, 8000, 8000};
+    private static final long[] BACKOFF_MS = {5000, 5000, 10000, 10000};
     /** Сколько ждём одну попытку целиком (рукопожатие). */
-    private static final long ATTEMPT_MS = 30_000;
+    private static final long ATTEMPT_MS = 8_000;
     /** Период необязательного ping через туннель (если задан healthcheckIp). */
     private static final int PING_MS = 5_000;
 
@@ -177,8 +177,9 @@ final class VpnImpl implements Vpn {
         Tunnel t = tunnel;
         if (t != null) t.setOnline(on);
         if (!on) {
-            Log.i(TAG, "network lost: waiting");
-            return;                                       // живой туннель ждёт; цикл подъёма сам ждёт сеть
+            Log.i(TAG, "network lost: restarting");
+            restart("network lost");
+            return;
         }
         if (t != null && t.isUp()) {
             if (t.mobike()) {
