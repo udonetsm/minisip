@@ -30,7 +30,7 @@ public final class CallService extends Service {
         } else {
             startForeground(1, n);
         }
-        return START_NOT_STICKY;
+        return START_STICKY;
     }
 
     @Override

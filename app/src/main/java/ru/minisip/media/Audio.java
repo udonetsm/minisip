@@ -13,4 +13,9 @@ interface Audio {
 
     /** Вывод звука: true — громкая связь, false — разговорный динамик. Допустимо и во время разговора. */
     default void setSpeaker(boolean on) {}
+
+    /** Отключение микрофона: true — звук заглушен (тишина), false — микрофон включен. */
+    default void setMute(boolean mute) {}
+
+    default boolean isMuted() { return false; }
 }

@@ -75,7 +75,7 @@ public final class SettingsFragment extends Fragment {
 
     private TextInputEditText server, login, pass, number, vpnServer, vpnLogin, vpnPass, vpnKey, vpnCa, vpnHealthcheck;
     private TextView status, vpnStatus;
-    private MaterialButton connect, disconnect, call, hang, audioBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
+    private MaterialButton connect, disconnect, call, hang, audioBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
     private LinearLayout vpnMainSpoilerContainer, vpnAdvancedSpoilerContainer, sipSpoilerContainer;
 
     /** Одна и та же ссылка нужна, чтобы в onPause снимать только свой колбэк. */
@@ -147,6 +147,7 @@ public final class SettingsFragment extends Fragment {
 
         hang = button(callBlock.container, "Discard", true, v -> app.hangup(page));
         audioBtn = button(callBlock.container, "Voice source", true, v -> pickOutput());
+        muteBtn = button(callBlock.container, "Mute microphone 🎤", true, v -> toggleMute());
 
         // --- Блок 3: Настройка VPN ---
         Block vpnBlock = createBlock(2);
@@ -363,7 +364,15 @@ public final class SettingsFragment extends Fragment {
             return;
         }
         app.setSpeaker(prefs.getBoolean("speaker", false));   // вывод звука, выбранный на этой странице
+        app.setMute(prefs.getBoolean("muted", false));
         app.dial(page, n);
+    }
+
+    private void toggleMute() {
+        boolean muted = !prefs.getBoolean("muted", false);
+        prefs.edit().putBoolean("muted", muted).apply();
+        if (!(app.busy() && app.lastPage != page)) app.setMute(muted);
+        render();
     }
 
     private void doVpnConnect() {
@@ -511,6 +520,8 @@ public final class SettingsFragment extends Fragment {
         audioBtn.setEnabled(!other);
         audioBtn.setText("Audio output: " + (prefs.getBoolean("speaker", false)
                 ? "Speakerphone" : "Earpiece"));
+        muteBtn.setEnabled(!other);
+        muteBtn.setText(prefs.getBoolean("muted", false) ? "Unmute microphone 🎙️" : "Mute microphone 🎤");
         connect.setEnabled(!other && idle && !reg && !conn);
         disconnect.setEnabled(reg || conn);
         // VPN: подключить можно только когда он не поднят и нет вызова; отключить — когда поднят или поднимается

@@ -266,13 +266,22 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
             changed();
             return;
         }
-        begin(CALLING, "🟡 Calling...");
+        begin(CALLING, "🟢 Connected | 🟡 Calling...");
         sip.call(number);
     }
 
     /** Куда идёт звук разговора: true — громкая связь, false — в ухо. */
     void setSpeaker(boolean on) {
         media.setSpeaker(on);
+    }
+
+    /** Отключение микрофона: true — заглушить, false — включить обратно. */
+    void setMute(boolean mute) {
+        media.setMute(mute);
+    }
+
+    boolean isMuted() {
+        return media.isMuted();
     }
 
     void hangup(int page) {
@@ -291,7 +300,11 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
 
     private void finish(String text) {
         state = IDLE;
-        status = text.startsWith("🔴") || text.startsWith("🟡") || text.startsWith("🟢") ? text : "🔴 " + text;
+        if (registered) {
+            status = "🟢 Connected | 🔴 " + text;
+        } else {
+            status = text.startsWith("🔴") || text.startsWith("🟡") || text.startsWith("🟢") ? text : "🔴 " + text;
+        }
         screen.stop();
         stopService(new Intent(this, CallService.class));
         changed();
@@ -317,7 +330,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     public void onRinging() {
         main.post(() -> {
             if (state == CALLING) {
-                status = "🟡 Calling...";
+                status = registered ? "🟢 Connected | 🟡 Calling..." : "🟡 Calling...";
                 changed();
             }
         });
@@ -327,7 +340,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     public void onConnected() {
         main.post(() -> {
             state = TALK;
-            status = "🟢 Call in progress";
+            status = "🟢 Connected | 🟢 Call in progress";
             changed();
         });
     }

@@ -11,6 +11,8 @@ import android.media.AudioTrack;
 import android.media.MediaRecorder;
 import android.os.Build;
 
+import java.util.Arrays;
+
 /** Микрофон и динамик разговорного тракта (в ухо, с эхоподавлением системы). */
 final class AndroidAudio implements Audio {
 
@@ -22,6 +24,7 @@ final class AndroidAudio implements Audio {
     private AudioFocusRequest focusReq;
     private int prevMode = -1;
     private volatile boolean speaker;        // выбранный вывод: громкая связь или в ухо
+    private volatile boolean muted;          // заглушен ли микрофон
 
     AndroidAudio(Context ctx) {
         am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
@@ -131,6 +134,20 @@ final class AndroidAudio implements Audio {
         if (prevMode >= 0) route();           // разговор уже идёт: переключаем на лету
     }
 
+    @Override
+    public void setMute(boolean mute) {
+        muted = mute;
+        try {
+            am.setMicrophoneMute(mute);
+        } catch (Exception ignored) {
+        }
+    }
+
+    @Override
+    public boolean isMuted() {
+        return muted;
+    }
+
     /**
      * Android 12+: штатный выбор устройства связи (разговорный динамик или громкая связь).
      * Старее, и если нужного устройства нет (планшет без разговорного динамика), — старый переключатель.
@@ -150,7 +167,11 @@ final class AndroidAudio implements Audio {
     @Override
     public int read(short[] buf) {
         try {
-            return rec.read(buf, 0, buf.length);
+            int n = rec.read(buf, 0, buf.length);
+            if (muted && n > 0) {
+                Arrays.fill(buf, 0, n, (short) 0);
+            }
+            return n;
         } catch (RuntimeException e) {
             return -1;
         }
@@ -167,6 +188,10 @@ final class AndroidAudio implements Audio {
 
     @Override
     public void stop() {
+        try {
+            am.setMicrophoneMute(false);
+        } catch (Exception ignored) {
+        }
         try {
             if (rec != null) {
                 rec.stop();

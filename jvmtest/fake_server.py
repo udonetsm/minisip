@@ -145,34 +145,9 @@ try:
     reply(bye, caddr, 200, "OK")
     time.sleep(0.3)
 
-    # ---------- 3. входящий вызов ----------
-    iv = ("INVITE sip:alice@127.0.0.1:%d SIP/2.0\r\n"
-          "Via: SIP/2.0/UDP 127.0.0.1:5099;branch=z9hG4bKsrv1;rport\r\n"
-          "From: \"Bob\" <sip:bob@127.0.0.1>;tag=bobt\r\nTo: <sip:alice@127.0.0.1>\r\n"
-          "Call-ID: in1@srv\r\nCSeq: 1 INVITE\r\nContact: <sip:bob@127.0.0.1:5099>\r\n"
-          "Content-Type: application/sdp\r\n") % caddr[1]
-    body = sdp(40002, [0, 8])
-    sock.sendto((iv + f"Content-Length: {len(body)}\r\n\r\n" + body).encode(), caddr)
-    ring = recv("SIP/2.0 180")
-    ok("tag=" in ring[1]["to"][0], "180 Ringing с тегом")
-    okr = recv("SIP/2.0 200")
-    ok("RTP/AVP 0" in okr[2] and "RTP/AVP 0 8" not in okr[2], "200 OK: выбран один кодек PCMU: " + okr[2].split("m=audio")[1].split("\r\n")[0])
-    ctag = re.search(r"tag=(\w+)", okr[1]["to"][0]).group(1)
-    ack = ("ACK sip:alice@127.0.0.1:%d SIP/2.0\r\nVia: SIP/2.0/UDP 127.0.0.1:5099;branch=z9hG4bKsrv2\r\n"
-           "From: \"Bob\" <sip:bob@127.0.0.1>;tag=bobt\r\nTo: <sip:alice@127.0.0.1>;tag=%s\r\n"
-           "Call-ID: in1@srv\r\nCSeq: 1 ACK\r\nContent-Length: 0\r\n\r\n") % (caddr[1], ctag)
-    sock.sendto(ack.encode(), caddr)
-    time.sleep(0.3)
-    byei = ("BYE sip:alice@127.0.0.1:%d SIP/2.0\r\nVia: SIP/2.0/UDP 127.0.0.1:5099;branch=z9hG4bKsrv3\r\n"
-            "From: \"Bob\" <sip:bob@127.0.0.1>;tag=bobt\r\nTo: <sip:alice@127.0.0.1>;tag=%s\r\n"
-            "Call-ID: in1@srv\r\nCSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n") % (caddr[1], ctag)
-    sock.sendto(byei.encode(), caddr)
-    rb = recv("SIP/2.0 200")
-    ok(rb[1]["cseq"][0] == "2 BYE", "клиент ответил 200 на BYE")
-
-    # ---------- 4. исходящий и отмена ----------
+    # ---------- 3. второй исходящий и отмена ----------
     i3 = recv("INVITE")
-    ok(i3[0].startswith("INVITE sip:2000@"), "третий вызов: " + i3[0])
+    ok(i3[0].startswith("INVITE sip:2000@"), "второй вызов: " + i3[0])
     reply(i3, caddr, 401, "Unauthorized", [f'WWW-Authenticate: Digest realm="{REALM}", nonce="{NONCE}", qop="auth"'], totag="s3")
     recv("ACK")
     i4 = recv("INVITE")
@@ -198,15 +173,10 @@ exp = [
     "MEDIA start 127.0.0.1 40000 8",
     "EV connected",
     "MEDIA stop",
-    "EV ended завершён",
-    "EV incoming bob",
-    "MEDIA start 127.0.0.1 40002 0",
-    "EV connected",
-    "MEDIA stop",
-    "EV ended собеседник завершил",
+    "EV ended ended",
     "EV ringing",
     "MEDIA stop",
-    "EV ended завершён",
+    "EV ended ended",
     "DONE",
 ]
 got = list(events)

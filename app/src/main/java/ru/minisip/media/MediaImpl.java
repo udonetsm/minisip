@@ -68,6 +68,16 @@ final class MediaImpl implements Media, Udp.Listener {
     }
 
     @Override
+    public void setMute(boolean mute) {
+        audio.setMute(mute);
+    }
+
+    @Override
+    public boolean isMuted() {
+        return audio.isMuted();
+    }
+
+    @Override
     public synchronized void stop() {
         boolean wasRunning = run;
         run = false;

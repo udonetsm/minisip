@@ -25,6 +25,11 @@ public interface Media {
      */
     default void setSpeaker(boolean on) {}
 
+    /** Заглушить микрофон: true — заглушить, false — включить обратно. */
+    default void setMute(boolean mute) {}
+
+    default boolean isMuted() { return false; }
+
     static Media create(Udp rtpSocket, Context ctx) {
         return new MediaImpl(rtpSocket, new AndroidAudio(ctx));
     }

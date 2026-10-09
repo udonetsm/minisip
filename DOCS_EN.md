@@ -26,8 +26,10 @@ All connection and call statuses are accompanied by intuitive color indicators:
   - **In Progress** (`Connecting...` / `Calling...`) — Registration request in progress, network check, or dialing recipient.
   - **Reconnecting** (`VPN: reconnecting`) — Temporary network drop, VPN automatically recovering connection.
 - `🟢` **Green Circle**:
-  - **Connected** (`Connected`) — Successfully registered on PBX or VPN tunnel is active.
-  - **Active Call** (`Call in progress`) — Recipient picked up, call in progress.
+  - **Connected** (`🟢 Connected`) — Successfully registered on PBX or VPN tunnel is active.
+  - **Dialing** (`🟢 Connected | 🟡 Calling...`) — Outgoing call in progress while registered on PBX.
+  - **Active Call** (`🟢 Connected | 🟢 Call in progress`) — Recipient picked up, active phone call in progress.
+  - **Call Ended** (`🟢 Connected | 🔴 Ended: ...`) — Call finished, returning to active PBX registration.
 
 ---
 
@@ -60,6 +62,7 @@ This block is used for dialing phone numbers and controlling audio during calls.
 * **Button `Voice source`**: Switches audio output source on the fly:
   - `Earpiece` — Earpiece speaker (for holding phone to your ear).
   - `Speakerphone` — Loudspeaker / speakerphone mode.
+* **Button `Mute microphone 🎤` / `Unmute microphone 🎙️`**: Instantly mutes or unmutes the microphone during a call. When muted, PCM silence frames are transmitted over RTP, ensuring the remote party hears complete silence.
   
 ### Smart Features During Calls:
 * **Proximity Sensor**: Holding the phone to your ear automatically turns off the screen to prevent accidental cheek touches.

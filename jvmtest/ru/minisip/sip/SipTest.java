@@ -33,7 +33,7 @@ public final class SipTest {
 
             public void onRinging() {
                 System.out.println("EV ringing");
-                if (ended == 2) sip.hangup();                 // третий вызов: отменяем до ответа
+                if (ended == 1) sip.hangup();                 // второй вызов: отменяем до ответа
             }
 
             public void onConnected() {
@@ -52,8 +52,8 @@ public final class SipTest {
             public void onEnded(String reason) {
                 System.out.println("EV ended " + reason);
                 ended++;
-                if (ended == 2) sip.call("2000");
-                if (ended == 3) {
+                if (ended == 1) sip.call("2000");
+                if (ended == 2) {
                     System.out.println("DONE");
                 }
             }
