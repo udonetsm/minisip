@@ -22,6 +22,7 @@ public interface Vpn {
          */
         default void onReconnecting(String reason, int attempt) {}
         default void onReconnecting(String reason) { onReconnecting(reason, 1); }
+        default void onPingLoss(int lostCount) {}
     }
     
     default void setStrict(boolean on) {}
@@ -58,6 +59,8 @@ public interface Vpn {
 
     /** Закрывает туннель и интерфейс. Можно звать в любом состоянии. */
     void disconnect();
+
+    default boolean mobike() { return false; }
 
     static Vpn create(Context ctx) {
         return new VpnImpl(ctx);

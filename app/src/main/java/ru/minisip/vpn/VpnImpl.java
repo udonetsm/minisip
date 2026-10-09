@@ -41,7 +41,7 @@ final class VpnImpl implements Vpn {
     /** Сколько ждём одну попытку целиком (рукопожатие). */
     private static final long ATTEMPT_MS = 30_000;
     /** Период необязательного ping через туннель (если задан healthcheckIp). */
-    private static final int PING_MS = 10_000;
+    private static final int PING_MS = 5_000;
 
     private final Context ctx;
     private final NetWatch watch;
@@ -65,6 +65,12 @@ final class VpnImpl implements Vpn {
     @Override
     public void setListener(Listener l) {
         lis = l;
+    }
+
+    @Override
+    public synchronized boolean mobike() {
+        Tunnel t = tunnel;
+        return t != null && t.mobike();
     }
 
     @Override
@@ -265,7 +271,7 @@ final class VpnImpl implements Vpn {
         t.supervised = true;
         t.strict = strict;
         String hc = healthcheckIp == null ? "" : healthcheckIp.trim();
-        t.pingHost = hc.isEmpty() ? null : hc;           // по умолчанию ping выключен: живость решает DPD
+        t.pingHost = (hc.isEmpty() || hc.equals("0")) ? null : hc;           // если 0 или пусто — ping выключен, работают механизмы IKEv2
         t.pingMs = PING_MS;
         t.log = m -> Log.i(TAG, m);
         g.owner = t;
@@ -386,6 +392,14 @@ final class VpnImpl implements Vpn {
                 tunnel = null;
                 lis.onReconnecting(reason, 1);
                 startRecovery(SETTLE_MS, false);
+            }
+        }
+
+        @Override
+        public void onPingLoss(int lostCount) {
+            synchronized (VpnImpl.this) {
+                if (tunnel != owner) return;
+                lis.onPingLoss(lostCount);
             }
         }
     }
