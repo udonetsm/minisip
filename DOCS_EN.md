@@ -90,7 +90,7 @@ This block secures traffic for the entire device or selected applications.
 * **Buttons `VPN connect` / `VPN disconnect`**: Starts or stops the encrypted tunnel.
 * **VPN Status Text**: Displays current VPN state (e.g. `🟢 VPN: connected (tun0)`).
 
-> 🛡 **Network Reliability**: To avoid false tunnel disconnects in subways or poor cell signal areas, VPN checks for 6 consecutive lost pings (12 seconds of silence) before sending DPD verification requests. VPN settings can be edited even during an active SIP call.
+> 🛡 **Network Reliability & Roaming**: To avoid false tunnel disconnects in subways or poor cell signal areas, VPN checks for 6 consecutive lost pings (12 seconds of silence) before sending DPD verification requests. It also fully supports **MOBIKE (RFC 4555)**: if your VPN server supports this standard, switching between Wi-Fi and mobile data instantly migrates the tunnel on the fly without dropping connection. If the server does not support MOBIKE, the app automatically performs a full reconnect through the new network interface. VPN settings can be edited even during an active SIP call.
 
 ---
 
