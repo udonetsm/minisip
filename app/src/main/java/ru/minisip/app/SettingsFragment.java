@@ -13,7 +13,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
 import android.text.InputType;
+import android.text.SpannableString;
+import android.text.Spanned;
 import android.text.TextWatcher;
+import android.text.style.RelativeSizeSpan;
 import android.util.TypedValue;
 import android.view.DragEvent;
 import android.view.LayoutInflater;
@@ -400,7 +403,7 @@ public final class SettingsFragment extends Fragment {
         String hc = text(vpnHealthcheck).trim();
         if (hc.isEmpty()) hc = "google.com";
 
-        if (isIpv4(hc)) {
+        if (hc.equals("0") || isIpv4(hc)) {
             app.vpnConnect(page, text(vpnServer).trim(), text(vpnLogin).trim(), text(vpnPass), text(vpnKey),
                     text(vpnCa), prefs.getString("vpnApps", ""), hc);
             return;
@@ -530,6 +533,17 @@ public final class SettingsFragment extends Fragment {
         vpnAppsBtn.setText("Apps using VPN (MiniSIP" + (n > 0 ? " + " + n : "") + ")");
         vpnAppsBtn.setEnabled(!other && !vUp && !vConn);   // список применяется при подключении
         vpnConnect.setEnabled(!other && idle && !vUp && !vConn);
+        if (vUp) {
+            String mobikeStatus = app.vpnMobike() ? "Active" : "Not supported";
+            String sub = "\nMOBIKE: " + mobikeStatus + " | DPD active";
+            SpannableString span = new SpannableString("VPN connect" + sub);
+            span.setSpan(new RelativeSizeSpan(0.7f), 11, span.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            vpnConnect.setText(span);
+            vpnConnect.setPadding(0, dp(12), 0, dp(12));
+        } else {
+            vpnConnect.setText("VPN connect");
+            vpnConnect.setPadding(0, dp(14), 0, dp(14));
+        }
         vpnDisconnect.setEnabled(vUp || vConn);
     }
 

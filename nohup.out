@@ -1,0 +1,181 @@
+21:57:08.728311 [INFO]     [bootstrap] initializing [directories]
+21:57:08.734358 [DEBUG]    [bootstrap] [directories] initialized in 6ms
+21:57:08.734446 [INFO]     [bootstrap] initializing [app info]
+21:57:08.742902 [DEBUG]    [bootstrap] [app info] initialized in 8ms
+21:57:08.742978 [INFO]     [bootstrap] initializing [preferences]
+21:57:08.743026 [DEBUG]    [preferences] initializing preferences
+21:57:08.743576 [DEBUG]    [bootstrap] [preferences] initialized in 0ms
+21:57:08.743679 [INFO]     [bootstrap] initializing [preferences migration]
+21:57:08.743723 [DEBUG]    [PreferencesMigration] already using the latest version (v1)
+21:57:08.743750 [DEBUG]    [bootstrap] [preferences migration] initialized in 0ms
+21:57:08.743815 [INFO]     [bootstrap] initializing [window controller]
+21:57:08.745192 [DEBUG]    [WindowNotifier] window state. maximized: false
+21:57:08.745291 [DEBUG]    [WindowNotifier] window state. size: Instance of 'Size'
+21:57:08.745333 [DEBUG]    [WindowNotifier] window state. position: centered
+21:57:08.745359 [DEBUG]    [WindowNotifier] window state. silent start: Disabled
+21:57:08.760783 [DEBUG]    [WindowNotifier] no previous position found, centering window
+21:57:08.764459 [DEBUG]    [WindowNotifier] showing app window on start
+21:57:08.764626 [DEBUG]    [bootstrap] [window controller] initialized in 20ms
+21:57:08.764695 [DEBUG]    [bootstrap] silent start [Disabled]
+21:57:08.767095 [INFO]     [bootstrap] initializing [auto start service]
+21:57:08.767425 [INFO]     [AutoStartNotifier] auto start is [Disabled]
+21:57:08.767525 [DEBUG]    [bootstrap] [auto start service] initialized in 0ms
+21:57:08.767563 [INFO]     [bootstrap] initializing [logs repository]
+21:57:08.769613 [DEBUG]    [bootstrap] [logs repository] initialized in 2ms
+21:57:08.769757 [INFO]     [bootstrap] initializing [logger controller]
+21:57:08.770049 [INFO]     [bootstrap] hiddify v4.1.1 (40101) [prod]
+general release
+linux [Linux 6.12.107+deb13-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.12.107-1 (2026-08-29)]
+21:57:08.770119 [INFO]     [bootstrap] initializing [profile repository]
+21:57:08.772111 [INFO]     [bootstrap] initializing [translations]
+21:57:08.773029 [INFO]     [bootstrap] initializing [active profile]
+21:57:08.797118 [INFO]     [bootstrap] initializing [hiddify-core]
+[37mDEBUG[0m[0000] H CORE libbox.Setup success /root/.local/share/hiddify /root/.local/share/hiddify /tmp true
+[37mDEBUG[0m[0000] H CORE StartGrpcServerByMode 127.0.0.1:17078 3
+[37mDEBUG[0m[0000] H CORE grpcServer started on 127.0.0.1:17078
+[36mINFO[0m[0000] Server listening on %s127.0.0.1:17078
+[37mDEBUG[0m[0000] H CORE HiddifySettingsJson&{HiddifySettingsJson {"region":"ru","balancer-strategy":"round-robin","block-ads":false,"use-xray-core-when-possible":false,"execute-config-as-is":false,"log-level":"warn","resolve-destination":true,"ipv6-mode":"ipv4_only","remote-dns-address":"udp://9.9.9.9","remote-dns-domain-strategy":"","direct-dns-address":"9.9.9.9","direct-dns-domain-strategy":"","mixed-port":12334,"tproxy-port":12335,"direct-port":12337,"redirect-port":12336,"tun-implementation":"gvisor","mtu":9000,"strict-route":true,"connection-test-url":"http://captive.apple.com/hotspot-detect.html","url-test-interval":600,"enable-clash-api":true,"clash-api-port":16756,"enable-tun":true,"set-system-proxy":false,"bypass-lan":true,"allow-connection-from-lan":false,"enable-fake-dns":false,"independent-dns-cache":true,"rules":[],"tls-tricks":{"enable-fragment":false,"fragment-size":"10-30","fragment-sleep":"2-8","mixed-sni-case":false,"enable-padding":false,"padding-size":"1-1500"},"warp":{"enable":false,"mode":"warp_over_proxy","wireguard-config":"","license-key":"","account-id":"","access-token":"","clean-ip":"auto","clean-port":0,"noise":"1-3","noise-size":"10-30","noise-delay":"10-30","noise-mode":"m4"},"warp2":{"enable":false,"mode":"warp_over_proxy","wireguard-config":"","license-key":"","account-id":"","access-token":"","clean-ip":"auto","clean-port":0,"noise":"1-3","noise-size":"10-30","noise-delay":"10-30","noise-mode":"m4"}}} <nil>
+21:57:09.240456 [INFO]     [CoreInterfaceDesktop] message: Hello, test
+
+21:57:09.241058 [INFO]     [HiddifyCoreService] Hiddify-core setup done
+21:57:09.241285 [INFO]     [bootstrap] initializing [system tray]
+21:57:09.241871 [ERROR]    [HiddifyCoreService] status
+21:57:09.242025 [INFO]     [ConnectionNotifier] connection status: DISCONNECTED
+21:57:09.242224 [WARNING]  [SystemTrayNotifier] error getting active proxy
+21:57:09.267671 [INFO]     [ConnectionNotifier] connection status: DISCONNECTED
+
+(app.hiddify.com:209549): libayatana-appindicator-WARNING **: 21:57:09.270: Unable to get the session bus: Failed to execute child process “dbus-launch” (No such file or directory)
+
+(app.hiddify.com:209549): LIBDBUSMENU-GLIB-WARNING **: 21:57:09.270: Unable to get session bus: Failed to execute child process “dbus-launch” (No such file or directory)
+
+(app.hiddify.com:209549): Gdk-CRITICAL **: 21:57:09.405: gdk_window_thaw_toplevel_updates: assertion 'window->update_and_descendants_freeze_count > 0' failed
+21:57:10.241795 [ERROR]    [bootstrap] [system tray] error initializing
+#0      Future.timeout.<anonymous closure> (dart:async/future_impl.dart:1042)
+<asynchronous suspension>
+#1      _init (package:hiddify/bootstrap.dart:132)
+<asynchronous suspension>
+#2      _safeInit (package:hiddify/bootstrap.dart:145)
+<asynchronous suspension>
+#3      lazyBootstrap (package:hiddify/bootstrap.dart:100)
+<asynchronous suspension>
+#4      main (package:hiddify/main_prod.dart:14)
+<asynchronous suspension>
+
+21:57:10.244126 [INFO]     [bootstrap] bootstrap took [1516ms]
+21:57:10.247347 [INFO]     [App] current app state
+21:57:10.247420 [INFO]     [App] AppLifecycleState.resumed
+21:57:10.265049 [WARNING]  [SystemTrayNotifier] error getting active proxy
+dynamic_color: Accent color detected.
+21:57:10.296739 [INFO]     [CoreInterfaceDesktop] core is already started!
+21:57:10.297284 [ERROR]    [HiddifyCoreService] status
+21:57:10.297442 [INFO]     [ConnectionNotifier] connection status: DISCONNECTED
+21:57:10.297841 [INFO]     [HiddifyCoreService] Hiddify-core setup done
+21:57:10.298448 [ERROR]    [HiddifyCoreService] status
+21:57:10.298635 [WARNING]  [SystemTrayNotifier] error getting active proxy
+21:57:10.298711 [INFO]     [ConnectionNotifier] connection status: DISCONNECTED
+21:57:10.322776 [INFO]     [ConnectionNotifier] connection status: DISCONNECTED
+21:57:10.323415 [WARNING]  [SystemTrayNotifier] error getting active proxy
+21:57:11.760122 [INFO]     [CoreInterfaceDesktop] core is already started!
+21:57:11.760645 [ERROR]    [HiddifyCoreService] status
+21:57:11.760831 [INFO]     [ConnectionNotifier] connection status: DISCONNECTED
+21:57:11.762005 [WARNING]  [SystemTrayNotifier] error getting active proxy
+21:57:11.785175 [INFO]     [ConnectionNotifier] connection status: DISCONNECTED
+21:57:11.785733 [WARNING]  [SystemTrayNotifier] error getting active proxy
+21:57:11.812422 [INFO]     [ConnectionNotifier] connection status: CONNECTING
+21:57:11.813424 [WARNING]  [SystemTrayNotifier] error getting active proxy
+21:57:11.814055 [INFO]     [ConnectionNotifier] connection status: CONNECTING
+21:57:11.814550 [WARNING]  [SystemTrayNotifier] error getting active proxy
+Saving config to /root/.local/share/hiddify/data/current-config.json <nil>
+21:57:12.091162 [ERROR]    [HiddifyCoreService] status
+21:57:12.091468 [WARNING]  [SystemTrayNotifier] error getting active proxy
+21:57:12.092015 [INFO]     [ConnectionNotifier] connection status: CONNECTED
+21:57:12.092801 [INFO]     [HiddifyCoreService] watching active groups
+21:57:12.095176 [INFO]     [ConnectionNotifier] connection status: CONNECTED
+21:57:14.615992 [INFO]     [App] current app state
+21:57:14.616213 [INFO]     [App] AppLifecycleState.inactive
+CompileCommand: exclude org/jetbrains/kotlin/serialization/deserialization/TypeDeserializer.simpleType bool exclude = true
+CompileCommand: exclude org/jetbrains/kotlin/serialization/deserialization/TypeDeserializer.toAttributes bool exclude = true
+22:10:36.591410 [INFO]     [App] current app state
+22:10:36.592110 [INFO]     [App] AppLifecycleState.resumed
+22:10:36.616393 [INFO]     [CoreInterfaceDesktop] core is already started!
+22:10:36.616857 [ERROR]    [HiddifyCoreService] status
+22:10:36.617081 [INFO]     [ConnectionNotifier] connection status: CONNECTED
+22:10:36.617438 [INFO]     [HiddifyCoreService] Hiddify-core setup done
+22:10:36.618307 [ERROR]    [HiddifyCoreService] status
+22:10:36.618529 [INFO]     [HiddifyCoreService] watching active groups
+22:10:36.618625 [INFO]     [ConnectionNotifier] connection status: CONNECTED
+22:10:36.642218 [INFO]     [ConnectionNotifier] connection status: CONNECTED
+22:10:38.023075 [INFO]     [ConnectionNotifier] connection status: DISCONNECTING
+22:10:38.024497 [WARNING]  [SystemTrayNotifier] error getting active proxy
+22:10:38.051656 [INFO]     [ConnectionNotifier] connection status: DISCONNECTED
+22:10:38.051956 [INFO]     [ConnectionNotifier] connection status: DISCONNECTED
+22:10:38.052237 [WARNING]  [SystemTrayNotifier] error getting active proxy
+22:10:38.595504 [INFO]     [App] current app state
+22:10:38.595747 [INFO]     [App] AppLifecycleState.inactive
+22:13:10.924854 [INFO]     [App] current app state
+22:13:10.925248 [INFO]     [App] AppLifecycleState.resumed
+22:13:10.953491 [INFO]     [CoreInterfaceDesktop] core is already started!
+22:13:10.953892 [ERROR]    [HiddifyCoreService] status
+22:13:10.954096 [INFO]     [ConnectionNotifier] connection status: DISCONNECTED
+22:13:10.954375 [INFO]     [HiddifyCoreService] Hiddify-core setup done
+22:13:10.954985 [ERROR]    [HiddifyCoreService] status
+22:13:10.955211 [WARNING]  [SystemTrayNotifier] error getting active proxy
+22:13:10.955304 [INFO]     [ConnectionNotifier] connection status: DISCONNECTED
+22:13:10.978040 [INFO]     [ConnectionNotifier] connection status: DISCONNECTED
+22:13:10.978559 [WARNING]  [SystemTrayNotifier] error getting active proxy
+22:13:11.833712 [INFO]     [ConnectionNotifier] connection status: CONNECTING
+22:13:11.834860 [WARNING]  [SystemTrayNotifier] error getting active proxy
+22:13:11.836642 [INFO]     [ConnectionNotifier] connection status: CONNECTING
+22:13:11.837074 [WARNING]  [SystemTrayNotifier] error getting active proxy
+Saving config to /root/.local/share/hiddify/data/current-config.json <nil>
+22:13:12.066128 [ERROR]    [HiddifyCoreService] status
+22:13:12.066482 [WARNING]  [SystemTrayNotifier] error getting active proxy
+22:13:12.066637 [INFO]     [ConnectionNotifier] connection status: CONNECTED
+22:13:12.067215 [INFO]     [HiddifyCoreService] watching active groups
+22:13:12.070745 [INFO]     [ConnectionNotifier] connection status: CONNECTED
+22:13:12.808077 [INFO]     [App] current app state
+22:13:12.808348 [INFO]     [App] AppLifecycleState.inactive
+22:15:08.725293 [INFO]     [App] current app state
+22:15:08.727630 [INFO]     [App] AppLifecycleState.resumed
+22:15:08.749891 [INFO]     [CoreInterfaceDesktop] core is already started!
+22:15:08.750110 [ERROR]    [HiddifyCoreService] status
+22:15:08.750215 [INFO]     [ConnectionNotifier] connection status: CONNECTED
+22:15:08.750354 [INFO]     [HiddifyCoreService] Hiddify-core setup done
+22:15:08.750667 [ERROR]    [HiddifyCoreService] status
+22:15:08.750741 [INFO]     [HiddifyCoreService] watching active groups
+22:15:08.750779 [INFO]     [ConnectionNotifier] connection status: CONNECTED
+22:15:08.774214 [INFO]     [ConnectionNotifier] connection status: CONNECTED
+22:15:09.491498 [INFO]     [App] current app state
+22:15:09.491904 [INFO]     [App] AppLifecycleState.inactive
+22:15:32.324666 [INFO]     [App] current app state
+22:15:32.325592 [INFO]     [App] AppLifecycleState.resumed
+22:15:32.350546 [INFO]     [CoreInterfaceDesktop] core is already started!
+22:15:32.351166 [ERROR]    [HiddifyCoreService] status
+22:15:32.351411 [INFO]     [ConnectionNotifier] connection status: CONNECTED
+22:15:32.351711 [INFO]     [HiddifyCoreService] Hiddify-core setup done
+22:15:32.352462 [ERROR]    [HiddifyCoreService] status
+22:15:32.352655 [INFO]     [HiddifyCoreService] watching active groups
+22:15:32.352769 [INFO]     [ConnectionNotifier] connection status: CONNECTED
+22:15:32.376066 [INFO]     [ConnectionNotifier] connection status: CONNECTED
+22:15:33.774837 [INFO]     [ConnectionNotifier] connection status: DISCONNECTING
+22:15:33.792381 [WARNING]  [SystemTrayNotifier] error getting active proxy
+22:15:33.808404 [INFO]     [ConnectionNotifier] connection status: DISCONNECTED
+22:15:33.809092 [INFO]     [ConnectionNotifier] connection status: DISCONNECTED
+22:15:33.815963 [WARNING]  [SystemTrayNotifier] error getting active proxy
+22:15:34.725814 [INFO]     [App] current app state
+22:15:34.727277 [INFO]     [App] AppLifecycleState.inactive
+22:15:38.674935 [INFO]     [App] current app state
+22:15:38.675129 [INFO]     [App] AppLifecycleState.resumed
+22:15:38.702959 [INFO]     [CoreInterfaceDesktop] core is already started!
+22:15:38.703763 [ERROR]    [HiddifyCoreService] status
+22:15:38.704142 [INFO]     [ConnectionNotifier] connection status: DISCONNECTED
+22:15:38.705604 [INFO]     [HiddifyCoreService] Hiddify-core setup done
+22:15:38.706546 [ERROR]    [HiddifyCoreService] status
+22:15:38.706678 [WARNING]  [SystemTrayNotifier] error getting active proxy
+22:15:38.706714 [INFO]     [ConnectionNotifier] connection status: DISCONNECTED
+22:15:38.731773 [INFO]     [ConnectionNotifier] connection status: DISCONNECTED
+22:15:38.732622 [WARNING]  [SystemTrayNotifier] error getting active proxy
+embedder.cc (2575): 'FlutterEngineRemoveView' returned 'kInvalidArguments'. Remove view info was invalid. The implicit view cannot be removed.
+
+** (app.hiddify.com:209549): WARNING **: 22:15:40.775: Failed to cleanup compositor shaders, unable to make OpenGL context current
+hiddify: ../src/dispatch_common.c:872: epoxy_get_proc_address: Assertion `0 && "Couldn't find current GLX or EGL context.\n"' failed.

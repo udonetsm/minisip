@@ -49,10 +49,10 @@ final class Tunnel {
     // настраиваемое для проверок
     int ikePort = 500, natPort = 4500;
     int rto = 3000, tries = 4;
-    int keepMs = 20000, dpdMs = 30000, deadMs = 90000;
+    int keepMs = 20000, dpdMs = 10000, deadMs = 30000;
     /** Необязательный ping через туннель: адрес (null — выключено). Промахи только запускают DPD. */
     String pingHost;
-    int pingMs = 2000, pingLoss = 6;
+    int pingMs = 2000, pingLoss = 3;
     /** true — обрыв поднятого туннеля сообщается через onReconnecting, решает владелец (VpnImpl). */
     boolean supervised;
     /** Причина неудачи до подъёма сетевая (имеет смысл повторить), а не из-за настроек/пароля. */
@@ -442,8 +442,10 @@ final class Tunnel {
         long lastKeep = System.currentTimeMillis(), lastDpd = 0, lastPing = 0, lastStat = 0;
         long lastWatchdog = System.currentTimeMillis();
         long prevTick = lastWatchdog;
-        long wdRx = rxEsp, wdTx = txPk, wdPendingSince = 0;
-        final long wdMs = 10000;   // сколько ждать ответа на ушедший пакет
+        long wdRx = rxEsp, wdTx = txPk, wdIke = rxIke, wdPendingSince = 0;
+        int totalPingLoss = 0;
+        ev.onPingLoss(0);
+        final long wdMs = 10000;   // дефолтный watchdog по RFC
         final long sleepGapMs = 5000;
         final long graceMs = 15000;   // после сна столько ждём ответа сервера, потом обрыв по deadMs
         long graceUntil = 0;
@@ -462,12 +464,14 @@ final class Tunnel {
                 if (now - prevTick > sleepGapMs) {
                     Log l = log;
                     if (l != null) l.d("resume after " + (now - prevTick) / 1000 + "s (strict=" + strict + ")");
+                    sendQuiet(new byte[]{(byte) 0xFF}, natPort); // принудительный пробой NAT после сна
                     lastRx = Math.min(lastRx, now - dpdMs);   // DPD стартует сразу
                     // окно на ответ даётся один раз; повторные пробуждения его не продлевают
                     if (graceUntil <= now) graceUntil = now + graceMs;
                     dpdReq = null;
                     wdRx = rxEsp;
                     wdTx = txPk;
+                    wdIke = rxIke;
                     wdPendingSince = 0;
                     lastWatchdog = now;
                     lastKeep = 0;
@@ -481,9 +485,10 @@ final class Tunnel {
                 // Отсчёт идёт от первого пакета без ответа. В простое не срабатывает.
                 if (now - lastWatchdog >= 2000) {
                     lastWatchdog = now;
-                    long rxNow = rxEsp, txNow = txPk;
-                    if (rxNow != wdRx) {              // ответ пришёл
+                    long rxNow = rxEsp, txNow = txPk, ikeNow = rxIke;
+                    if (rxNow != wdRx || ikeNow != wdIke) {              // ответ пришёл
                         wdRx = rxNow;
+                        wdIke = ikeNow;
                         wdTx = txNow;
                         wdPendingSince = 0;
                     } else if (txNow != wdTx) {       // ушло новое, ответа нет
@@ -542,7 +547,7 @@ final class Tunnel {
                     lastKeep = now;
                 }
 
-                // ================= PING: необязательный healthcheck через туннель =================
+                // ================= PING: healthcheck (подсчет потерь + авто-реконнект при достижении pingLoss) =================
                 if (pingHost != null && now - lastPing >= pingMs) {
                     if (pinged) {
                         if (pongs != seen || lastRx > lastPing) {
@@ -550,11 +555,17 @@ final class Tunnel {
                             missed = 0;
                         } else {
                             missed++;
+                            totalPingLoss++;
+                            Vpn.Listener l = ev;
+                            if (l != null) l.onPingLoss(totalPingLoss);
                         }
                     }
                     if (missed >= pingLoss) {
                         missed = 0;
-                        lastRx = Math.min(lastRx, now - dpdMs);
+                        Log l = log;
+                        if (l != null) l.d("ping healthcheck: " + pingLoss + " losses reached; restarting tunnel to refresh socket");
+                        lost("ping healthcheck timeout");
+                        return;
                     }
                     byte[] ip = echo(++seq);
                     sendQuiet(esp.wrap(ip, ip.length), natPort);
