@@ -220,12 +220,22 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         return x == null || x.isEmpty() ? c : c + " | " + x;
     }
 
+    private volatile String vpnReason = "";
+
+    /** Статус во время переподключения; «нет сети» отдельно, чтобы не выглядело как попытка подключиться. */
+    private String reconStatus() {
+        String att = vpnAttempts > 99 ? ">99" : String.valueOf(vpnAttempts);
+        boolean noNet = "waiting for network".equals(vpnReason);
+        return (noNet ? "🔴 VPN: no network, waiting" : "🟡 VPN: reconnecting (attempt " + att + ")") + counters();
+    }
+
     /** Пока VPN поднят, раз в 2 с обновляет строку статуса: heal/mig/silence приходят без колбэков. */
     private final Runnable statusTick = new Runnable() {
         @Override
         public void run() {
             if (!vpnUp) return;
-            vpnStatus = "🟢 VPN: connected (" + vpnIface + ")" + counters();
+            // vpnUp остаётся true и во время переподключения: статус должен соответствовать состоянию
+            vpnStatus = vpnAttempts == 0 ? "🟢 VPN: connected (" + vpnIface + ")" + counters() : reconStatus();
             changed();
             main.postDelayed(this, 2000);
         }
@@ -240,9 +250,8 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
             if (newCycle) {
                 vpnReconnectCount = (short) Math.min(vpnReconnectCount + 1, 32767);
             }
-            String attStr = attempt > 99 ? ">99" : String.valueOf(attempt);
-            String cnt = counters();
-            vpnStatus = "🟡 VPN: reconnecting (attempt " + attStr + ")" + cnt;
+            vpnReason = reason == null ? "" : reason;
+            vpnStatus = reconStatus();
             sipUdp.bind(null);               // локальный VPN сейчас не работает: SIP и RTP идут стеком системы
             rtpUdp.bind(null);
             if (sipHost != null && (registered || connecting)) {
@@ -363,12 +372,11 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         main.post(() -> {
             vpnLossCount = (short) Math.min(lostCount, 32767);
             String cnt = counters();
-            if (vpnUp) {
-                vpnStatus = "🟢 VPN: connected (" + vpnIface + ")" + cnt;
+            if (vpnAttempts > 0) {
+                vpnStatus = reconStatus();
                 changed();
-            } else if (vpnAttempts > 0) {
-                String attStr = vpnAttempts > 99 ? ">99" : String.valueOf(vpnAttempts);
-                vpnStatus = "🟡 VPN: reconnecting (attempt " + attStr + ")" + cnt;
+            } else if (vpnUp) {
+                vpnStatus = "🟢 VPN: connected (" + vpnIface + ")" + cnt;
                 changed();
             }
         });
