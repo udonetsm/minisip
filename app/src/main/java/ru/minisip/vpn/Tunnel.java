@@ -560,12 +560,11 @@ final class Tunnel {
                             if (l != null) l.onPingLoss(totalPingLoss);
                         }
                     }
-                    if (missed >= pingLoss) {
+                    if (missed >= pingLoss && migLatch == null) {
                         missed = 0;
                         Log l = log;
-                        if (l != null) l.d("ping healthcheck: " + pingLoss + " losses reached; restarting tunnel to refresh socket");
-                        lost("ping healthcheck timeout");
-                        return;
+                        if (l != null) l.d("ping healthcheck: " + pingLoss + " losses reached; triggering standard DPD reconnect");
+                        lastRx = Math.min(lastRx, now - dpdMs);
                     }
                     byte[] ip = echo(++seq);
                     sendQuiet(esp.wrap(ip, ip.length), natPort);
