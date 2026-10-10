@@ -23,8 +23,9 @@ import java.util.concurrent.TimeUnit;
  *  4. Чужие VPN (в том числе в другом профиле) на нас не влияют: Android держит VPN отдельно на
  *     каждого пользователя/профиль, а наши сети ищем только среди NOT_VPN. Вытеснение — только
  *     onRevoke() текущего экземпляра TunService.
- *  5. Два режима (setStrict): АТС подключена — держим PARTIAL_WAKE_LOCK, пока VPN запущен, и
- *     Tunnel рвёт связь жёстким watchdog'ом; АТС нет — обычный VPN без wake lock, обрыв по DPD.
+ *  5. PARTIAL_WAKE_LOCK держим всегда, пока VPN запущен (нужен постоянному NAT-keepalive).
+ *     Два режима (setStrict): АТС подключена — Tunnel рвёт связь жёстким watchdog'ом;
+ *     АТС нет — мягкий watchdog (MOBIKE-refresh, затем реконнект).
  * Все вызовы слушателя идут под замком VpnImpl.
  */
 final class VpnImpl implements Vpn {
@@ -55,6 +56,7 @@ final class VpnImpl implements Vpn {
     private PowerManager.WakeLock wl;
     private int gen;                       // меняется при connect/disconnect/revoke/рестарте: отменяет циклы
     private Thread recovery;               // поток подъёма/переподключения; null — не идёт
+    private int reconnects;                // реконнектов с последнего connect(): +1 на каждый обрыв/смену сети
 
     VpnImpl(Context ctx) {
         this.ctx = ctx.getApplicationContext();
@@ -82,23 +84,28 @@ final class VpnImpl implements Vpn {
     }
 
     /**
-     * Режим работы. true — АТС подключена: пока VPN запущен, держим wake lock, а Tunnel жёстко
-     * следит за ответами. false — обычный VPN: без wake lock, обрыв определяет DPD (deadMs).
+     * Режим работы. true — АТС подключена: Tunnel жёстко следит за ответами (watchdog рвёт связь).
+     * false — обычный VPN: watchdog мягкий (MOBIKE-refresh, потом реконнект). Wake lock в обоих
+     * режимах держится, пока VPN запущен.
      * Можно звать в любой момент и сколько угодно раз.
      */
     @Override
     public synchronized void setStrict(boolean on) {
         if (strict == on) return;
         strict = on;
-        Log.i(TAG, "mode: " + (on ? "PBX (wake lock, strict watchdog)" : "plain VPN (soft watchdog)"));
+        Log.i(TAG, "mode: " + (on ? "PBX (strict watchdog)" : "plain VPN (soft watchdog)") + ", wake lock always");
         Tunnel t = tunnel;
         if (t != null) t.strict = on;
         updateWake();
     }
 
-    /** Wake lock нужен, пока VPN запущен и подключена АТС. Под замком. */
+    /**
+     * Partial wake lock держим ВСЕГДА, пока VPN запущен (туннель поднят или идёт переподключение),
+     * независимо от режима strict: иначе при сне CPU замолкает поток vpn-keep, NAT-запись
+     * умирает и сервер шлёт ESP на старый порт. Под замком.
+     */
     private void updateWake() {
-        if (running && strict) {
+        if (running) {
             if (wl == null) {
                 wl = ctx.getSystemService(PowerManager.class)
                         .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "minisip:vpn");
@@ -133,6 +140,7 @@ final class VpnImpl implements Vpn {
         this.healthcheckIp = healthcheckIp;
         running = true;
         want = true;
+        reconnects = 0;
         updateWake();
         ctx.startService(new Intent(ctx, TunService.class));
     }
@@ -221,7 +229,9 @@ final class VpnImpl implements Vpn {
         Tunnel t = tunnel;
         tunnel = null;
         if (t != null) t.stop(reason);
-        lis.onReconnecting(reason, 1);
+        reconnects++;
+        lis.onPingLoss(0);                            // новый реконнект: Loss с нуля
+        lis.onReconnecting(reason, reconnects);
         startRecovery(SETTLE_MS, false);
     }
 
@@ -308,7 +318,7 @@ final class VpnImpl implements Vpn {
                         if (g != gen) return;
                         if (!told) {
                             told = true;
-                            lis.onReconnecting("waiting for network", attempts);
+                            lis.onReconnecting("waiting for network", Math.max(1, reconnects));
                         }
                     }
                     Thread.sleep(500);
@@ -317,7 +327,7 @@ final class VpnImpl implements Vpn {
                 Tunnel t;
                 synchronized (this) {
                     if (g != gen) return;
-                    if (attempts > 1) lis.onReconnecting("reconnecting", attempts);
+                    if (attempts > 1) lis.onReconnecting("reconnecting", Math.max(1, reconnects));
                     t = launch(gd);
                 }
                 boolean finished = gd.done.await(ATTEMPT_MS, TimeUnit.MILLISECONDS);
@@ -391,7 +401,9 @@ final class VpnImpl implements Vpn {
             synchronized (VpnImpl.this) {
                 if (tunnel != owner) return;
                 tunnel = null;
-                lis.onReconnecting(reason, 1);
+                reconnects++;
+                lis.onPingLoss(0);                    // обрыв поднятого туннеля: Loss с нуля, Recon +1
+                lis.onReconnecting(reason, reconnects);
                 startRecovery(SETTLE_MS, false);
             }
         }
