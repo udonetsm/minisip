@@ -40,7 +40,7 @@ final class VpnImpl implements Vpn {
     /** Паузы после неудачной попытки; по кругу. */
     private static final long[] BACKOFF_MS = {5000, 5000, 10000, 10000};
     /** Сколько ждём одну попытку целиком (рукопожатие). */
-    private static final long ATTEMPT_MS = 8_000;
+    private static final long ATTEMPT_MS = 20_000;
     /** Период необязательного ping через туннель (если задан healthcheckIp). */
     private static final int PING_MS = 5_000;
 
@@ -185,6 +185,12 @@ final class VpnImpl implements Vpn {
         Tunnel t = tunnel;
         if (t != null) t.setOnline(on);
         if (!on) {
+            if (t != null && t.isUp() && t.mobike()) {
+                // MOBIKE: SA и tun переживают пропажу сети; по возвращении сети — migrate. Если сервер
+                // за это время забыл SA, migrate не подтвердится и будет обычный реконнект.
+                Log.i(TAG, "network lost: MOBIKE tunnel kept, waiting for the network");
+                return;
+            }
             Log.i(TAG, "network lost: restarting");
             restart("network lost");
             return;
