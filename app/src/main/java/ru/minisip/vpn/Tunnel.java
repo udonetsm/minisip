@@ -108,7 +108,10 @@ final class Tunnel {
     private volatile long lastEspRx;
     /** Сколько раз подряд путь признан мёртвым без единого ESP в ответ. Сбрасывается от ESP. */
     private volatile int healTries;
-    private volatile long healSince, lastHealAct;
+    private volatile long healSince, lastHealAct, lastProbe;
+    private volatile String[] probeArgs;                       // identity, psk, password, ca, host: для пробного INIT
+    private final java.util.concurrent.atomic.AtomicBoolean probing = new java.util.concurrent.atomic.AtomicBoolean();
+    static final long PROBE_GAP_MS = 10_000;
     /** Сколько ждём возврата ESP после первого heal, прежде чем пересоздавать туннель. */
     static final long HEAL_GIVE_UP_MS = 120_000;
     static final long HEAL_MIN_GAP_MS = 5_000;
@@ -246,6 +249,7 @@ final class Tunnel {
                 fail("cannot take the transport socket out of the VPN", false);
                 return;
             }
+            probeArgs = new String[]{identity, psk, password, ca, host};
             ike = new Ike(identity, psk, password, ca, host);
             String bad = ike.check();
             if (bad != null) {
@@ -734,6 +738,42 @@ final class Tunnel {
      * Повторно без единого ESP — обрыв, дальше решает владелец через onReconnecting.
      * @return true, если туннель закрыт и timers() должен завершиться.
      */
+    /**
+     * Лечение не помогло (ESP не вернулся). Отвечает ли сервер на свежий IKE_SA_INIT с нового сокета?
+     * Да: сеть жива, значит NAT-маппинг или SA на сервере мертвы (роутер переподключился, смена IP),
+     * и ждать остаток окна бессмысленно: пересоздаём туннель сразу. Нет: путь ещё лежит, ждём дальше.
+     */
+    private void probePath(String why) {
+        long now = System.currentTimeMillis();
+        String[] a = probeArgs;
+        if (a == null || now - lastProbe < PROBE_GAP_MS || !probing.compareAndSet(false, true)) return;
+        lastProbe = now;
+        daemon(() -> {
+            DatagramSocket ps = null;
+            try {
+                Ike k = new Ike(a[0], a[1], a[2], a[3], a[4]);
+                byte[] req = k.initRequest(srv.getAddress(), ikePort);
+                ps = new DatagramSocket();
+                if (!tun.protect(ps)) return;
+                ps.setSoTimeout(3000);
+                ps.send(new DatagramPacket(req, req.length, srv, ikePort));
+                byte[] buf = new byte[2048];
+                DatagramPacket rp = new DatagramPacket(buf, buf.length);
+                ps.receive(rp);
+                if (rp.getLength() >= 28 && srv.equals(rp.getAddress()) && healTries > 0 && !closed.get()) {
+                    Log l = log;
+                    if (l != null) l.d(why + ": server answers a fresh IKE_SA_INIT, old path/SA is dead: reconnect");
+                    lost(why + ": server reachable, old path dead");
+                }
+            } catch (IOException | RuntimeException ignored) {
+                // нет ответа: путь ещё недоступен, ждём возврата ESP или конца окна
+            } finally {
+                if (ps != null) ps.close();
+                probing.set(false);
+            }
+        }, "vpn-probe");
+    }
+
     private boolean heal(String why) {
         long now = System.currentTimeMillis();
         int n = ++healTries;
@@ -750,6 +790,7 @@ final class Tunnel {
         }
         if (n > 1 && now - lastHealAct < HEAL_MIN_GAP_MS) return false;   // не чаще, чем раз в HEAL_MIN_GAP_MS
         lastHealAct = now;
+        if (n > 1) probePath(why);
         if (ike != null && ike.mobike) {
             if (migLatch != null) return false;                           // migrate уже идёт
             if (l != null) l.d(why + ": trying MOBIKE refresh (heal #" + n + ")");
