@@ -49,7 +49,7 @@ final class Tunnel {
     // настраиваемое для проверок
     int ikePort = 500, natPort = 4500;
     int rto = 3000, tries = 4;
-    int keepMs = 20000, dpdMs = 10000, deadMs = 30000;
+    int keepMs = 10000, dpdMs = 10000, deadMs = 30000;   // keepMs короче таймаута UDP-NAT оператора
     /** Необязательный ping через туннель: адрес (null — выключено). Промахи только запускают DPD. */
     String pingHost;
     int pingMs = 2000, pingLoss = 3;
@@ -77,6 +77,10 @@ final class Tunnel {
     private volatile boolean online = true;
     private volatile boolean kick;
     private volatile long lastRx;
+    /** Время последнего ESP от сервера (IKE сюда не входит): только он доказывает живой ESP-путь. */
+    private volatile long lastEspRx;
+    /** Сколько раз подряд путь признан мёртвым без единого ESP в ответ. Сбрасывается от ESP. */
+    private volatile int healTries;
     private volatile int pongs;
     private volatile byte[] dpdReq;
     private volatile int dpdId = -1;
@@ -229,6 +233,7 @@ final class Tunnel {
             esp = ike.esp;
             sock.setSoTimeout(0);
             lastRx = System.currentTimeMillis();
+            lastEspRx = lastRx;
             rx = daemon(this::rxLoop, "vpn-rx");
             tx = daemon(this::txLoop, "vpn-tun");
             up = true;
@@ -354,6 +359,8 @@ final class Tunnel {
                         byte[] ip = esp.unwrap(buf, n);
                         if (ip != null) {
                             lastRx = System.currentTimeMillis();
+                            lastEspRx = lastRx;
+                            healTries = 0;
                             rxEsp++;
                             if (pong(ip)) {
                                 pongs++;
@@ -442,7 +449,7 @@ final class Tunnel {
         long lastKeep = System.currentTimeMillis(), lastDpd = 0, lastPing = 0, lastStat = 0;
         long lastWatchdog = System.currentTimeMillis();
         long prevTick = lastWatchdog;
-        long wdRx = rxEsp, wdTx = txPk, wdIke = rxIke, wdPendingSince = 0;
+        long wdRx = rxEsp, wdTx = txPk, wdPendingSince = 0;
         int totalPingLoss = 0;
         ev.onPingLoss(0);
         final long wdMs = 10000;   // дефолтный watchdog по RFC
@@ -471,13 +478,12 @@ final class Tunnel {
                     dpdReq = null;
                     wdRx = rxEsp;
                     wdTx = txPk;
-                    wdIke = rxIke;
                     wdPendingSince = 0;
                     lastWatchdog = now;
                     lastKeep = 0;
                     lastPing = now;
-                    pinged = false;
-                    missed = 0;
+                    // missed и pinged НЕ сбрасываем: при Doze с периодическими пробуждениями
+                    // счётчик потерь ping иначе никогда не дорастёт до pingLoss
                 }
                 prevTick = now;
 
@@ -485,10 +491,9 @@ final class Tunnel {
                 // Отсчёт идёт от первого пакета без ответа. В простое не срабатывает.
                 if (now - lastWatchdog >= 2000) {
                     lastWatchdog = now;
-                    long rxNow = rxEsp, txNow = txPk, ikeNow = rxIke;
-                    if (rxNow != wdRx || ikeNow != wdIke) {              // ответ пришёл
+                    long rxNow = rxEsp, txNow = txPk;
+                    if (rxNow != wdRx) {              // ответный ESP пришёл (IKE живость ESP-пути не доказывает)
                         wdRx = rxNow;
-                        wdIke = ikeNow;
                         wdTx = txNow;
                         wdPendingSince = 0;
                     } else if (txNow != wdTx) {       // ушло новое, ответа нет
@@ -505,10 +510,10 @@ final class Tunnel {
                             lost("no ESP replies while sending");
                             return;
                         }
-                        // обычный VPN: не рвём, а просим DPD проверить путь; решит deadMs
-                        if (l != null) l.d("WATCHDOG(soft): no ESP back for " + silent + "s; start DPD");
+                        // обычный VPN: сначала лечим NAT (MOBIKE-refresh), повторно без ESP — реконнект
+                        if (l != null) l.d("WATCHDOG(soft): no ESP back for " + silent + "s");
                         wdPendingSince = 0;
-                        lastRx = Math.min(lastRx, now - dpdMs);
+                        if (heal("no ESP replies while sending")) return;
                     }
                 }
 
@@ -519,7 +524,8 @@ final class Tunnel {
                     if (l != null) {
                         l.d("stats: txEsp=" + txPk + " rxEsp=" + rxEsp + " rxIke=" + rxIke
                                 + " sendFail=" + txFail + (txFail > 0 ? " lastErr=" + lastSendErr : "")
-                                + " idleRx=" + (now - lastRx) / 1000 + "s online=" + online
+                                + " idleRx=" + (now - lastRx) / 1000 + "s idleEsp=" + (now - lastEspRx) / 1000
+                                + "s online=" + online
                                 + " strict=" + strict
                                 + " dpdPending=" + (dpdReq != null) + " " + esp.drops());
                     }
@@ -550,7 +556,7 @@ final class Tunnel {
                 // ================= PING: healthcheck (подсчет потерь + авто-реконнект при достижении pingLoss) =================
                 if (pingHost != null && now - lastPing >= pingMs) {
                     if (pinged) {
-                        if (pongs != seen || lastRx > lastPing) {
+                        if (pongs != seen || lastEspRx > lastPing) {   // только ESP, не IKE
                             seen = pongs;
                             missed = 0;
                         } else {
@@ -563,8 +569,8 @@ final class Tunnel {
                     if (missed >= pingLoss && migLatch == null) {
                         missed = 0;
                         Log l = log;
-                        if (l != null) l.d("ping healthcheck: " + pingLoss + " losses reached; triggering standard DPD reconnect");
-                        lastRx = Math.min(lastRx, now - dpdMs);
+                        if (l != null) l.d("ping healthcheck: " + pingLoss + " losses reached");
+                        if (heal("ESP path dead (ping loss)")) return;
                     }
                     byte[] ip = echo(++seq);
                     sendQuiet(esp.wrap(ip, ip.length), natPort);
@@ -599,6 +605,29 @@ final class Tunnel {
         }
     }
 
+    /**
+     * ESP-путь признан мёртвым (DPD по IKE при этом может отвечать: NAT-маппинг сменился, сервер
+     * шлёт ESP на старый порт). Первый раз — MOBIKE-refresh: новый сокет + UPDATE_SA_ADDRESSES.
+     * Попытка делается и без согласованного MOBIKE. Повторно без единого ESP — обрыв,
+     * дальше решает владелец через onReconnecting.
+     * @return true, если туннель закрыт и timers() должен завершиться.
+     */
+    private boolean heal(String why) {
+        int n = ++healTries;
+        Log l = log;
+        if (n == 1 && ike != null && migLatch == null) {
+            // одна попытка даже если MOBIKE не согласован: вдруг сервер всё равно обновит адрес
+            if (l != null) l.d(why + ": trying MOBIKE refresh (negotiated=" + ike.mobike + ")");
+            migrate(true, ok -> {
+                if (!ok) lost(why + ": MOBIKE refresh failed");
+            });
+            return false;
+        }
+        if (l != null) l.d(why + ": reconnect");
+        lost(why);
+        return true;
+    }
+
     // ================= MOBIKE =================
 
     /**
@@ -606,17 +635,22 @@ final class Tunnel {
      * с нового пути. Асинхронно; done.done(true) — сервер подтвердил, false — полное переподключение.
      */
     void migrate(Done done) {
+        migrate(false, done);
+    }
+
+    /** force = true: попытка даже если MOBIKE не был согласован при подъёме (последний шанс до реконнекта). */
+    void migrate(boolean force, Done done) {
         Thread t = new Thread(() -> {
-            boolean ok = doMigrate();
+            boolean ok = doMigrate(force);
             if (!closed.get()) done.done(ok);
         }, "vpn-mobike");
         t.setDaemon(true);
         t.start();
     }
 
-    private boolean doMigrate() {
+    private boolean doMigrate(boolean force) {
         synchronized (migLock) {
-            if (closed.get() || !up || ike == null || !ike.mobike) return false;
+            if (closed.get() || !up || ike == null || (!force && !ike.mobike)) return false;
             CountDownLatch l = new CountDownLatch(1);
             try {
                 DatagramSocket ns = new DatagramSocket();
