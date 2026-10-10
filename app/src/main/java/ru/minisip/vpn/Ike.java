@@ -111,6 +111,18 @@ final class Ike {
         return nextId++;
     }
 
+    private int ackFloor = 1;                   // меньше этого номера все наши запросы сервер подтвердил
+
+    /** Пришёл проверенный ответ на наш запрос с номером id. */
+    synchronized void acked(int id) {
+        if (id >= ackFloor) ackFloor = id + 1;
+    }
+
+    /** Первый номер, которого сервер мог ещё не получить. */
+    synchronized int ackFloor() {
+        return ackFloor;
+    }
+
     // =====================================================================
     // Сборка и разбор payload'ов
     // =====================================================================
@@ -474,6 +486,13 @@ final class Ike {
         for (Pl p : r.pl) {
             if (p.type == NOTIFY && p.body.length >= 4 && u16(p.body, 2) < 16384) {
                 return eap && stage > 0 ? "wrong login or password" : notifyText(u16(p.body, 2));
+            }
+        }
+        // MOBIKE_SUPPORTED может прийти в любом из ответов IKE_AUTH (при EAP не обязательно в последнем).
+        // Ответ уже расшифрован и проверен в open(), так что нотификации можно верить.
+        for (Pl p : r.pl) {
+            if (p.type == NOTIFY && p.body.length >= 4 && u16(p.body, 2) == N_MOBIKE_SUPPORTED) {
+                mobike = true;
             }
         }
         if (!eap) return complete(r, psk);

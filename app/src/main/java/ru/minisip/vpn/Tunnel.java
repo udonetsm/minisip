@@ -54,7 +54,8 @@ final class Tunnel {
     int keepMs = 10000, dpdMs = 10000, deadMs = 30000;   // keepMs короче таймаута UDP-NAT оператора
     /**
      * Необязательный ping через туннель: адрес (null — выключено). pingLoss промахов подряд — сначала
-     * попытка MOBIKE, не подтвердилась (или ESP так и не пошёл) — реконнект через onReconnecting.
+     * лечение (MOBIKE-refresh, а без MOBIKE — keepalive и DPD на том же сокете), не помогло — реконнект
+     * через onReconnecting.
      */
     String pingHost;
     int pingMs = 2000, pingLoss = 5;   // подряд без ответа -> MOBIKE, не вышло -> реконнект
@@ -74,6 +75,8 @@ final class Tunnel {
 
     private volatile long txPk, rxEsp, rxIke, txFail;
     private volatile String lastSendErr = "";
+    private volatile long rxBad;
+    private volatile String lastRxErr = "";
 
     private final Tun tun;
     private final Vpn.Listener ev;
@@ -88,6 +91,8 @@ final class Tunnel {
     private volatile int healTries;
     private volatile int pongs;
     private volatile byte[] dpdReq;
+    /** Повторить неподтверждённый DPD сразу, с тем же номером (сбрасывать его нельзя: образуется дыра в ID). */
+    private volatile boolean dpdNow;
     private volatile int dpdId = -1;
     private volatile int migId = -1;
     private volatile CountDownLatch migLatch;
@@ -246,11 +251,13 @@ final class Tunnel {
                     fail("server does not answer IKE_AUTH", true);
                     return;
                 }
+                int sentId = ike.curId;
                 String err = ike.onAuth(r);
                 if (err != null) {
                     fail(err, false);
                     return;
                 }
+                ike.acked(sentId);
                 req = ike.next;
             }
             if (ike.esp == null) {
@@ -413,12 +420,12 @@ final class Tunnel {
                             tun.write(ip, 0, ip.length);
                         }
                     }
-                } catch (IOException e) {
-                    lost("rxLoop: tun.write() failed: " + e.getMessage());
-                    return;
-                } catch (RuntimeException e) {
-                    lost("rxLoop: RuntimeException: " + e.getMessage());
-                    return;
+                } catch (IOException | RuntimeException e) {
+                    // Один плохой пакет (чужой формат, больше MTU, сбой tun.write) — не повод рвать туннель:
+                    // если tun действительно умер, это увидит txLoop (read вернёт ошибку).
+                    if (closed.get()) return;
+                    rxBad++;
+                    lastRxErr = String.valueOf(e);
                 }
             }
         } catch (InterruptedException e) {
@@ -460,6 +467,7 @@ final class Tunnel {
         if (l != null) l.d("IKE from server: exch=" + x.exch + " resp=" + x.response
                 + " id=" + x.id + " payloads=" + x.pl.size());
         if (x.response) {
+            ike.acked(x.id);
             if (x.id == dpdId) dpdReq = null;
             CountDownLatch latch = migLatch;
             if (x.id == migId && latch != null) latch.countDown();
@@ -493,8 +501,11 @@ final class Tunnel {
         long lastDpd = 0, lastPing = 0, lastStat = 0;
         long lastWatchdog = System.currentTimeMillis();
         long prevTick = lastWatchdog;
-        long wdRx = rxEsp, wdTx = txPk, wdPendingSince = 0;
+        long wdRx = rxEsp, wdTx = txPk, wdIke = rxIke, wdPendingSince = 0;
         int totalPingLoss = 0;
+        long hangRx = rxEsp, hangTx = txPk, hangSince = 0;   // ping выключен: страховка от «IKE жив, ESP нет»
+        final long hangMs = 60000;
+        final int hangPkts = 5;
         ev.onPingLoss(0);
         final long wdMs = 10000;   // дефолтный watchdog по RFC
         final long sleepGapMs = 5000;
@@ -519,10 +530,14 @@ final class Tunnel {
                     lastRx = Math.min(lastRx, now - dpdMs);   // DPD стартует сразу
                     // окно на ответ даётся один раз; повторные пробуждения его не продлевают
                     if (graceUntil <= now) graceUntil = now + graceMs;
-                    dpdReq = null;
+                    dpdNow = true;
                     wdRx = rxEsp;
                     wdTx = txPk;
+                    wdIke = rxIke;
                     wdPendingSince = 0;
+                    hangSince = 0;
+                    hangRx = rxEsp;
+                    hangTx = txPk;
                     lastWatchdog = now;
                     wakeKeep();                               // keepalive вне очереди после сна
                     lastPing = now;
@@ -535,8 +550,15 @@ final class Tunnel {
                 // Отсчёт идёт от первого пакета без ответа. В простое не срабатывает.
                 if (now - lastWatchdog >= 2000) {
                     lastWatchdog = now;
-                    long rxNow = rxEsp, txNow = txPk;
-                    if (rxNow != wdRx) {              // ответный ESP пришёл (IKE живость ESP-пути не доказывает)
+                    long rxNow = rxEsp, txNow = txPk, ikeNow = rxIke;
+                    // Ping включён: живость ESP-пути доказывают только ESP (ответы на ping идут каждые pingMs),
+                    // IKE-ответы её маскируют. Ping выключен: ESP в ответ приходит не всегда (приложение
+                    // шлёт в пустоту, ретраи TCP/SIP), поэтому живым считаем и ответ IKE (DPD): иначе
+                    // watchdog рвёт рабочий туннель каждые ~10 с. Обрыв тогда определяет DPD по deadMs.
+                    boolean espOnly = pingHost != null;
+                    boolean answered = rxNow != wdRx || (!espOnly && ikeNow != wdIke);
+                    wdIke = ikeNow;
+                    if (answered) {                   // ответ пришёл
                         wdRx = rxNow;
                         wdTx = txNow;
                         wdPendingSince = 0;
@@ -545,6 +567,28 @@ final class Tunnel {
                         if (wdPendingSince == 0) wdPendingSince = now;
                     }
                     if (!up || !online) wdPendingSince = 0;
+                    // Ping выключен, и ESP от сервера нет hangMs, хотя мы отправили hangPkts+ пакетов, а IKE
+                    // отвечает (DPD это не ловит). Сначала лечим путь (MOBIKE-refresh), повтор — реконнект.
+                    if (!espOnly && up && online) {
+                        if (rxNow != hangRx) {
+                            hangRx = rxNow;
+                            hangTx = txNow;
+                            hangSince = 0;
+                        } else if (hangSince == 0 && txNow - hangTx >= hangPkts) {
+                            hangSince = now;
+                        }
+                        if (hangSince != 0 && now - hangSince >= hangMs) {
+                            hangSince = 0;
+                            hangTx = txNow;
+                            Log hl = log;
+                            if (hl != null) hl.d("no ESP for " + hangMs / 1000 + "s while sending, IKE alive");
+                            if (heal("no ESP replies while IKE answers")) return;
+                        }
+                    } else {
+                        hangSince = 0;
+                        hangRx = rxNow;
+                        hangTx = txNow;
+                    }
                     if (wdPendingSince != 0 && now - wdPendingSince >= wdMs) {
                         Log l = log;
                         long silent = (now - wdPendingSince) / 1000;
@@ -554,10 +598,16 @@ final class Tunnel {
                             lost("no ESP replies while sending");
                             return;
                         }
-                        // обычный VPN: сначала лечим NAT (MOBIKE-refresh), повторно без ESP — реконнект
-                        if (l != null) l.d("WATCHDOG(soft): no ESP back for " + silent + "s");
                         wdPendingSince = 0;
-                        if (heal("no ESP replies while sending")) return;
+                        if (espOnly) {
+                            // обычный VPN с ping: сначала лечим путь (MOBIKE-refresh), повторно без ESP — реконнект
+                            if (l != null) l.d("WATCHDOG(soft): no ESP back for " + silent + "s");
+                            if (heal("no ESP replies while sending")) return;
+                        } else {
+                            // обычный VPN без ping: не рвём, а просим DPD проверить путь; решит deadMs
+                            if (l != null) l.d("WATCHDOG(soft): silence for " + silent + "s; start DPD");
+                            lastRx = Math.min(lastRx, now - dpdMs);
+                        }
                     }
                 }
 
@@ -572,14 +622,15 @@ final class Tunnel {
                                 + "s online=" + online
                                 + " strict=" + strict
                                 + " keepSent=" + keepSent + " lastKeep=" + (now - lastKeepAt) / 1000 + "s ago"
-                                + " dpdPending=" + (dpdReq != null) + " " + esp.drops());
+                                + " dpdPending=" + (dpdReq != null) + " rxBad=" + rxBad + (rxBad > 0 ? " lastRxErr=" + lastRxErr : "")
+                                + " " + esp.drops());
                     }
                 }
 
                 // ================= СЕТЬ: если её нет — ничего не делаем =================
                 if (!online) {
                     lastRx = now;
-                    dpdReq = null;
+                    dpdNow = true;
                     pinged = false;
                     continue;
                 }
@@ -587,7 +638,7 @@ final class Tunnel {
                 // ================= СЕТЬ ВЕРНУЛАСЬ: сбросить таймеры =================
                 if (kick) {
                     kick = false;
-                    dpdReq = null;
+                    dpdNow = true;
                     lastRx = Math.min(lastRx, now - dpdMs);
                 }
 
@@ -627,13 +678,15 @@ final class Tunnel {
                 }
 
                 if (dpdReq == null && idle >= dpdMs) {
+                    dpdNow = false;
                     dpdId = ike.nextId();
                     dpdReq = Crypto.cat(new byte[4], ike.seal(Ike.INFO, false, dpdId, new ArrayList<>()));
                     lastDpd = 0;
                 }
 
                 byte[] d = dpdReq;
-                if (d != null && now - lastDpd >= Math.max(100, dpdMs / 6)) {
+                if (d != null && (dpdNow || now - lastDpd >= Math.max(100, dpdMs / 6))) {
+                    dpdNow = false;
                     sendQuiet(d, natPort);
                     lastDpd = now;
                 }
@@ -646,21 +699,32 @@ final class Tunnel {
     }
 
     /**
-     * ESP-путь признан мёртвым (DPD по IKE при этом может отвечать: NAT-маппинг сменился, сервер
-     * шлёт ESP на старый порт). Первый раз — MOBIKE-refresh: новый сокет + UPDATE_SA_ADDRESSES.
-     * Попытка делается и без согласованного MOBIKE. Повторно без единого ESP — обрыв,
-     * дальше решает владелец через onReconnecting.
+     * ESP-путь признан мёртвым (DPD по IKE при этом может отвечать: NAT-маппинг сменился).
+     * Первая попытка лечения:
+     *  - MOBIKE согласован: MOBIKE-refresh (новый сокет + UPDATE_SA_ADDRESSES); не подтвердился —
+     *    реконнект;
+     *  - MOBIKE не согласован: сокет НЕ меняем (новый порт сервер для IKE не подхватит, его IKE-сообщения
+     *    уйдут на старый порт и потеряются). Вместо этого тот же сокет: keepalive и DPD вне очереди,
+     *    и ещё одна серия пингов.
+     * Повторно без единого ESP — обрыв, дальше решает владелец через onReconnecting.
      * @return true, если туннель закрыт и timers() должен завершиться.
      */
     private boolean heal(String why) {
         int n = ++healTries;
         Log l = log;
-        if (n == 1 && ike != null && migLatch == null) {
-            // одна попытка даже если MOBIKE не согласован: вдруг сервер всё равно обновит адрес
-            if (l != null) l.d(why + ": trying MOBIKE refresh (negotiated=" + ike.mobike + ")");
-            migrate(true, ok -> {
+        if (n == 1 && ike != null && ike.mobike && migLatch == null) {
+            if (l != null) l.d(why + ": trying MOBIKE refresh");
+            migrate(ok -> {
+                if (l != null) l.d(why + ": MOBIKE refresh result ok=" + ok);
                 if (!ok) lost(why + ": MOBIKE refresh failed");
             });
+            return false;
+        }
+        if (n == 1 && ike != null && !ike.mobike) {
+            if (l != null) l.d(why + ": MOBIKE not negotiated, refreshing NAT on the same socket (keepalive + DPD)");
+            wakeKeep();
+            dpdNow = true;
+            lastRx = Math.min(lastRx, System.currentTimeMillis() - dpdMs);   // DPD стартует сразу
             return false;
         }
         if (l != null) l.d(why + ": reconnect");
@@ -675,22 +739,17 @@ final class Tunnel {
      * с нового пути. Асинхронно; done.done(true) — сервер подтвердил, false — полное переподключение.
      */
     void migrate(Done done) {
-        migrate(false, done);
-    }
-
-    /** force = true: попытка даже если MOBIKE не был согласован при подъёме (последний шанс до реконнекта). */
-    void migrate(boolean force, Done done) {
         Thread t = new Thread(() -> {
-            boolean ok = doMigrate(force);
+            boolean ok = doMigrate();
             if (!closed.get()) done.done(ok);
         }, "vpn-mobike");
         t.setDaemon(true);
         t.start();
     }
 
-    private boolean doMigrate(boolean force) {
+    private boolean doMigrate() {
         synchronized (migLock) {
-            if (closed.get() || !up || ike == null || (!force && !ike.mobike)) return false;
+            if (closed.get() || !up || ike == null || !ike.mobike) return false;
             CountDownLatch l = new CountDownLatch(1);
             try {
                 DatagramSocket ns = new DatagramSocket();
@@ -701,6 +760,13 @@ final class Tunnel {
                 DatagramSocket old = sock;
                 sock = ns;                                    // дальше ESP и keepalive идут новым путём
                 if (old != null) old.close();                 // rxLoop подхватит новый сокет
+                // Неподтверждённый DPD доводим до ответа новым путём: иначе сервер ждёт его номер,
+                // а наш UPDATE_SA_ADDRESSES с большим номером он проигнорирует.
+                for (int i = 0; i < 40 && dpdReq != null && !closed.get(); i++) {
+                    byte[] pend = dpdReq;
+                    if (pend != null && i % 10 == 0) sendQuiet(pend, natPort);
+                    Thread.sleep(50);
+                }
                 migId = ike.nextId();
                 migLatch = l;
                 byte[] req = Crypto.cat(new byte[4],
@@ -786,16 +852,49 @@ final class Tunnel {
         end(reason, true);
     }
 
+    /**
+     * Просим сервер удалить IKE SA, чтобы он не держал её и не слал DPD на закрытый порт.
+     * Шлём, если IKE_AUTH хотя бы начинался (а не только при up). Номер сообщения сервер принимает
+     * только ожидаемый, поэтому шлём подряд все возможные номера (от первого неподтверждённого).
+     * Дважды: с текущего сокета и со свежего, чтобы Delete имел шанс уйти по новой сети.
+     */
+    private void sendDelete() {
+        Ike k = ike;
+        if (k == null || !(up || k.esp != null || k.curId > 0)) return;
+        List<byte[]> msgs = new ArrayList<>();
+        try {
+            List<Ike.Pl> del = Collections.singletonList(new Ike.Pl(Ike.DELETE, new byte[]{1, 0, 0, 0}));
+            int lo = k.ackFloor(), hi = k.nextId();
+            if (hi - lo > 7) lo = hi - 7;
+            for (int id = lo; id <= hi; id++) {
+                msgs.add(Crypto.cat(new byte[4], k.seal(Ike.INFO, false, id, del)));
+            }
+        } catch (RuntimeException e) {
+            return;
+        }
+        for (byte[] m : msgs) sendQuiet(m, natPort);
+        DatagramSocket ns = null;
+        try {
+            ns = new DatagramSocket();
+            if (tun.protect(ns)) {
+                for (byte[] m : msgs) ns.send(new DatagramPacket(m, m.length, srv, natPort));
+            }
+        } catch (IOException | RuntimeException ignored) {
+        } finally {
+            if (ns != null) ns.close();
+        }
+    }
+
     private void end(String reason, boolean retry) {
         if (!closed.compareAndSet(false, true)) return;
         android.util.Log.w(TAG, "Tunnel.end reason=" + reason + " retry=" + retry
                 + " thread=" + Thread.currentThread().getName(), new Throwable());
-        if (up) {
-            try {
-                List<Ike.Pl> del = Collections.singletonList(new Ike.Pl(Ike.DELETE, new byte[]{1, 0, 0, 0}));
-                send(ike.seal(Ike.INFO, false, ike.nextId(), del), natPort, true);
-            } catch (IOException | RuntimeException ignored) {
-            }
+        // Не из вызывающего потока: stop() зовут и с главного, где сокетный I/O запрещён (StrictMode),
+        // и под замком VpnImpl. Ждём недолго, чтобы Delete успел уйти до закрытия сокета.
+        try {
+            daemon(this::sendDelete, "vpn-delete").join(400);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
         up = false;
         DatagramSocket s = sock;
