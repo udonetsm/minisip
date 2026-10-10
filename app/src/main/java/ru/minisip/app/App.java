@@ -201,9 +201,10 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
             vpnConnecting = false;
             vpnUp = true;
             vpnAttempts = 0;                 // сброс счетчика попыток в 0 при успешном реконнекте
-            String lossStr = " | Loss: " + (vpnLossCount > 99 ? "99+" : vpnLossCount);
-            String reconStr = " | Recon: " + (vpnReconnectCount > 99 ? "99+" : vpnReconnectCount);
-            vpnStatus = "🟢 VPN: connected (" + iface + ")" + lossStr + reconStr;
+            String cnt = counters();
+            vpnStatus = "🟢 VPN: connected (" + iface + ")" + cnt;
+            main.removeCallbacks(statusTick);
+            main.postDelayed(statusTick, 2000);
             sipUdp.bind(iface);              // SIP и RTP идут строго через туннель
             rtpUdp.bind(iface);
             reregister();
@@ -211,18 +212,37 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         });
     }
 
+    /** Loss | Recon и счётчики событий без реконнекта (Mig | Heal | Silence | Kept). */
+    private String counters() {
+        String c = " | Loss: " + (vpnLossCount > 99 ? "99+" : vpnLossCount)
+                + " | Recon: " + (vpnReconnectCount > 99 ? "99+" : vpnReconnectCount);
+        String x = vpn.extraStats();
+        return x == null || x.isEmpty() ? c : c + " | " + x;
+    }
+
+    /** Пока VPN поднят, раз в 2 с обновляет строку статуса: heal/mig/silence приходят без колбэков. */
+    private final Runnable statusTick = new Runnable() {
+        @Override
+        public void run() {
+            if (!vpnUp) return;
+            vpnStatus = "🟢 VPN: connected (" + vpnIface + ")" + counters();
+            changed();
+            main.postDelayed(this, 2000);
+        }
+    };
+
     @Override
     public void onReconnecting(String reason, int attempt) {
         main.post(() -> {
             if (!vpnUp) return;
+            boolean newCycle = vpnAttempts == 0;          // новый цикл переподключения, а не очередная попытка
             vpnAttempts = attempt;
-            if (attempt == 1) {
+            if (newCycle) {
                 vpnReconnectCount = (short) Math.min(vpnReconnectCount + 1, 32767);
             }
             String attStr = attempt > 99 ? ">99" : String.valueOf(attempt);
-            String lossStr = " | Loss: " + (vpnLossCount > 99 ? "99+" : vpnLossCount);
-            String reconStr = " | Recon: " + (vpnReconnectCount > 99 ? "99+" : vpnReconnectCount);
-            vpnStatus = "🟡 VPN: reconnecting (attempt " + attStr + ")" + lossStr + reconStr;
+            String cnt = counters();
+            vpnStatus = "🟡 VPN: reconnecting (attempt " + attStr + ")" + cnt;
             sipUdp.bind(null);               // локальный VPN сейчас не работает: SIP и RTP идут стеком системы
             rtpUdp.bind(null);
             if (sipHost != null && (registered || connecting)) {
@@ -342,14 +362,13 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     public void onPingLoss(int lostCount) {
         main.post(() -> {
             vpnLossCount = (short) Math.min(lostCount, 32767);
-            String lossStr = " | Loss: " + (vpnLossCount > 99 ? "99+" : vpnLossCount);
-            String reconStr = " | Recon: " + (vpnReconnectCount > 99 ? "99+" : vpnReconnectCount);
+            String cnt = counters();
             if (vpnUp) {
-                vpnStatus = "🟢 VPN: connected (" + vpnIface + ")" + lossStr + reconStr;
+                vpnStatus = "🟢 VPN: connected (" + vpnIface + ")" + cnt;
                 changed();
             } else if (vpnAttempts > 0) {
                 String attStr = vpnAttempts > 99 ? ">99" : String.valueOf(vpnAttempts);
-                vpnStatus = "🟡 VPN: reconnecting (attempt " + attStr + ")" + lossStr + reconStr;
+                vpnStatus = "🟡 VPN: reconnecting (attempt " + attStr + ")" + cnt;
                 changed();
             }
         });

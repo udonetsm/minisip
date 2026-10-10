@@ -73,6 +73,25 @@ final class Tunnel {
 
     volatile Log log;
 
+    /** События без пересоздания туннеля: владелец ведёт по ним отдельные счётчики (не Recon и не Loss). */
+    interface PathEvents {
+        void heal(String why);       // лечение пути: MOBIKE-refresh или NAT-refresh
+
+        void silence(String why);    // сработал детектор тишины (watchdog, deadMs, нет ESP при живом IKE)
+    }
+
+    volatile PathEvents pathEvents;
+
+    private void pathHeal(String why) {
+        PathEvents p = pathEvents;
+        if (p != null) p.heal(why);
+    }
+
+    private void pathSilence(String why) {
+        PathEvents p = pathEvents;
+        if (p != null) p.silence(why);
+    }
+
     private volatile long txPk, rxEsp, rxIke, txFail;
     private volatile String lastSendErr = "";
     private volatile long rxBad;
@@ -89,6 +108,10 @@ final class Tunnel {
     private volatile long lastEspRx;
     /** Сколько раз подряд путь признан мёртвым без единого ESP в ответ. Сбрасывается от ESP. */
     private volatile int healTries;
+    private volatile long healSince, lastHealAct;
+    /** Сколько ждём возврата ESP после первого heal, прежде чем пересоздавать туннель. */
+    static final long HEAL_GIVE_UP_MS = 120_000;
+    static final long HEAL_MIN_GAP_MS = 5_000;
     private volatile int pongs;
     private volatile byte[] dpdReq;
     /** Повторить неподтверждённый DPD сразу, с тем же номером (сбрасывать его нельзя: образуется дыра в ID). */
@@ -582,6 +605,7 @@ final class Tunnel {
                             hangTx = txNow;
                             Log hl = log;
                             if (hl != null) hl.d("no ESP for " + hangMs / 1000 + "s while sending, IKE alive");
+                            pathSilence("no ESP while IKE alive");
                             if (heal("no ESP replies while IKE answers")) return;
                         }
                     } else {
@@ -599,6 +623,7 @@ final class Tunnel {
                             // сообщает «отключено от постоянной VPN», а АТС теряет регистрацию.
                             if (l != null) l.d("WATCHDOG(" + (strict ? "strict" : "soft") + "): no ESP back for "
                                     + silent + "s after send; " + esp.drops());
+                            pathSilence("watchdog");
                             if (heal("no ESP replies while sending")) return;
                         } else {
                             // обычный VPN без ping: не рвём, а просим DPD проверить путь; решит deadMs
@@ -671,6 +696,7 @@ final class Tunnel {
 
                 if (idle >= deadMs && now >= graceUntil) {
                     // Сначала один раз лечим путь (после сна NAT-маппинг мёртв), потом уже реконнект.
+                    pathSilence("deadMs");
                     if (heal("server does not respond")) return;
                     lastRx = now - dpdMs;
                     idle = dpdMs;
@@ -709,26 +735,40 @@ final class Tunnel {
      * @return true, если туннель закрыт и timers() должен завершиться.
      */
     private boolean heal(String why) {
+        long now = System.currentTimeMillis();
         int n = ++healTries;
+        if (n == 1) healSince = now;
         Log l = log;
-        if (n == 1 && ike != null && ike.mobike && migLatch == null) {
-            if (l != null) l.d(why + ": trying MOBIKE refresh");
+        // Реконнект закрывает tun («отключено от постоянной VPN», АТС теряет регистрацию), а пропажи пути
+        // (смена вышки, провал радиоканала) обычно проходят сами. Поэтому лечим повторно в пределах окна
+        // HEAL_GIVE_UP_MS и рвём туннель, только если за всё окно не пришло ни одного ESP-пакета
+        // (healTries обнуляется приёмом ESP). Раньше второй вызов heal рвал туннель через секунду.
+        if (n > 1 && now - healSince >= HEAL_GIVE_UP_MS) {
+            if (l != null) l.d(why + ": no ESP for " + (now - healSince) / 1000 + "s since first heal: reconnect");
+            lost(why);
+            return true;
+        }
+        if (n > 1 && now - lastHealAct < HEAL_MIN_GAP_MS) return false;   // не чаще, чем раз в HEAL_MIN_GAP_MS
+        lastHealAct = now;
+        if (ike != null && ike.mobike) {
+            if (migLatch != null) return false;                           // migrate уже идёт
+            if (l != null) l.d(why + ": trying MOBIKE refresh (heal #" + n + ")");
+            pathHeal(why);
             migrate(ok -> {
                 if (l != null) l.d(why + ": MOBIKE refresh result ok=" + ok);
-                if (!ok) lost(why + ": MOBIKE refresh failed");
+                // неудача посреди окна — не повод рвать: путь может вернуться, следующий heal повторит
+                if (!ok && System.currentTimeMillis() - healSince >= HEAL_GIVE_UP_MS) {
+                    lost(why + ": MOBIKE refresh failed");
+                }
             });
             return false;
         }
-        if (n == 1 && ike != null && !ike.mobike) {
-            if (l != null) l.d(why + ": MOBIKE not negotiated, refreshing NAT on the same socket (keepalive + DPD)");
-            wakeKeep();
-            dpdNow = true;
-            lastRx = Math.min(lastRx, System.currentTimeMillis() - dpdMs);   // DPD стартует сразу
-            return false;
-        }
-        if (l != null) l.d(why + ": reconnect");
-        lost(why);
-        return true;
+        if (l != null) l.d(why + ": MOBIKE not negotiated, refreshing NAT on the same socket (heal #" + n + ")");
+        pathHeal(why);
+        wakeKeep();
+        dpdNow = true;
+        lastRx = Math.min(lastRx, now - dpdMs);   // DPD стартует сразу
+        return false;
     }
 
     // ================= MOBIKE =================
