@@ -22,10 +22,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * "vpn-tun" (tun -> сокет), "vpn-mobike" (смена пути при смене сети).
  *
  * Два режима (поле strict, меняется на лету):
- *  - strict (АТС подключена; VpnImpl держит wake lock): watchdog рвёт туннель, если за wdMs
- *    после отправки не пришло ни одного ESP. Нужен быстрый отклик для телефонии.
- *  - обычный VPN (strict = false): watchdog лишь запускает DPD, а настоящий обрыв определяется
- *    только по deadMs тишины.
+ *  - strict (АТС подключена): watchdog рвёт туннель, если за wdMs после отправки не пришло
+ *    ни одного ESP. Нужен быстрый отклик для телефонии.
+ *  - обычный VPN (strict = false): watchdog сначала пробует MOBIKE-refresh, при повторе —
+ *    реконнект; обрыв по тишине определяется ещё и по deadMs.
+ * VpnImpl держит PARTIAL_WAKE_LOCK всегда, пока VPN запущен: поток vpn-keep (NAT-keepalive)
+ * должен работать и при выключенном экране.
  * В обоих режимах есть детектор сна: если поток таймеров не работал дольше 5 с (CPU спал),
  * тишина за это время не считается обрывом: таймеры пересчитываются, сразу идут keepalive и DPD.
  *
@@ -50,9 +52,12 @@ final class Tunnel {
     int ikePort = 500, natPort = 4500;
     int rto = 3000, tries = 4;
     int keepMs = 10000, dpdMs = 10000, deadMs = 30000;   // keepMs короче таймаута UDP-NAT оператора
-    /** Необязательный ping через туннель: адрес (null — выключено). Промахи только запускают DPD. */
+    /**
+     * Необязательный ping через туннель: адрес (null — выключено). pingLoss промахов подряд — сначала
+     * попытка MOBIKE, не подтвердилась (или ESP так и не пошёл) — реконнект через onReconnecting.
+     */
     String pingHost;
-    int pingMs = 2000, pingLoss = 3;
+    int pingMs = 2000, pingLoss = 5;   // подряд без ответа -> MOBIKE, не вышло -> реконнект
     /** true — обрыв поднятого туннеля сообщается через onReconnecting, решает владелец (VpnImpl). */
     boolean supervised;
     /** Причина неудачи до подъёма сетевая (имеет смысл повторить), а не из-за настроек/пароля. */
@@ -93,7 +98,10 @@ final class Tunnel {
     private InetAddress srv;
     private Ike ike;
     private Esp esp;
-    private Thread main, rx, tx;
+    private Thread main, rx, tx, kp;
+    /** Отдельный поток NAT-keepalive: не зависит от online, DPD, watchdog и остального в timers(). */
+    private final Object keepLock = new Object();
+    private volatile long keepSent, lastKeepAt;
 
     Tunnel(Tun tun, Vpn.Listener ev) {
         this.tun = tun;
@@ -133,12 +141,47 @@ final class Tunnel {
     void setOnline(boolean on) {
         boolean was = online;
         online = on;
-        if (on && !was) kick = true;
+        if (on && !was) {
+            kick = true;
+            wakeKeep();
+        }
     }
 
     /** Проверить путь сейчас: keepalive и DPD вне очереди. */
     void nudge() {
         kick = true;
+        wakeKeep();
+    }
+
+    private void wakeKeep() {
+        synchronized (keepLock) {
+            keepLock.notifyAll();
+        }
+    }
+
+    /**
+     * NAT-keepalive (RFC 3948: один байт 0xFF на порт 4500) каждые keepMs. Безусловно: не смотрит на
+     * online, DPD, watchdog, ping и migLatch. Сбой отправки — потеря пакета, следующий через keepMs.
+     * setOnline(true), nudge() и пробуждение из сна будят поток для немедленной отправки.
+     */
+    private void keepLoop() {
+        try {
+            while (!closed.get()) {
+                sendQuiet(new byte[]{(byte) 0xFF}, natPort);
+                keepSent++;
+                lastKeepAt = System.currentTimeMillis();
+                synchronized (keepLock) {
+                    keepLock.wait(Math.max(1000, keepMs));
+                }
+            }
+        } catch (InterruptedException e) {
+            // закрыли снаружи
+        } catch (RuntimeException e) {
+            // keepalive не должен умирать молча: перезапускаем цикл
+            if (!closed.get()) {
+                kp = daemon(this::keepLoop, "vpn-keep");
+            }
+        }
     }
 
     /** Окончательное закрытие по просьбе пользователя или системы. Из любого потока. */
@@ -236,6 +279,7 @@ final class Tunnel {
             lastEspRx = lastRx;
             rx = daemon(this::rxLoop, "vpn-rx");
             tx = daemon(this::txLoop, "vpn-tun");
+            kp = daemon(this::keepLoop, "vpn-keep");
             up = true;
             ev.onUp(name);
             timers();
@@ -446,7 +490,7 @@ final class Tunnel {
      * Обрыв — когда сервер молчит deadMs при живой сети (а в strict-режиме ещё и по watchdog).
      */
     private void timers() {
-        long lastKeep = System.currentTimeMillis(), lastDpd = 0, lastPing = 0, lastStat = 0;
+        long lastDpd = 0, lastPing = 0, lastStat = 0;
         long lastWatchdog = System.currentTimeMillis();
         long prevTick = lastWatchdog;
         long wdRx = rxEsp, wdTx = txPk, wdPendingSince = 0;
@@ -480,7 +524,7 @@ final class Tunnel {
                     wdTx = txPk;
                     wdPendingSince = 0;
                     lastWatchdog = now;
-                    lastKeep = 0;
+                    wakeKeep();                               // keepalive вне очереди после сна
                     lastPing = now;
                     // missed и pinged НЕ сбрасываем: при Doze с периодическими пробуждениями
                     // счётчик потерь ping иначе никогда не дорастёт до pingLoss
@@ -527,6 +571,7 @@ final class Tunnel {
                                 + " idleRx=" + (now - lastRx) / 1000 + "s idleEsp=" + (now - lastEspRx) / 1000
                                 + "s online=" + online
                                 + " strict=" + strict
+                                + " keepSent=" + keepSent + " lastKeep=" + (now - lastKeepAt) / 1000 + "s ago"
                                 + " dpdPending=" + (dpdReq != null) + " " + esp.drops());
                     }
                 }
@@ -542,16 +587,11 @@ final class Tunnel {
                 // ================= СЕТЬ ВЕРНУЛАСЬ: сбросить таймеры =================
                 if (kick) {
                     kick = false;
-                    lastKeep = 0;
                     dpdReq = null;
                     lastRx = Math.min(lastRx, now - dpdMs);
                 }
 
-                // ================= KEEPALIVE =================
-                if (now - lastKeep >= keepMs) {
-                    sendQuiet(new byte[]{(byte) 0xFF}, natPort);
-                    lastKeep = now;
-                }
+                // KEEPALIVE вынесен в отдельный поток keepLoop() и шлётся всегда
 
                 // ================= PING: healthcheck (подсчет потерь + авто-реконнект при достижении pingLoss) =================
                 if (pingHost != null && now - lastPing >= pingMs) {
@@ -761,7 +801,7 @@ final class Tunnel {
         DatagramSocket s = sock;
         if (s != null) s.close();
         tun.close();
-        for (Thread t : new Thread[]{main, rx, tx}) {
+        for (Thread t : new Thread[]{main, rx, tx, kp}) {
             if (t != null && t != Thread.currentThread()) t.interrupt();
         }
         if (retry) ev.onReconnecting(reason);
