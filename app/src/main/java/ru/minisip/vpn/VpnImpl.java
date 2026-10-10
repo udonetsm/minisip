@@ -56,6 +56,7 @@ final class VpnImpl implements Vpn {
     private PowerManager.WakeLock wl;
     private int gen;                       // меняется при connect/disconnect/revoke/рестарте: отменяет циклы
     private Thread recovery;               // поток подъёма/переподключения; null — не идёт
+    private volatile int migs, heals, silences, kept;   // Mig / Heal / Silence / Kept: события без реконнекта
     private int reconnects;                // реконнектов с последнего connect(): +1 на каждый обрыв/смену сети
 
     VpnImpl(Context ctx) {
@@ -141,8 +142,14 @@ final class VpnImpl implements Vpn {
         running = true;
         want = true;
         reconnects = 0;
+        migs = heals = silences = kept = 0;
         updateWake();
         ctx.startService(new Intent(ctx, TunService.class));
+    }
+
+    /** Для строки статуса рядом с Recon/Loss: «Mig:1 | Heal:2 | Silence:3 | Kept:0». */
+    public String extraStats() {
+        return "Mig:" + migs + " | Heal:" + heals + " | Silence:" + silences + " | Kept:" + kept;
     }
 
     @Override
@@ -189,6 +196,7 @@ final class VpnImpl implements Vpn {
                 // MOBIKE: SA и tun переживают пропажу сети; по возвращении сети — migrate. Если сервер
                 // за это время забыл SA, migrate не подтвердится и будет обычный реконнект.
                 Log.i(TAG, "network lost: MOBIKE tunnel kept, waiting for the network");
+                kept++;
                 return;
             }
             Log.i(TAG, "network lost: restarting");
@@ -200,6 +208,7 @@ final class VpnImpl implements Vpn {
                 final int g = gen;
                 watch.mark();
                 Log.i(TAG, "network changed: MOBIKE update");
+                migs++;
                 t.migrate(ok -> onMigrated(t, g, ok));
             } else if (watch.sameAsMarked()) {
                 t.nudge();                                // та же сеть вернулась: проверить, жив ли путь
@@ -237,7 +246,7 @@ final class VpnImpl implements Vpn {
         if (t != null) t.stop(reason);
         reconnects++;
         lis.onPingLoss(0);                            // новый реконнект: Loss с нуля
-        lis.onReconnecting(reason, reconnects);
+        lis.onReconnecting(reason, 1);                // 1 = начало нового цикла; App считает по нему Recon
         startRecovery(SETTLE_MS, false);
     }
 
@@ -291,6 +300,7 @@ final class VpnImpl implements Vpn {
         t.pingHost = (hc.isEmpty() || hc.equals("0")) ? null : hc;           // если 0 или пусто — ping выключен, работают механизмы IKEv2
         t.pingMs = PING_MS;
         t.log = m -> Log.i(TAG, m);
+        t.pathEvents = g;
         g.owner = t;
         tunnel = t;
         watch.mark();
@@ -324,7 +334,7 @@ final class VpnImpl implements Vpn {
                         if (g != gen) return;
                         if (!told) {
                             told = true;
-                            lis.onReconnecting("waiting for network", Math.max(1, reconnects));
+                            lis.onReconnecting("waiting for network", attempts);
                         }
                     }
                     Thread.sleep(500);
@@ -333,7 +343,7 @@ final class VpnImpl implements Vpn {
                 Tunnel t;
                 synchronized (this) {
                     if (g != gen) return;
-                    if (attempts > 1) lis.onReconnecting("reconnecting", Math.max(1, reconnects));
+                    if (attempts > 1) lis.onReconnecting("reconnecting", attempts);
                     t = launch(gd);
                 }
                 boolean finished = gd.done.await(ATTEMPT_MS, TimeUnit.MILLISECONDS);
@@ -364,12 +374,31 @@ final class VpnImpl implements Vpn {
     }
 
     /** Пропускает события только от действующего сеанса: старые, заменённые, молчат. */
-    private final class Guard implements Listener {
+    private final class Guard implements Listener, Tunnel.PathEvents {
         volatile Tunnel owner;
         final CountDownLatch done = new CountDownLatch(1);
         volatile boolean ok;                       // дошла до onUp
         volatile boolean retryable;                // неудача сетевая, можно повторять
         volatile String why;
+
+        /** Лечение пути и срабатывания детекторов: отдельные счётчики, Recon и Loss не трогаем. */
+        @Override
+        public void heal(String why) {
+            synchronized (VpnImpl.this) {
+                if (tunnel != owner) return;
+                heals++;
+                Log.i(TAG, "heal #" + heals + ": " + why);
+            }
+        }
+
+        @Override
+        public void silence(String why) {
+            synchronized (VpnImpl.this) {
+                if (tunnel != owner) return;
+                silences++;
+                Log.i(TAG, "silence #" + silences + ": " + why);
+            }
+        }
 
         @Override
         public void onUp(String iface) {
@@ -409,7 +438,7 @@ final class VpnImpl implements Vpn {
                 tunnel = null;
                 reconnects++;
                 lis.onPingLoss(0);                    // обрыв поднятого туннеля: Loss с нуля, Recon +1
-                lis.onReconnecting(reason, reconnects);
+                lis.onReconnecting(reason, 1);
                 startRecovery(SETTLE_MS, false);
             }
         }

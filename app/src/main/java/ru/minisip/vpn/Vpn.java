@@ -24,6 +24,8 @@ public interface Vpn {
         default void onReconnecting(String reason) { onReconnecting(reason, 1); }
         default void onPingLoss(int lostCount) {}
     }
+
+    default String extraStats() { return ""; }
     
     default void setStrict(boolean on) {}
 
