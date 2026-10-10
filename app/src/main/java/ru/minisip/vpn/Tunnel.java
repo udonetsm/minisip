@@ -566,7 +566,7 @@ final class Tunnel {
                         wdTx = txNow;
                         if (wdPendingSince == 0) wdPendingSince = now;
                     }
-                    if (!up || !online) wdPendingSince = 0;
+                    if (!up || !online || migLatch != null) wdPendingSince = 0;   // во время migrate не считаем
                     // Ping выключен, и ESP от сервера нет hangMs, хотя мы отправили hangPkts+ пакетов, а IKE
                     // отвечает (DPD это не ловит). Сначала лечим путь (MOBIKE-refresh), повтор — реконнект.
                     if (!espOnly && up && online) {
@@ -592,16 +592,13 @@ final class Tunnel {
                     if (wdPendingSince != 0 && now - wdPendingSince >= wdMs) {
                         Log l = log;
                         long silent = (now - wdPendingSince) / 1000;
-                        if (strict) {
-                            if (l != null) l.d("WATCHDOG(strict): no ESP back for " + silent
-                                    + "s after send; " + esp.drops());
-                            lost("no ESP replies while sending");
-                            return;
-                        }
                         wdPendingSince = 0;
-                        if (espOnly) {
-                            // обычный VPN с ping: сначала лечим путь (MOBIKE-refresh), повторно без ESP — реконнект
-                            if (l != null) l.d("WATCHDOG(soft): no ESP back for " + silent + "s");
+                        if (strict || espOnly) {
+                            // Сначала лечим путь (MOBIKE-refresh, а без MOBIKE keepalive+DPD на том же сокете),
+                            // и только при повторе без ESP — реконнект. Реконнект закрывает tun: система
+                            // сообщает «отключено от постоянной VPN», а АТС теряет регистрацию.
+                            if (l != null) l.d("WATCHDOG(" + (strict ? "strict" : "soft") + "): no ESP back for "
+                                    + silent + "s after send; " + esp.drops());
                             if (heal("no ESP replies while sending")) return;
                         } else {
                             // обычный VPN без ping: не рвём, а просим DPD проверить путь; решит deadMs
@@ -673,8 +670,10 @@ final class Tunnel {
                 long idle = now - lastRx;
 
                 if (idle >= deadMs && now >= graceUntil) {
-                    lost("server does not respond");
-                    return;
+                    // Сначала один раз лечим путь (после сна NAT-маппинг мёртв), потом уже реконнект.
+                    if (heal("server does not respond")) return;
+                    lastRx = now - dpdMs;
+                    idle = dpdMs;
                 }
 
                 if (dpdReq == null && idle >= dpdMs) {

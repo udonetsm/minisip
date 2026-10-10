@@ -179,3 +179,7 @@ embedder.cc (2575): 'FlutterEngineRemoveView' returned 'kInvalidArguments'. Remo
 
 ** (app.hiddify.com:209549): WARNING **: 22:15:40.775: Failed to cleanup compositor shaders, unable to make OpenGL context current
 hiddify: ../src/dispatch_common.c:872: epoxy_get_proc_address: Assertion `0 && "Couldn't find current GLX or EGL context.\n"' failed.
+sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper
+sudo: a password is required
+sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper
+sudo: a password is required
