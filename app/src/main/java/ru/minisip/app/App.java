@@ -161,6 +161,11 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         vpn.disconnect();
     }
 
+    String vpnDpd() {
+        String s = vpn.dpdState();
+        return s == null || s.isEmpty() ? "unknown" : s;
+    }
+
     boolean vpnMobike() {
         return vpn.mobike();
     }

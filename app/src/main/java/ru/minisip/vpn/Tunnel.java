@@ -120,6 +120,23 @@ final class Tunnel {
     private volatile byte[] dpdReq;
     /** Повторить неподтверждённый DPD сразу, с тем же номером (сбрасывать его нельзя: образуется дыра в ID). */
     private volatile boolean dpdNow;
+    // фактическое состояние DPD (для подписи на кнопке): ответы на наши запросы и запросы сервера
+    private volatile long dpdSentAt;
+    private volatile int dpdOk, srvDpd;
+
+    /**
+     * Фактический статус DPD для подписи на кнопке:
+     * Pending — ещё нет результата (запрос не отправлен или ждём первого ответа);
+     * Active — сервер ответил на наш DPD, значит DPD поддерживается;
+     * Active|Incoming — плюс сервер сам присылает DPD-запросы;
+     * Unavailable — остальные случаи (наш запрос висит без ответа 5 с и больше).
+     */
+    String dpdState() {
+        long now = System.currentTimeMillis();
+        if (dpdReq != null && now - dpdSentAt >= 5000) return "Unavailable";
+        if (dpdOk > 0 || srvDpd > 0) return srvDpd > 0 ? "Active|Incoming" : "Active";
+        return "Pending";
+    }
     private volatile int dpdId = -1;
     private volatile int migId = -1;
     private volatile CountDownLatch migLatch;
@@ -496,7 +513,10 @@ final class Tunnel {
                 + " id=" + x.id + " payloads=" + x.pl.size());
         if (x.response) {
             ike.acked(x.id);
-            if (x.id == dpdId) dpdReq = null;
+            if (x.id == dpdId && dpdReq != null) {
+                dpdReq = null;
+                dpdOk++;
+            }
             CountDownLatch latch = migLatch;
             if (x.id == migId && latch != null) latch.countDown();
             return;
@@ -516,6 +536,7 @@ final class Tunnel {
                 if (Crypto.u32(p.body, 4 + 4 * i) == ike.spiOut) gone = true;
             }
         }
+        if (x.pl.isEmpty()) srvDpd++;                    // пустой INFORMATIONAL от сервера = его DPD
         sendQuietIke(ike.seal(Ike.INFO, true, x.id, new ArrayList<>()));
         if (gone) lost("server closed the tunnel");
     }
@@ -711,6 +732,7 @@ final class Tunnel {
                 if (dpdReq == null && idle >= dpdMs) {
                     dpdNow = false;
                     dpdId = ike.nextId();
+                    dpdSentAt = now;
                     dpdReq = Crypto.cat(new byte[4], ike.seal(Ike.INFO, false, dpdId, new ArrayList<>()));
                     lastDpd = 0;
                 }

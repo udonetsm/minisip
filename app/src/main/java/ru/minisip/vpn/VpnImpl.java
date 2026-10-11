@@ -147,6 +147,12 @@ final class VpnImpl implements Vpn {
         ctx.startService(new Intent(ctx, TunService.class));
     }
 
+    /** Фактический статус DPD для подписи на кнопке. */
+    public String dpdState() {
+        Tunnel t = tunnel;
+        return t == null ? "" : t.dpdState();
+    }
+
     /** Сколько ping оценено в текущем сеансе (знаменатель для Loss). */
     public int pingEvaluated() {
         Tunnel t = tunnel;

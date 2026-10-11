@@ -178,7 +178,7 @@ public final class SettingsFragment extends Fragment {
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE, false);
         vpnCa.setSingleLine(false);
         vpnCa.setMaxLines(4);
-        vpnHealthcheck = field(vpnAdvancedSpoilerContainer, "Healthcheck address", "IP or domain for connectivity check", prefs.getString("vpnHealthcheck", "0"),
+        vpnHealthcheck = field(vpnAdvancedSpoilerContainer, "Healthcheck address", "IP or domain for connectivity check", prefs.getString("vpnHealthcheck", "google.com"),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI, false);
 
         vpnAppsBtn = button(vpnMainSpoilerContainer, "Apps using VPN", true, v -> pickApps());
@@ -401,7 +401,7 @@ public final class SettingsFragment extends Fragment {
     private void vpnStart() {
         save(vpnHealthcheck, "vpnHealthcheck");
         String hc = text(vpnHealthcheck).trim();
-        if (hc.isEmpty()) hc = "0";
+        if (hc.isEmpty()) hc = "google.com";
 
         if (hc.equals("0") || isIpv4(hc)) {
             app.vpnConnect(page, text(vpnServer).trim(), text(vpnLogin).trim(), text(vpnPass), text(vpnKey),
@@ -535,7 +535,7 @@ public final class SettingsFragment extends Fragment {
         vpnConnect.setEnabled(!other && idle && !vUp && !vConn);
         if (vUp) {
             String mobikeStatus = app.vpnMobike() ? "Active" : "Not supported";
-            String sub = "\nMOBIKE: " + mobikeStatus + " | DPD active";
+            String sub = "\nMOBIKE: " + mobikeStatus + " | DPD: " + app.vpnDpd();
             SpannableString span = new SpannableString("VPN connect" + sub);
             span.setSpan(new RelativeSizeSpan(0.7f), 11, span.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             vpnConnect.setText(span);
