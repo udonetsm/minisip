@@ -47,7 +47,7 @@ final class VpnImpl implements Vpn {
     private final Context ctx;
     private final NetWatch watch;
     private volatile Listener lis = new Listener() {};
-    private Tunnel tunnel;                 // действующий (или поднимающийся) сеанс; null — сеанса нет
+    private volatile Tunnel tunnel;                 // действующий (или поднимающийся) сеанс; null — сеанса нет
     private TunService svc;                // живой экземпляр сервиса сеанса
     private String host, identity, psk, password, ca, apps, healthcheckIp;
     private boolean running;               // connect() был, disconnect()/сброса ещё не было
@@ -145,6 +145,12 @@ final class VpnImpl implements Vpn {
         migs = heals = silences = kept = 0;
         updateWake();
         ctx.startService(new Intent(ctx, TunService.class));
+    }
+
+    /** Сколько ping оценено в текущем сеансе (знаменатель для Loss). */
+    public int pingEvaluated() {
+        Tunnel t = tunnel;
+        return t == null ? 0 : t.pingEval;
     }
 
     /** Для строки статуса рядом с Recon/Loss: «Mig:1 | Heal:2 | Silence:3 | Kept:0». */

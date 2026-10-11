@@ -40,6 +40,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     boolean vpnConnecting = false;
     int vpnAttempts = 0;
     private short vpnLossCount = 0;
+    private int vpnLossTotal = 0;           // знаменатель Loss: фиксируется в момент очередной потери, а не растёт сам
     private short vpnReconnectCount = 0;
     String vpnIface = "tun0";
     String vpnStatus = "🔴 VPN: disconnected";
@@ -212,9 +213,14 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         });
     }
 
+    private static String cap99(int v) {
+        return v > 99 ? "99+" : String.valueOf(v);
+    }
+
     /** Loss | Recon и счётчики событий без реконнекта (Mig | Heal | Silence | Kept). */
     private String counters() {
-        String c = " | Loss: " + (vpnLossCount > 99 ? "99+" : vpnLossCount)
+        int lost = vpnLossCount, total = Math.max(lost, vpnLossTotal);
+        String c = " | Loss: " + cap99(lost) + "/" + cap99(total)
                 + " | Recon: " + (vpnReconnectCount > 99 ? "99+" : vpnReconnectCount);
         String x = vpn.extraStats();
         return x == null || x.isEmpty() ? c : c + " | " + x;
@@ -269,6 +275,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
             boolean isManual = reason != null && (reason.toLowerCase().contains("disconnected") || reason.toLowerCase().contains("user"));
             if (isManual) {
                 vpnLossCount = 0;
+                vpnLossTotal = 0;
                 vpnReconnectCount = 0;
             }
             boolean isTakeover = reason != null &&
@@ -371,6 +378,8 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     public void onPingLoss(int lostCount) {
         main.post(() -> {
             vpnLossCount = (short) Math.min(lostCount, 32767);
+            // знаменатель обновляем только вместе с числителем; сброс (0) обнуляет и его
+            vpnLossTotal = lostCount == 0 ? 0 : vpn.pingEvaluated();
             String cnt = counters();
             if (vpnAttempts > 0) {
                 vpnStatus = reconStatus();

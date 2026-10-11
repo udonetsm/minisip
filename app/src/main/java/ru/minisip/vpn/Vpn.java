@@ -26,7 +26,7 @@ public interface Vpn {
     }
 
     default String extraStats() { return ""; }
-    
+    default int pingEvaluated() { return 0; }
     default void setStrict(boolean on) {}
 
     void setListener(Listener l);
