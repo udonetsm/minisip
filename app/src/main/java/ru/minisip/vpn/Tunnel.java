@@ -58,6 +58,7 @@ final class Tunnel {
      * через onReconnecting.
      */
     String pingHost;
+    volatile int pingEval;             // сколько ping уже оценено (ответ или промах): знаменатель для Loss «потеряно/всего»
     int pingMs = 2000, pingLoss = 5;   // подряд без ответа -> MOBIKE, не вышло -> реконнект
     /** true — обрыв поднятого туннеля сообщается через onReconnecting, решает владелец (VpnImpl). */
     boolean supervised;
@@ -673,6 +674,7 @@ final class Tunnel {
                 // ================= PING: healthcheck (подсчет потерь + авто-реконнект при достижении pingLoss) =================
                 if (pingHost != null && now - lastPing >= pingMs) {
                     if (pinged) {
+                        pingEval++;
                         if (pongs != seen || lastEspRx > lastPing) {   // только ESP, не IKE
                             seen = pongs;
                             missed = 0;
