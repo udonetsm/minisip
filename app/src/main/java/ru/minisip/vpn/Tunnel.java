@@ -508,7 +508,11 @@ final class Tunnel {
     private void onIke(byte[] m) {
         Ike.Rx x = ike.open(m);
         if (x == null) return;
-        lastRx = System.currentTimeMillis();
+             // lastRx отражает только ESP: если сервер шлёт DPD, но ESP не идёт, путь мёртв.
+        // Раньше lastRx обновлялся здесь, из-за чего deadMs никогда не наступал: сервер
+        // отвечал на свои же DPD, lastRx не старел, наш DPD не отправлялся, а ESP-тишина
+        // не детектилась до hangMs=60s.
+        // lastRx = System.currentTimeMillis();  <-- убрано
         rxIke++;
         Log l = log;
         if (l != null) l.d("IKE from server: exch=" + x.exch + " resp=" + x.response
