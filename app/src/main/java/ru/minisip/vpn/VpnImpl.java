@@ -132,6 +132,14 @@ final class VpnImpl implements Vpn {
         Tunnel old = tunnel;
         tunnel = null;
         if (old != null) old.stop("replaced");
+        // Если предыдущий сеанс уже был привязан к живому TunService, гасим его перед запуском
+        // нового. Иначе startService переиспользует тот же экземпляр, serviceReady сработает
+        // повторно, а асинхронный onRevoke от системы может прилететь уже в новую сессию и
+        // её сбросить (гонка).
+        if (svc != null) {
+            svc = null;
+            ctx.stopService(new Intent(ctx, TunService.class));
+        }
         this.host = host;
         this.identity = identity;
         this.password = password;

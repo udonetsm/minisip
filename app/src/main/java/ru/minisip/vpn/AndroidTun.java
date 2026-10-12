@@ -21,7 +21,7 @@ import java.util.Set;
 
 /** Tun на Android: VpnService.Builder.establish() даёт дескриптор интерфейса. */
 final class AndroidTun implements Tun {
-
+    volatile boolean transientFail;
     private final TunService svc;
     private volatile ParcelFileDescriptor fd;
     private volatile FileInputStream in;
@@ -66,7 +66,12 @@ final class AndroidTun implements Tun {
                 if (!d.isEmpty()) b.addDnsServer(d);
             }
             ParcelFileDescriptor f = b.establish();     // заодно вытесняет любой другой действующий VPN
-            if (f == null) return null;
+             if (f == null) {
+ // Система временно не даёт VPN (например, только что отозвала разрешение или
+                // активировалось другое VPN). Это сетевая, а не фатальная причина: пробуем снова.
+                transientFail = true;
+                return null;
+            }
             fd = f;
             in = new FileInputStream(f.getFileDescriptor());
             out = new FileOutputStream(f.getFileDescriptor());
@@ -74,10 +79,13 @@ final class AndroidTun implements Tun {
             if (name == null) close();
             return name;
         } catch (Exception e) {
+            transientFail = true;
             close();
             return null;
         }
     }
+    
+    
 
     /**
      * Имя интерфейса именно нашей VPN-сети. Система регистрирует её через долю секунды после
