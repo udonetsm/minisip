@@ -315,9 +315,11 @@ final class Tunnel {
                 if (pingSrc.length != 4 || pingDst.length != 4) pingHost = null;
             }
             alive();
+            if (tun instanceof AndroidTun) ((AndroidTun) tun).transientFail = false;
             String name = tun.open(ike.ip, ike.dns, ike.routes, MTU, apps);
             if (name == null) {
-                fail("cannot create the tun interface", false);
+                boolean isTransient = tun instanceof AndroidTun && ((AndroidTun) tun).transientFail;
+                fail("cannot create the tun interface", isTransient);
                 return;
             }
             if (closed.get()) {
@@ -632,7 +634,8 @@ final class Tunnel {
                             Log hl = log;
                             if (hl != null) hl.d("no ESP for " + hangMs / 1000 + "s while sending, IKE alive");
                             pathSilence("no ESP while IKE alive");
-                            if (heal("no ESP replies while IKE answers")) return;
+                            heal("no ESP replies while IKE answers");
+                           if (closed.get()) return;
                         }
                     } else {
                         hangSince = 0;
@@ -650,7 +653,8 @@ final class Tunnel {
                             if (l != null) l.d("WATCHDOG(" + (strict ? "strict" : "soft") + "): no ESP back for "
                                     + silent + "s after send; " + esp.drops());
                             pathSilence("watchdog");
-                            if (heal("no ESP replies while sending")) return;
+                            heal("no ESP replies while sending");
+                            if (closed.get()) return;
                         } else {
                             // обычный VPN без ping: не рвём, а просим DPD проверить путь; решит deadMs
                             if (l != null) l.d("WATCHDOG(soft): silence for " + silent + "s; start DPD");
@@ -710,7 +714,8 @@ final class Tunnel {
                         missed = 0;
                         Log l = log;
                         if (l != null) l.d("ping healthcheck: " + pingLoss + " losses reached");
-                        if (heal("ESP path dead (ping loss)")) return;
+                        heal("ESP path dead (ping loss)");
+                       if (closed.get()) return;
                     }
                     byte[] ip = echo(++seq);
                     sendQuiet(esp.wrap(ip, ip.length), natPort);
@@ -724,9 +729,15 @@ final class Tunnel {
                 if (idle >= deadMs && now >= graceUntil) {
                     // Сначала один раз лечим путь (после сна NAT-маппинг мёртв), потом уже реконнект.
                     pathSilence("deadMs");
-                    if (heal("server does not respond")) return;
-                    lastRx = now - dpdMs;
-                    idle = dpdMs;
+                    long before = lastHealAct;
+                    heal("server does not respond");
+                    if (closed.get()) return;
+                    // Если heal реально сработал (lastHealAct обновился), перезапускаем DPD;
+                    // если троттлится — не трогаем lastRx, следующий тик снова попадёт сюда.
+                    if (lastHealAct != before) {
+                        lastRx = now - dpdMs;
+                        idle = dpdMs;
+                    }
                 }
 
                 if (dpdReq == null && idle >= dpdMs) {
@@ -761,6 +772,7 @@ final class Tunnel {
      *    и ещё одна серия пингов.
      * Повторно без единого ESP — обрыв, дальше решает владелец через onReconnecting.
      * @return true, если туннель закрыт и timers() должен завершиться.
+     * false во всех остальных случаях, включая троттлинг.
      */
     /**
      * Лечение не помогло (ESP не вернулся). Отвечает ли сервер на свежий IKE_SA_INIT с нового сокета?
@@ -812,7 +824,14 @@ final class Tunnel {
             lost(why);
             return true;
         }
-        if (n > 1 && now - lastHealAct < HEAL_MIN_GAP_MS) return false;   // не чаще, чем раз в HEAL_MIN_GAP_MS
+       // В окне HEAL_MIN_GAP_MS повторный heal ничего не делает. Возвращаем true — «сейчас
+        // не лечим», чтобы timers() НЕ сбрасывал lastRx и не запускал новый DPD: иначе DPD
+        // уходит каждые ~1.6 с, реальной попытки нет, а окно HEAL_GIVE_UP_MS тянется.
+        if (n > 1 && now - lastHealAct < HEAL_MIN_GAP_MS) {
+            if (l != null) l.d(why + ": heal throttled (last attempt "
+                    + (now - lastHealAct) + "ms ago)");
+            return false;
+        }
         lastHealAct = now;
         if (n > 1) probePath(why);
         if (ike != null && ike.mobike) {
