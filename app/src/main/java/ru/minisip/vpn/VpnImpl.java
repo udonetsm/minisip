@@ -201,6 +201,7 @@ final class VpnImpl implements Vpn {
                 + " tunnel=" + (tunnel != null ? "up=" + tunnel.isUp() + " mobike=" + tunnel.mobike() : "none"));
         if (!running || want || svc == null) return;
         boolean on = watch.online();
+        boolean good = watch.validated();
         Tunnel t = tunnel;
         if (t != null) t.setOnline(on);
         if (!on) {
@@ -213,6 +214,10 @@ final class VpnImpl implements Vpn {
             }
             Log.i(TAG, "network lost: restarting");
             restart("network lost");
+            return;
+        }
+        if (!good && (t == null || !t.isUp())) {
+            Log.i(TAG, "networkChanged: online but not validated, waiting");
             return;
         }
         if (t != null && t.isUp()) {
@@ -341,7 +346,7 @@ final class VpnImpl implements Vpn {
             for (;;) {
                 if (wait > 0) Thread.sleep(wait);
                 boolean told = false;
-                while (!watch.online()) {
+                while (!watch.validated()) {
                     synchronized (this) {
                         if (g != gen) return;
                         if (!told) {

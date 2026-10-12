@@ -30,8 +30,10 @@ final class NetWatch {
     private final Handler h = new Handler(Looper.getMainLooper());
     private volatile String marked;
     private volatile boolean offline;
+    private volatile boolean validated;
     private Runnable onChange;
     private ConnectivityManager.NetworkCallback cb;
+    private final Object snap = new Object();
 
     private final Runnable check = new Runnable() {
         @Override
@@ -42,9 +44,13 @@ final class NetWatch {
             }
             if (r == null) return;
             String k = key();
-            boolean was = offline;
-            offline = k == null;
-            if (!Objects.equals(k, marked) || (k != null && was)) r.run();
+            boolean fire;
+            synchronized (snap) {
+                boolean was = offline;
+                offline = k == null;
+                fire = !Objects.equals(k, marked) || (k != null && was);
+            }
+            if (fire) r.run();
         }
     };
 
@@ -58,6 +64,7 @@ final class NetWatch {
         this.onChange = onChange;
         marked = key();
         offline = marked == null;
+        validated = hasValidated();
         cb = new ConnectivityManager.NetworkCallback() {
             @Override
             public void onAvailable(Network n) {
@@ -102,7 +109,10 @@ final class NetWatch {
 
     /** Текущая сеть становится исходной (зовут перед каждой попыткой подключения и миграцией). */
     void mark() {
-        marked = key();
+        String k = key();
+        synchronized (snap) {
+            marked = k;
+        }
     }
 
     /** Есть ли сейчас хоть какая-то сеть с интернетом (кроме VPN). */
@@ -110,9 +120,16 @@ final class NetWatch {
         return key() != null;
     }
 
+    /** Есть ли реально ВАЛИДИРОВАННАЯ сеть (проверенный выход в интернет). */
+    boolean validated() {
+        return hasValidated();
+    }
+
     /** Сеть та же, на которой мы запомнили состояние. */
     boolean sameAsMarked() {
-        return Objects.equals(key(), marked);
+        synchronized (snap) {
+            return Objects.equals(key(), marked);
+        }
     }
 
     private void poke() {
@@ -121,25 +138,52 @@ final class NetWatch {
     }
 
     @SuppressWarnings("deprecation")
-    private String key() {
-        Network best = null;
-        int bestRank = -1;
+    private boolean hasValidated() {
         for (Network n : cm.getAllNetworks()) {
             NetworkCapabilities nc = cm.getNetworkCapabilities(n);
             if (nc == null || !nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    || !nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                     || nc.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
                 continue;
             }
-            int rank = nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) ? 10 : 0;
-            if (nc.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) rank += 3;
-            else if (nc.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) rank += 2;
-            else if (nc.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) rank += 1;
-            if (rank > bestRank) {
-                best = n;
-                bestRank = rank;
-            }
+            return true;
         }
-        if (best == null) return null;
+        return false;
+    }
+
+    @SuppressWarnings("deprecation")
+    private String key() {
+        
+                // Берём ту сеть, которую система реально использует как default (getActiveNetwork),
+        // а не «самую лучшую по рейтингу». Иначе валидированный LTE «перекрывает» Wi-Fi без
+        // интернета: сеть формально та же, сетевые колбэки молчат, а трафик идёт по мёртвому
+        // default-маршруту. Если активная сеть — наша VPN или её нет, падаем на перебор.
+        Network best = cm.getActiveNetwork();
+        NetworkCapabilities nc = best == null ? null : cm.getNetworkCapabilities(best);
+        if (nc == null
+                || !nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                || nc.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+            best = null;
+            int bestRank = -1;
+            for (Network n : cm.getAllNetworks()) {
+                NetworkCapabilities c = cm.getNetworkCapabilities(n);
+                if (c == null || !c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                        || c.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                    continue;
+                }
+                int rank = c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) ? 10 : 0;
+                if (c.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) rank += 3;
+                else if (c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) rank += 2;
+                else if (c.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) rank += 1;
+                if (rank > bestRank) {
+                    best = n;
+                    bestRank = rank;
+                }
+            }
+            if (best == null) return null;
+            nc = cm.getNetworkCapabilities(best);
+        }
+
         StringBuilder sb = new StringBuilder(best.toString());
         LinkProperties lp = cm.getLinkProperties(best);
         if (lp != null) {
@@ -147,6 +191,8 @@ final class NetWatch {
                 if (la.getAddress() instanceof Inet4Address) sb.append('|').append(la.getAddress().getHostAddress());
             }
         }
+        sb.append("|validated=")
+  .append(nc != null && nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED));
         return sb.toString();
     }
 }
