@@ -651,8 +651,14 @@ final class Ike {
         Crypto.Suite c = sa.suite;
         int e = c.encKeyLen(), i = c.integKeyLen();
         byte[] k = suite.prfPlus(skD, cat(ni, nr), 2 * (e + i));
-        Crypto.Box out = new Crypto.Box(c, Arrays.copyOfRange(k, 0, e), Arrays.copyOfRange(k, e, e + i));
-        Crypto.Box in = new Crypto.Box(c, Arrays.copyOfRange(k, e + i, 2 * e + i),
+                // RFC 7296, п. 2.17: KEYMAT = prf+(SK_d, Ni | Nr), затем
+        //   init_enc [0..e) | resp_enc [e..2e) | init_integ [2e..2e+i) | resp_integ [2e+i..2e+2i)
+        // (для AEAD e включает 4 байта соли, i = 0).
+        Crypto.Box out = new Crypto.Box(c,
+                Arrays.copyOfRange(k, 0, e),
+                Arrays.copyOfRange(k, 2 * e, 2 * e + i));
+        Crypto.Box in = new Crypto.Box(c,
+                Arrays.copyOfRange(k, e, 2 * e),
                 Arrays.copyOfRange(k, 2 * e + i, 2 * (e + i)));
         spiOut = u32(sa.spi, 0);
         esp = new Esp(c, out, in, spiOut, spiIn);
