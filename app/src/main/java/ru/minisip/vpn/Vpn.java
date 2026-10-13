@@ -2,6 +2,8 @@ package ru.minisip.vpn;
 
 import android.content.Context;
 
+import ru.minisip.log.LogSink;
+
 /**
  * IKEv2-клиент (общий ключ или логин/пароль, ESP поверх UDP 4500) и интерфейс tun.
  * Ни от каких наших пакетов не зависит. Наружу — только встроенные типы.
@@ -28,6 +30,9 @@ public interface Vpn {
     default String extraStats() { return ""; }
     default int pingEvaluated() { return 0; }
     default void setStrict(boolean on) {}
+
+    /** Куда писать журнал событий (null — никуда). Строки без секретов. */
+    default void setLogSink(LogSink s) {}
 
     void setListener(Listener l);
     /** true — подключена АТС: wake lock и жёсткий watchdog. false — обычный VPN. */

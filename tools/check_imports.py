@@ -17,14 +17,22 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent / "app/src/main/java/ru/minisip"
 
 ALLOWED = {
+    "log": set(),
     "net": set(),
     "media": {"net"},
-    "sip": {"net", "media"},
+    "sip": {"net", "media", "log"},
     "screen": set(),
-    "vpn": set(),
-    "app": {"net", "media", "sip", "screen", "vpn"},
+    "vpn": {"log"},
+    "app": {"net", "media", "sip", "screen", "vpn", "log"},
 }
-IFACE = {"net": "Udp", "media": "Media", "sip": "Sip", "screen": "Screen", "vpn": "Vpn"}
+IFACE = {
+    "log": {"LogSink", "LogBuffer", "LogFile"},
+    "net": {"Udp"},
+    "media": {"Media"},
+    "sip": {"Sip"},
+    "screen": {"Screen"},
+    "vpn": {"Vpn"},
+}
 
 errors = []
 
@@ -41,7 +49,7 @@ for pkg, allowed in ALLOWED.items():
                 continue
             if dep not in allowed:
                 errors.append(f"{where}: пакет '{pkg}' не может зависеть от '{dep}'")
-            elif cls != IFACE[dep]:
+            elif cls not in IFACE[dep]:
                 errors.append(f"{where}: из '{dep}' можно только {IFACE[dep]}, а не {cls}")
 
 # --- ацикличность карты ---
@@ -64,19 +72,22 @@ if has_cycle():
 
 # --- 3: сигнатуры публичных интерфейсов ---
 OK_TYPES = {"void", "int", "long", "boolean", "String", "byte[]", "short[]", "Context",
-            "Listener", "Udp", "Media", "Sip", "Screen", "Vpn", "int...", "Object"}
-for pkg, name in IFACE.items():
-    f = ROOT / pkg / f"{name}.java"
-    src = re.sub(r"/\*.*?\*/", "", f.read_text(encoding="utf-8"), flags=re.S)
-    src = re.sub(r"//.*", "", src)
-    for m in re.finditer(r"^\s*(?:default\s+|static\s+)?([\w\[\].]+)\s+(\w+)\s*\(([^)]*)\)", src, re.M):
-        ret, meth, params = m.groups()
-        if ret in ("interface", "return", "new"):
+            "Listener", "Udp", "Media", "Sip", "Screen", "Vpn", "LogSink", "LogBuffer", "Runnable", "int...", "Object"}
+for pkg, names in IFACE.items():
+    for name in names:
+        f = ROOT / pkg / f"{name}.java"
+        if not f.exists():
             continue
-        types = [ret] + [p.strip().rsplit(" ", 1)[0] for p in params.split(",") if p.strip()]
-        for t in types:
-            if t not in OK_TYPES:
-                errors.append(f"{pkg}/{name}.java: метод {meth}() использует тип '{t}'")
+        src = re.sub(r"/\*.*?\*/", "", f.read_text(encoding="utf-8"), flags=re.S)
+        src = re.sub(r"//.*", "", src)
+        for m in re.finditer(r"^\s*(?:default\s+|static\s+)?([\w\[\].]+)\s+(\w+)\s*\(([^)]*)\)", src, re.M):
+            ret, meth, params = m.groups()
+            if ret in ("interface", "return", "new", "private", "public", "protected") or meth == name:
+                continue
+            types = [ret] + [p.strip().rsplit(" ", 1)[0] for p in params.split(",") if p.strip()]
+            for t in types:
+                if t not in OK_TYPES:
+                    errors.append(f"{pkg}/{name}.java: метод {meth}() использует тип '{t}'")
 
 if errors:
     print("НАРУШЕНИЯ:")

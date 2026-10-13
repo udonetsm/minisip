@@ -10,6 +10,8 @@ import android.util.Log;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import ru.minisip.log.LogSink;
+
 /**
  * Связывает публичный интерфейс, системный сервис и Tunnel.
  *
@@ -47,6 +49,7 @@ final class VpnImpl implements Vpn {
     private final Context ctx;
     private final NetWatch watch;
     private volatile Listener lis = new Listener() {};
+    private volatile LogSink sink;
     private volatile Tunnel tunnel;                 // действующий (или поднимающийся) сеанс; null — сеанса нет
     private TunService svc;                // живой экземпляр сервиса сеанса
     private String host, identity, psk, password, ca, apps, healthcheckIp;
@@ -68,6 +71,18 @@ final class VpnImpl implements Vpn {
     @Override
     public void setListener(Listener l) {
         lis = l;
+    }
+
+    @Override
+    public void setLogSink(LogSink s) {
+        sink = s;
+    }
+
+    /** Одна точка журнала: logcat и панель лога. Секреты сюда не передавать. */
+    private void log(String m) {
+        Log.i(TAG, m);
+        LogSink s = sink;
+        if (s != null) s.log(m);
     }
 
     @Override
@@ -94,7 +109,7 @@ final class VpnImpl implements Vpn {
     public synchronized void setStrict(boolean on) {
         if (strict == on) return;
         strict = on;
-        Log.i(TAG, "mode: " + (on ? "PBX (strict watchdog)" : "plain VPN (soft watchdog)") + ", wake lock always");
+        log("mode: " + (on ? "PBX (strict watchdog)" : "plain VPN (soft watchdog)") + ", wake lock always");
         Tunnel t = tunnel;
         if (t != null) t.strict = on;
         updateWake();
@@ -114,11 +129,11 @@ final class VpnImpl implements Vpn {
             }
             if (!wl.isHeld()) {
                 wl.acquire();
-                Log.i(TAG, "wake lock acquired");
+                log("wake lock acquired");
             }
         } else if (wl != null && wl.isHeld()) {
             wl.release();
-            Log.i(TAG, "wake lock released");
+            log("wake lock released");
         }
     }
 
@@ -183,7 +198,7 @@ final class VpnImpl implements Vpn {
         if (!want) return false;
         want = false;
         this.svc = s;
-        Log.i(TAG, "service ready, starting connection to " + host + ", online=" + watch.online());
+        log("service ready, starting connection to " + host + ", online=" + watch.online());
         updateWake();
         watch.start(this::networkChanged);
         startRecovery(0, false);
@@ -195,7 +210,7 @@ final class VpnImpl implements Vpn {
      * onRevoke от старого, уже заменённого экземпляра (мы сами пересоздаём сервис) сеанс не трогает.
      */
     synchronized void revoked(TunService s) {
-        Log.i(TAG, "onRevoke from " + System.identityHashCode(s) + ", current "
+        log("onRevoke from " + System.identityHashCode(s) + ", current "
                 + (svc == null ? "none" : String.valueOf(System.identityHashCode(svc))));
         if (s != svc) return;
         cancel("VPN was revoked by the system or another app");
@@ -205,7 +220,7 @@ final class VpnImpl implements Vpn {
 
     /** Сеть под VPN изменилась (другая, пропала, вернулась). Под замком. */
     private synchronized void networkChanged() {
-        Log.i(TAG, "networkChanged: running=" + running + " want=" + want + " svc=" + (svc != null)
+        log("networkChanged: running=" + running + " want=" + want + " svc=" + (svc != null)
                 + " tunnel=" + (tunnel != null ? "up=" + tunnel.isUp() + " mobike=" + tunnel.mobike() : "none"));
         if (!running || want || svc == null) return;
         boolean on = watch.online();
@@ -216,23 +231,23 @@ final class VpnImpl implements Vpn {
             if (t != null && t.isUp() && t.mobike()) {
                 // MOBIKE: SA и tun переживают пропажу сети; по возвращении сети — migrate. Если сервер
                 // за это время забыл SA, migrate не подтвердится и будет обычный реконнект.
-                Log.i(TAG, "network lost: MOBIKE tunnel kept, waiting for the network");
+                log("network lost: MOBIKE tunnel kept, waiting for the network");
                 kept++;
                 return;
             }
-            Log.i(TAG, "network lost: restarting");
+            log("network lost: restarting");
             restart("network lost");
             return;
         }
         if (!good && (t == null || !t.isUp())) {
-            Log.i(TAG, "networkChanged: online but not validated, waiting");
+            log("networkChanged: online but not validated, waiting");
             return;
         }
         if (t != null && t.isUp()) {
             if (t.mobike()) {
                 final int g = gen;
                 watch.mark();
-                Log.i(TAG, "network changed: MOBIKE update");
+                log("network changed: MOBIKE update");
                 migs++;
                 t.migrate(ok -> onMigrated(t, g, ok));
             } else if (watch.sameAsMarked()) {
@@ -248,11 +263,11 @@ final class VpnImpl implements Vpn {
     private synchronized void onMigrated(Tunnel t, int g, boolean ok) {
         if (g != gen || tunnel != t) return;
         if (ok) {
-            Log.i(TAG, "MOBIKE update done");
+            log("MOBIKE update done");
             String f = t.iface();
             if (f != null) lis.onUp(f);                   // App перепривяжет сокеты
         } else {
-            Log.i(TAG, "MOBIKE update failed: full reconnect");
+            log("MOBIKE update failed: full reconnect");
             restart("network changed");
         }
     }
@@ -261,7 +276,7 @@ final class VpnImpl implements Vpn {
 
     /** Полное переподключение с нуля (старый Tunnel молчит). Под замком. */
     private void restart(String reason) {
-        Log.i(TAG, "restart: " + reason);
+        log("restart: " + reason);
         gen++;
         Thread r = recovery;
         recovery = null;
@@ -324,7 +339,7 @@ final class VpnImpl implements Vpn {
         String hc = healthcheckIp == null ? "" : healthcheckIp.trim();
         t.pingHost = (hc.isEmpty() || hc.equals("0")) ? null : hc;           // если 0 или пусто — ping выключен, работают механизмы IKEv2
         t.pingMs = PING_MS;
-        t.log = m -> Log.i(TAG, m);
+        t.log = this::log;
         t.pathEvents = g;
         g.owner = t;
         tunnel = t;
@@ -372,7 +387,7 @@ final class VpnImpl implements Vpn {
                     t = launch(gd);
                 }
                 boolean finished = gd.done.await(ATTEMPT_MS, TimeUnit.MILLISECONDS);
-                Log.i(TAG, "attempt " + attempts + ": finished=" + finished + " ok=" + gd.ok
+                log("attempt " + attempts + ": finished=" + finished + " ok=" + gd.ok
                         + " retryable=" + gd.retryable + " why=" + gd.why);
                 if (finished && gd.ok) {
                     synchronized (this) {
@@ -412,7 +427,7 @@ final class VpnImpl implements Vpn {
             synchronized (VpnImpl.this) {
                 if (tunnel != owner) return;
                 heals++;
-                Log.i(TAG, "heal #" + heals + ": " + why);
+                log("heal #" + heals + ": " + why);
             }
         }
 
@@ -421,13 +436,13 @@ final class VpnImpl implements Vpn {
             synchronized (VpnImpl.this) {
                 if (tunnel != owner) return;
                 silences++;
-                Log.i(TAG, "silence #" + silences + ": " + why);
+                log("silence #" + silences + ": " + why);
             }
         }
 
         @Override
         public void onUp(String iface) {
-            Log.i(TAG, "tunnel up: " + iface);
+            log("tunnel up: " + iface);
             synchronized (VpnImpl.this) {
                 if (tunnel != owner) return;
                 ok = true;
@@ -438,7 +453,7 @@ final class VpnImpl implements Vpn {
 
         @Override
         public void onDown(String reason) {
-            Log.i(TAG, "tunnel down: " + reason + " (wasUp=" + ok + ")");
+            log("tunnel down: " + reason + " (wasUp=" + ok + ")");
             why = reason;
             Tunnel o = owner;
             retryable = o != null && o.retryable;
@@ -457,7 +472,7 @@ final class VpnImpl implements Vpn {
         /** Поднятый сеанс оборвался: переподключаемся. */
         @Override
         public void onReconnecting(String reason) {
-            Log.i(TAG, "tunnel lost: " + reason);
+            log("tunnel lost: " + reason);
             synchronized (VpnImpl.this) {
                 if (tunnel != owner) return;
                 tunnel = null;

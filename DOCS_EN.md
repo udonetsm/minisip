@@ -1,6 +1,6 @@
 # 📖 Detailed MiniSIP User Manual
 
-This manual is written in clear and accessible language for users of any skill level. It explains the purpose and usage of every button, input field, status indicator, and gesture in the **MiniSIP** application.
+This manual is written in clear and accessible language for users of any skill level. It explains the purpose and usage of every button, input field, status indicator, popup menu, and gesture in the **MiniSIP** application.
 
 ---
 
@@ -90,11 +90,34 @@ This block secures traffic for the entire device or selected applications.
 * **Buttons `VPN connect` / `VPN disconnect`**: Starts or stops the encrypted tunnel.
 * **VPN Status Text**: Displays current VPN state (e.g. `🟢 VPN: connected (tun0)`).
 
-> 🛡 **Network Reliability & Roaming**: To avoid false tunnel disconnects in subways or poor cell signal areas, VPN checks for 6 consecutive lost pings (12 seconds of silence) before sending DPD verification requests. It also fully supports **MOBIKE (RFC 4555)**: if your VPN server supports this standard, switching between Wi-Fi and mobile data instantly migrates the tunnel on the fly without dropping connection. If the server does not support MOBIKE, the app automatically performs a full reconnect through the new network interface. VPN settings can be edited even during an active SIP call.
+> 🛡 **Network Reliability & Roaming**: To avoid false tunnel disconnects in subways or poor cell signal areas, VPN checks for 5 consecutive lost pings (10 seconds of silence) before sending DPD verification requests. It also fully supports **MOBIKE (RFC 4555)**: if your VPN server supports this standard, switching between Wi-Fi and mobile data instantly migrates the tunnel on the fly without dropping connection. If the server does not support MOBIKE, the app automatically performs a full reconnect through the new network interface. VPN settings can be edited even during an active SIP call.
 
 ---
 
-## 🔀 6. Card Drag-and-Drop Reordering
+## 📋 6. Built-in Logs and Debugging (Log Console)
+
+Each of the three block cards features an integrated logging panel for connection diagnostics and error troubleshooting.
+
+### Opening Block Logs:
+1. Tap the `⋮` (three dots) menu button on the right side of any block header (`SIP server settings`, `Number and voice source`, `VPN settings`).
+2. Select **`Log`**.
+3. An interactive log console opens below the block card.
+
+### Log Controls:
+* **Button `Enable` / `Disable`**: Toggles recording and rendering of log messages in the chosen buffer.
+* **Button `Clear`**: Clears the current log buffer.
+* **Button `Copy`**: Copies all accumulated log text to the system clipboard.
+* **Button `Save`**: Exports logs to a text file.
+  - Files are saved to the public **`Downloads/MiniSIP/logs/`** directory.
+  - Android 10+ uses Scoped Storage (`MediaStore`). Android 9 and lower prompts for storage write permission (`WRITE_EXTERNAL_STORAGE`).
+* **Arrow `▼`**: Instantly scrolls to the bottom of the log console.
+* **Cross `✕`**: Closes the log console.
+
+> 💡 **Smart Auto-scroll**: Auto-scroll keeps up with incoming log entries as long as you are at the bottom of the text view. If you manually scroll up to read earlier entries, auto-scroll pauses so your view is not interrupted.
+
+---
+
+## 🔀 7. Card Drag-and-Drop Reordering
 
 You can customize the vertical order of blocks on your screen:
 1. **Long-press** any of the three cards (`SIP server settings`, `Number and voice source`, `VPN settings`).
@@ -103,7 +126,7 @@ You can customize the vertical order of blocks on your screen:
 
 ---
 
-## 📄 7. Page Management (Multi-Account Support)
+## 📄 8. Page Management (Multi-Account Support)
 
 The app allows configuring multiple independent profiles (e.g., Work, Home, Travel).
 

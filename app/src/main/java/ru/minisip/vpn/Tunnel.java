@@ -261,6 +261,7 @@ final class Tunnel {
                 fail("cannot resolve the server (IPv4 address needed)", true);
                 return;
             }
+            note("resolved " + host + " -> " + srv.getHostAddress());
             sock = new DatagramSocket();
             alive();
             if (!tun.protect(sock)) {
@@ -289,6 +290,7 @@ final class Tunnel {
                 fail(rc < 0 ? ike.error : "server keeps asking for a cookie", false);
                 return;
             }
+            note("IKE_SA_INIT done");
             byte[] req = ike.authRequest();
             for (int round = 0; req != null && round < 8; round++) {
                 r = exchange(req, natPort, true, ike.curId);
@@ -309,6 +311,7 @@ final class Tunnel {
                 fail("login did not finish", false);
                 return;
             }
+            note("IKE_AUTH done, ip=" + ike.ip);
             if (pingHost != null) {
                 pingSrc = InetAddress.getByName(ike.ip).getAddress();
                 pingDst = InetAddress.getByName(pingHost).getAddress();
@@ -316,12 +319,14 @@ final class Tunnel {
             }
             alive();
             if (tun instanceof AndroidTun) ((AndroidTun) tun).transientFail = false;
+            note("opening tun (mtu=" + MTU + ")");
             String name = tun.open(ike.ip, ike.dns, ike.routes, MTU, apps);
             if (name == null) {
                 boolean isTransient = tun instanceof AndroidTun && ((AndroidTun) tun).transientFail;
                 fail("cannot create the tun interface", isTransient);
                 return;
             }
+            note("tun " + name + " up");
             if (closed.get()) {
                 tun.close();
                 return;
@@ -351,6 +356,11 @@ final class Tunnel {
         } catch (IOException ignored) {
         }
         return null;
+    }
+
+    private void note(String m) {
+        Log l = log;
+        if (l != null) l.d(m);
     }
 
     private static Thread daemon(Runnable r, String name) {
