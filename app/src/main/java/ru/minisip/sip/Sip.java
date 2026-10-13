@@ -1,5 +1,6 @@
 package ru.minisip.sip;
 
+import ru.minisip.log.LogSink;
 import ru.minisip.media.Media;
 import ru.minisip.net.Udp;
 
@@ -22,6 +23,9 @@ public interface Sip {
     }
 
     void setListener(Listener l);
+
+    /** Куда писать отладочный лог; по умолчанию — никуда. */
+    default void setLogSink(LogSink sink) {}
 
     /** Открывает сокет и регистрируется на сервере; обновляет регистрацию сама. */
     void register(String host, int port, String user, String password);

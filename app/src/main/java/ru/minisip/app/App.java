@@ -12,6 +12,7 @@ import ru.minisip.media.Media;
 import ru.minisip.net.Udp;
 import ru.minisip.screen.Screen;
 import ru.minisip.sip.Sip;
+import ru.minisip.log.LogBuffer;
 import ru.minisip.vpn.Vpn;
 
 /**
@@ -28,6 +29,9 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     private Screen screen;
     private Vpn vpn;
     private Udp sipUdp, rtpUdp;            // сокеты SIP и RTP: их привязываем к VPN
+    private LogBuffer vpnLog;              // лог VPN: один на приложение, живёт в памяти
+    private LogBuffer callLog;             // лог звонка: события Sip.Listener и команды пользователя
+    private LogBuffer sipLog;              // лог SIP: регистрация, вызов, ответы сервера
     private String sipHost, sipUser, sipPass;
     private int sipPort;
 
@@ -76,6 +80,11 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         screen = Screen.create(this);
         vpn = Vpn.create(this);
         vpn.setListener(this);
+        vpnLog = LogBuffer.create(500);
+        vpn.setLogSink(vpnLog);
+        callLog = LogBuffer.create(500);
+        sipLog = LogBuffer.create(500);
+        sip.setLogSink(sipLog);
         try {                                // смена основной сети системы: SIP-сокет надо переоткрыть
             getSystemService(ConnectivityManager.class).registerDefaultNetworkCallback(
                     new ConnectivityManager.NetworkCallback() {
@@ -86,6 +95,21 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
                     });
         } catch (RuntimeException ignored) {
         }
+    }
+
+    /** Кольцевой лог VPN: страница настроек читает его для панели "Log". */
+    LogBuffer vpnLog() {
+        return vpnLog;
+    }
+
+    /** Кольцевой лог блока «Звонок»: страница настроек читает его для панели "Log". */
+    LogBuffer callLog() {
+        return callLog;
+    }
+
+    /** Кольцевой лог блока «SIP сервер»: страница настроек читает его для панели "Log". */
+    LogBuffer sipLog() {
+        return sipLog;
     }
 
     /**
@@ -326,6 +350,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     void dial(int page, String number) {
         if (state != IDLE || !allowed(page)) return;
         lastPage = page;
+        callLog.log("dial " + number);
         if (!registered) {
             status = "🔴 Error: no network";
             changed();
@@ -351,6 +376,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
 
     void hangup(int page) {
         if (state == IDLE || lastPage != page) return;
+        callLog.log("hangup (state=" + state + ")");
         sip.hangup();
     }
 
@@ -401,6 +427,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     @Override
     public void onRegistered(boolean ok, String info) {
         main.post(() -> {
+            callLog.log("registered=" + ok + (ok ? "" : " (" + info + ")"));
             registered = ok;
             connecting = false;
             status = ok ? "🟢 Connected" : "🔴 Error: " + info;
@@ -411,6 +438,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     @Override
     public void onRinging() {
         main.post(() -> {
+            callLog.log("ringing");
             if (state == CALLING) {
                 status = registered ? "🟢 Connected | 🟡 Calling..." : "🟡 Calling...";
                 changed();
@@ -421,6 +449,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     @Override
     public void onConnected() {
         main.post(() -> {
+            callLog.log("call connected");
             state = TALK;
             status = "🟢 Connected | 🟢 Call in progress";
             changed();
@@ -429,6 +458,9 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
 
     @Override
     public void onEnded(String reason) {
-        main.post(() -> finish("Ended: " + reason));
+        main.post(() -> {
+            callLog.log("call ended: " + reason);
+            finish("Ended: " + reason);
+        });
     }
 }

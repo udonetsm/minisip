@@ -12,6 +12,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
+import ru.minisip.log.LogSink;
 import ru.minisip.media.Media;
 import ru.minisip.net.Udp;
 
@@ -33,6 +34,7 @@ final class SipImpl implements Sip {
         return t;
     });
     private volatile Listener lis = new Listener() {};
+    private volatile LogSink sink = s -> {};
 
     // настройки и сокет
     private String host, user, pass, ip;
@@ -118,8 +120,19 @@ final class SipImpl implements Sip {
     }
 
     @Override
+    public void setLogSink(LogSink s) {
+        sink = s == null ? x -> {} : s;
+    }
+
+    /** Единая точка отладочного лога: logcat не пишем, только sink. Пароль и Authorization не логируем. */
+    private void log(String m) {
+        sink.log(m);
+    }
+
+    @Override
     public void register(String h, int p, String u, String pw) {
         post(() -> {
+            log("register " + h + ":" + p + " " + u);
             host = h;
             port = p;
             user = u;
@@ -131,6 +144,7 @@ final class SipImpl implements Sip {
     @Override
     public void unregister() {
         post(() -> {
+            log("unregister");
             cancelReg();
             if (ip != null && user != null && host != null) {
                 regCseq++;
@@ -152,8 +166,10 @@ final class SipImpl implements Sip {
     @Override
     public void call(String number) {
         post(() -> {
+            log("INVITE → " + number.trim());
             if (call != null) return;
             if (ip == null) {
+                log("call failed: no network");
                 lis.onEnded("no network");
                 return;
             }
@@ -235,12 +251,14 @@ final class SipImpl implements Sip {
         if (c < 200) return;
         if (regTx != null) regTx.stop();
         if (c == 401 || c == 407) {
+            log(c + " received");
             String a = regAuth ? null : authHeader(m, "REGISTER", "sip:" + host);
             if (a == null) {
                 regFail("invalid login or password", false);
                 return;
             }
             regAuth = true;
+            log("authorized");
             regCseq++;
             sendReg(a);
         } else if (c < 300) {
@@ -251,6 +269,7 @@ final class SipImpl implements Sip {
                 if (e != null) exp = Integer.parseInt(e.trim());
             } catch (NumberFormatException ignored) {
             }
+            log("registered ok (expires=" + exp + ")");
             lis.onRegistered(true, "");
             regTimer = ex.schedule(() -> guard(this::doRegister), Math.max(20, exp / 2),
                     TimeUnit.SECONDS);
@@ -260,6 +279,7 @@ final class SipImpl implements Sip {
     }
 
     private void regFail(String why, boolean retry) {
+        log("register failed: " + why);
         lis.onRegistered(false, why);
         if (retry) regTimer = ex.schedule(() -> guard(this::startReg), 20, TimeUnit.SECONDS);
     }
@@ -297,8 +317,10 @@ final class SipImpl implements Sip {
         }
         if (c < 200) {
             k.tx.stop();
+            if (c == 100) log("100 Trying");
             if ((c == 180 || c == 183) && !k.ringing) {
                 k.ringing = true;
+                log(c + " Ringing");
                 String[] s = Sdp.parse(m.body);
                 if (s != null) {
                     media.start(s[0], Integer.parseInt(s[1]), Integer.parseInt(s[2]));
@@ -326,6 +348,7 @@ final class SipImpl implements Sip {
             k.tx.start();
         } else if (c >= 300) {
             send(ackFail(m), host, port);
+            log("call failed: " + c + " " + m.reason());
             end(k, c + " " + m.reason());
         } else {                                  // 2xx
             k.to = m.get("to");
@@ -335,6 +358,8 @@ final class SipImpl implements Sip {
             Collections.reverse(rr);
             k.route = rr;
             send(ack2xx(k), k.dh, k.dp);
+            log("200 OK");
+            log("ACK");
             String[] s = Sdp.parse(m.body);
             boolean ok = s != null
                     && media.start(s[0], Integer.parseInt(s[1]), Integer.parseInt(s[2]));
@@ -412,6 +437,7 @@ final class SipImpl implements Sip {
     }
 
     private void cancel(Call k) {
+        log("CANCEL");
         String m = msg("CANCEL " + k.uri + " SIP/2.0", "", hdrs(
                 "Via: " + via(k.branch), "Max-Forwards: 70",
                 "From: " + k.from, "To: <" + k.uri + ">",
@@ -421,6 +447,7 @@ final class SipImpl implements Sip {
 
     private void bye(Call k) {
         int n = ++k.cseq;
+        log("BYE");
         List<String> l = hdrs("Via: " + via(branch()), "Max-Forwards: 70");
         for (String r : k.route) l.add("Route: " + r);
         l.addAll(hdrs("From: " + k.from, "To: " + k.to, "Call-ID: " + k.id,

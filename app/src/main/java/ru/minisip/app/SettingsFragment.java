@@ -3,11 +3,13 @@ package ru.minisip.app;
 import android.Manifest;
 import android.animation.LayoutTransition;
 import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -19,13 +21,17 @@ import android.text.TextWatcher;
 import android.text.style.RelativeSizeSpan;
 import android.util.TypedValue;
 import android.view.DragEvent;
+import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -40,6 +46,8 @@ import com.google.android.material.color.MaterialColors;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
+
+import ru.minisip.log.LogFile;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
@@ -81,12 +89,42 @@ public final class SettingsFragment extends Fragment {
     private MaterialButton connect, disconnect, call, hang, audioBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
     private LinearLayout vpnMainSpoilerContainer, vpnAdvancedSpoilerContainer, sipSpoilerContainer;
 
+    private LogArea sipLog, callLog, vpnLog;
+
     /** Одна и та же ссылка нужна, чтобы в onPause снимать только свой колбэк. */
     private final Runnable renderer = this::render;
+
+    /** Мост LogBuffer -> поле панели: буфер зовёт из своего потока, поле обновляем через post. */
+    private final Runnable vpnLogUpdate = () -> {
+        LogArea a = vpnLog;
+        if (a != null && app != null) a.setText(app.vpnLog().text());
+    };
+
+    /** Мост LogBuffer -> поле панели для блока «Звонок». */
+    private final Runnable callLogUpdate = () -> {
+        LogArea a = callLog;
+        if (a != null && app != null) a.setText(app.callLog().text());
+    };
+
+    /** Мост LogBuffer -> поле панели для блока «SIP сервер». */
+    private final Runnable sipLogUpdate = () -> {
+        LogArea a = sipLog;
+        if (a != null && app != null) a.setText(app.sipLog().text());
+    };
 
     private final ActivityResultLauncher<String> micPermission = registerForActivityResult(
             new ActivityResultContracts.RequestPermission(), granted -> {
                 if (!granted && status != null) status.setText("Microphone permission required");
+            });
+
+    /** Отложенное сохранение на Android ≤ 9, пока пользователь не выдаст разрешение. */
+    private Runnable pendingSave;
+    /** Разрешение на внешнее хранилище для Android ≤ 9; после выдачи продолжаем отложенное сохранение. */
+    private final ActivityResultLauncher<String> storagePermission = registerForActivityResult(
+            new ActivityResultContracts.RequestPermission(), granted -> {
+                Runnable r = pendingSave;
+                pendingSave = null;
+                if (granted && r != null) r.run();
             });
 
     @Override
@@ -110,7 +148,7 @@ public final class SettingsFragment extends Fragment {
 
         // --- Блок 1: Настройка АТС сервера ---
         Block sipBlock = createBlock(0);
-        title(sipBlock.container, "SIP server settings", 0);
+        sipLog = title(sipBlock.container, "SIP server settings", 0);
 
         sipSpoilerContainer = new LinearLayout(ctx);
         sipSpoilerContainer.setOrientation(LinearLayout.VERTICAL);
@@ -134,9 +172,11 @@ public final class SettingsFragment extends Fragment {
         disconnect = button(sipBlock.container, "Disconnect", true, v -> app.disconnect(page));
         status = body(sipBlock.container, dp(8));
 
+        sipBlock.container.addView(sipLog.panel, row(dp(8)));
+
         // --- Блок 2: Номер телефона и источник звука ---
         Block callBlock = createBlock(1);
-        title(callBlock.container, "Number and voice source", 0);
+        callLog = title(callBlock.container, "Number and voice source", 0);
         number = field(callBlock.container, "Number", null, "", InputType.TYPE_CLASS_PHONE, false);
         number.setTextSize(TypedValue.COMPLEX_UNIT_SP, 35f);
         number.setPadding(dp(16), dp(16), dp(16), dp(16));
@@ -152,9 +192,11 @@ public final class SettingsFragment extends Fragment {
         audioBtn = button(callBlock.container, "Voice source", true, v -> pickOutput());
         muteBtn = button(callBlock.container, "Mute microphone 🎤", true, v -> toggleMute());
 
+        callBlock.container.addView(callLog.panel, row(dp(8)));
+
         // --- Блок 3: Настройка VPN ---
         Block vpnBlock = createBlock(2);
-        title(vpnBlock.container, "VPN settings (IKEv2)", 0);
+        vpnLog = title(vpnBlock.container, "VPN settings (IKEv2)", 0);
 
         vpnMainSpoilerContainer = new LinearLayout(ctx);
         vpnMainSpoilerContainer.setOrientation(LinearLayout.VERTICAL);
@@ -202,6 +244,8 @@ public final class SettingsFragment extends Fragment {
         vpnConnect = button(vpnBlock.container, "VPN connect", false, v -> doVpnConnect());
         vpnDisconnect = button(vpnBlock.container, "VPN disconnect", true, v -> app.vpnDisconnect(page));
         vpnStatus = body(vpnBlock.container, dp(8));
+
+        vpnBlock.container.addView(vpnLog.panel, row(dp(8)));
 
         setupCardDragAndDrop(sipBlock.card, 0, col);
         setupCardDragAndDrop(callBlock.card, 1, col);
@@ -325,12 +369,36 @@ public final class SettingsFragment extends Fragment {
         load(vpnKey, "vpnKey");
         load(vpnCa, "vpnCa");
         load(vpnHealthcheck, "vpnHealthcheck");
+        if (vpnLog != null) {
+            vpnLog.onEnable = vpnLogUpdate;
+            vpnLog.onClear = () -> app.vpnLog().clear();
+            vpnLog.onSave = () -> saveLog("vpn", vpnLog);
+            vpnLog.setText(app.vpnLog().text());
+            app.vpnLog().setListener(vpnLogUpdate);
+        }
+        if (callLog != null) {
+            callLog.onEnable = callLogUpdate;
+            callLog.onClear = () -> app.callLog().clear();
+            callLog.onSave = () -> saveLog("call", callLog);
+            callLog.setText(app.callLog().text());
+            app.callLog().setListener(callLogUpdate);
+        }
+        if (sipLog != null) {
+            sipLog.onEnable = sipLogUpdate;
+            sipLog.onClear = () -> app.sipLog().clear();
+            sipLog.onSave = () -> saveLog("sip", sipLog);
+            sipLog.setText(app.sipLog().text());
+            app.sipLog().setListener(sipLogUpdate);
+        }
         app.onChange = renderer;     // событиями App живёт только видимая страница
         render();
     }
 
     @Override
     public void onPause() {
+        if (app != null) app.vpnLog().setListener(null);
+        if (app != null) app.callLog().setListener(null);
+        if (app != null) app.sipLog().setListener(null);
         if (app.onChange == renderer) app.onChange = null;
         super.onPause();
     }
@@ -722,11 +790,216 @@ public final class SettingsFragment extends Fragment {
         return p;
     }
 
-    private void title(LinearLayout parent, String text, int top) {
-        TextView t = new TextView(parent.getContext());
+    private LogArea title(LinearLayout parent, String text, int top) {
+        Context ctx = parent.getContext();
+        LinearLayout head = new LinearLayout(ctx);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView t = new TextView(ctx);
         t.setText(text);
         t.setTextAppearance(android.R.style.TextAppearance_Medium);
-        parent.addView(t, row(top));
+        head.addView(t, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView more = new TextView(ctx);
+        more.setText("\u22EE");                 // ⋮
+        more.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
+        int pad = dp(10);
+        more.setPadding(pad, 0, pad, 0);
+        more.setClickable(true);
+        more.setFocusable(true);
+        head.addView(more);
+
+        parent.addView(head, row(top));
+
+        LogArea area = new LogArea(ctx);
+
+        more.setOnClickListener(v -> {
+            PopupMenu pm = new PopupMenu(ctx, v);
+            pm.getMenu().add("Log");
+            pm.setOnMenuItemClickListener(item -> {
+                boolean show = area.panel.getVisibility() == View.GONE;
+                area.panel.setVisibility(show ? View.VISIBLE : View.GONE);
+                return true;
+            });
+            pm.show();
+        });
+
+        return area;
+    }
+
+    /** Панель лога блока: контейнер, поле для текста и кнопки. */
+    private final class LogArea {
+        volatile boolean enabled = false;   // было true: пока пользователь не включил — не пишем в поле
+        final LinearLayout panel;
+        final EditText text;
+        final MaterialButton toggle;
+        Runnable onEnable;
+        Runnable onClear;
+        Runnable onSave;
+
+        LogArea(Context ctx) {
+            panel = new LinearLayout(ctx);
+            panel.setOrientation(LinearLayout.VERTICAL);
+            panel.setVisibility(View.GONE);
+            // шапка панели: крестик закрытия справа
+            LinearLayout head = new LinearLayout(ctx);
+            head.setOrientation(LinearLayout.HORIZONTAL);
+            head.setGravity(Gravity.END);
+            int cp = dp(10);
+
+            TextView down = new TextView(ctx);
+            down.setText("\u25BC");                  // ▼
+            down.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
+            down.setPadding(cp, dp(2), cp, dp(2));
+            down.setClickable(true);
+            down.setFocusable(true);
+            down.setOnClickListener(v -> scrollToBottom());
+            head.addView(down);
+
+            TextView close = new TextView(ctx);
+            close.setText("\u2715");                 // ✕
+            close.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
+            close.setPadding(cp, dp(2), cp, dp(2));
+            close.setClickable(true);
+            close.setFocusable(true);
+            close.setOnClickListener(v -> panel.setVisibility(View.GONE));
+            head.addView(close);
+            panel.addView(head);
+            text = new EditText(ctx);
+            text.setKeyListener(null);              // только чтение
+            text.setTextIsSelectable(true);
+            text.setGravity(Gravity.TOP | Gravity.START);
+            text.setTextAppearance(android.R.style.TextAppearance_Small);
+            text.setHint("Log is empty");
+            text.setPadding(dp(8), dp(8), dp(8), dp(8));
+            text.setMovementMethod(new android.text.method.ScrollingMovementMethod());
+            text.setVerticalScrollBarEnabled(true);
+            text.setFocusable(true);
+            text.setFocusableInTouchMode(true);
+            text.setOnTouchListener((v, ev) -> {
+                switch (ev.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        v.getParent().requestDisallowInterceptTouchEvent(true);
+                        break;
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        v.getParent().requestDisallowInterceptTouchEvent(false);
+                        break;
+                }
+                return false;
+            });
+
+            // Ненавязчивая рамка вокруг поля: тонкая заливка + контур. Видна и на светлом,
+            // и на тёмном фоне (полупрозрачный серый ложится поверх любого тона).
+            android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+            bg.setColor(0x14808080);              // ~8% серого поверх фона страницы
+            bg.setStroke(dp(1), 0x33808080);      // рамка чуть плотнее заливки
+            bg.setCornerRadius(dp(8));
+            text.setBackground(bg);
+
+            // Центр — поле лога, по бокам по 15% — пустые полосы (там жест уходит странице).
+            LinearLayout band = new LinearLayout(ctx);
+            band.setOrientation(LinearLayout.HORIZONTAL);
+            View left = new View(ctx);
+            band.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.15f));
+            band.addView(text, new LinearLayout.LayoutParams(0, dp(300), 0.70f));
+            View right = new View(ctx);
+            band.addView(right, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.15f));
+            panel.addView(band, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(300)));
+            LinearLayout row = new LinearLayout(ctx);
+            row.setOrientation(LinearLayout.VERTICAL);
+            MaterialButton clear = smallButton(ctx, "Clear");
+            MaterialButton copy = smallButton(ctx, "Copy");
+            MaterialButton save = smallButton(ctx, "Save");
+            toggle = smallButton(ctx, "Enable");
+            clear.setOnClickListener(v -> {
+                text.setText("");
+                if (onClear != null) onClear.run();
+            });
+            copy.setOnClickListener(v -> {
+                ClipboardManager cm = (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
+                if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("log", text.getText()));
+            });
+            save.setOnClickListener(v -> {
+                if (onSave != null) onSave.run();
+            });
+            toggle.setOnClickListener(v -> {
+                enabled = !enabled;
+                toggle.setText(enabled ? "Disable" : "Enable");
+                if (enabled && onEnable != null) onEnable.run();
+            });
+            row.addView(clear);
+            row.addView(copy);
+            row.addView(save);
+            row.addView(toggle);
+            panel.addView(row);
+        }
+
+        void setText(String s) {
+            text.post(() -> {
+                if (!enabled) return;
+                boolean near = isNearBottom();   // решение принимаем ДО обновления текста
+                text.setText(s);
+                if (near) scrollToBottom();
+            });
+        }
+
+        /** Авто-скролл разрешён, пока видна хотя бы одна из последних 4 строк; как только ушли — стоп. */
+        private boolean isNearBottom() {
+            android.text.Layout l = text.getLayout();
+            int lc = text.getLineCount();
+            if (l == null || lc == 0) return true;
+            int view = text.getHeight() - text.getPaddingTop() - text.getPaddingBottom();
+            if (view <= 0) return true;
+            int keepTop = l.getLineTop(Math.max(0, lc - 4));
+            return keepTop < text.getScrollY() + view - 1;
+        }
+
+        /** Максимально возможный scrollY для текущего содержимого. */
+        private int maxScroll() {
+            android.text.Layout l = text.getLayout();
+            if (l == null) return 0;
+            int content = l.getLineTop(text.getLineCount());
+            int view = text.getHeight() - text.getPaddingTop() - text.getPaddingBottom();
+            return Math.max(0, content - view);
+        }
+
+        private void scrollToBottom() {
+            int max = maxScroll();
+            if (max > 0) text.scrollTo(0, max);
+        }
+    }
+
+    private MaterialButton smallButton(Context ctx, String label) {
+        MaterialButton b = new MaterialButton(ctx);
+        b.setText(label);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
+        b.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return b;
+    }
+
+    /** Сохранить текст панели в Documents/minisip/. На Android ≤ 9 сначала спрашиваем разрешение. */
+    private void saveLog(String prefix, LogArea area) {
+        String text = area.text.getText().toString();
+        if (text.trim().isEmpty()) {
+            Toast.makeText(requireContext(), "Log is empty", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (Build.VERSION.SDK_INT <= 28
+                && requireContext().checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+            pendingSave = () -> saveLog(prefix, area);
+            storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+            return;
+        }
+        String result = LogFile.save(requireContext(), prefix, text);
+        Toast.makeText(requireContext(),
+                result.startsWith("error:") ? result : "Saved: " + result,
+                Toast.LENGTH_LONG).show();
     }
 
     private TextView body(LinearLayout parent, int top) {

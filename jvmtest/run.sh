@@ -7,6 +7,7 @@ SRC=app/src/main/java/ru/minisip
 OUT=$(mktemp -d)
 python3 tools/check_imports.py
 javac -d "$OUT" $(find jvmtest/stubs -name '*.java') \
+      $SRC/log/LogSink.java $SRC/log/LogBuffer.java $SRC/log/LogBufferImpl.java \
       $SRC/net/*.java $SRC/media/*.java $SRC/sip/*.java $SRC/vpn/*.java $SRC/app/PageStore.java \
       jvmtest/ru/minisip/media/*.java jvmtest/ru/minisip/sip/*.java \
       jvmtest/ru/minisip/net/*.java jvmtest/ru/minisip/vpn/*.java jvmtest/ru/minisip/app/*.java
