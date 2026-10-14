@@ -99,7 +99,7 @@ This block secures traffic for the entire device or selected applications.
 Each of the three block cards features an integrated logging panel for connection diagnostics and error troubleshooting.
 
 ### Opening Block Logs:
-1. Tap the `⋮` (three dots) menu button on the right side of any block header (`SIP server settings`, `Number and voice source`, `VPN settings`).
+1. Tap the `⋮` (three dots) menu button on the right side of any block header (`SIP server settings`, `Number and voice source`, `VPN settings`) or next to the version label.
 2. Select **`Log`**.
 3. An interactive log console opens below the block card.
 
@@ -149,3 +149,25 @@ The app allows configuring multiple independent profiles (e.g., Work, Home, Trav
 In all confirmation popup dialogs:
 - **`No` Button** (Cancel) is styled in **bright bold blue** (`#2196F3`) to prevent accidental actions.
 - **`Yes` Button** (Confirm) is styled in **dim gray** (`#888888`) with 20% translucency (`alpha = 0.80f`).
+
+---
+
+## 🔄 9. App Updates (Auto-Update)
+
+The app features an integrated updater for checking and installing updates directly from GitHub Releases.
+
+### Checking for Updates:
+1. Scroll to the bottom of any settings page to find the version label (e.g., `v0.1`).
+2. Press and hold the version label for **2 seconds**.
+3. A dialog will prompt you to choose an update channel:
+   - **`Stable`** — Official stable release builds.
+   - **`Pre-release`** — Preview and pre-release builds.
+4. Tap **`Check`**.
+
+### Download and Installation Flow:
+* **Background Check**: The app queries the GitHub Releases API in the background and compares the release date to the installed package timestamp.
+* **Progress Bar**: If a new release is available, a dark **`UpdateBar`** slides up at the bottom of the screen displaying the download progress (`Downloading vX.X.X — 45%`).
+* **One-Tap Install**: Once downloaded, the bar displays an **`Install`** button. Tapping it:
+  - Prompts for `REQUEST_INSTALL_PACKAGES` permission on Android 8+ if not already granted.
+  - Launches Android's native package installer via a secure `FileProvider`.
+* **Update Log**: Access the update service log anytime via the `⋮` menu next to the version string -> `Log`.

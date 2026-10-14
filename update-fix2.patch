@@ -1,0 +1,49 @@
+diff --git a/app/build.gradle b/app/build.gradle
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -1,4 +1,27 @@
+ plugins {
+     id 'com.android.application'
+ }
+ 
++// Версия из локального git-тега (того же, что привязан к релизу на GitHub).
++//   на теге v2.0.5        → versionName "2.0.5",        versionCode 20500
++//   +3 коммита (тест)     → versionName "2.0.5-3-gabc", versionCode 20500
++//   без тегов             → versionName "abc1234",      versionCode 1
++def gitDescribe = { ->
++    try {
++        def out = new ByteArrayOutputStream()
++        exec {
++            commandLine 'git', 'describe', '--tags', '--always', '--dirty=-dirty'
++            standardOutput = out
++            ignoreExitValue = true
++        }
++        def s = out.toString().trim()
++        return s.isEmpty() ? '0.0.0' : s
++    } catch (Exception e) {
++        return '0.0.0'
++    }
++}
++
++def rawTag    = gitDescribe()
++def vName     = rawTag.startsWith('v') ? rawTag.substring(1) : rawTag
++def vBase     = vName.split('-')[0]
++def vParts    = vBase.tokenize('.').collect { it.isInteger() ? it.toInteger() : 0 }
++def vCode     = vParts.size() >= 3
++        ? vParts[0] * 10000 + vParts[1] * 100 + vParts[2]
++        : (vParts.size() == 2 ? vParts[0] * 10000 + vParts[1] * 100 : 1)
++
+ android {
+     namespace 'ru.minisip'
+     compileSdk 35
+@@ -8,8 +31,8 @@
+         applicationId 'ru.minisip'
+         minSdk 27
+         targetSdk 34
+-        versionCode 1
+-        versionName '0.1'
++        versionCode vCode
++        versionName vName
+     }
+ 
+     compileOptions {
