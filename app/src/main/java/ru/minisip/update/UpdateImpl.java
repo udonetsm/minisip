@@ -122,8 +122,8 @@ final class UpdateImpl implements Update {
                     emit(() -> { Listener p = persistent; if (p != null) p.onChecked(fr); },
                          () -> l.onChecked(fr));
                 } else {
-                    emit(() -> { Listener p = persistent; if (p != null) p.onError("релизов пока нет"); },
-                         () -> l.onError("релизов пока нет"));
+                    emit(() -> { Listener p = persistent; if (p != null) p.onError("No releases yet"); },
+                         () -> l.onError("No releases yet"));
                 }
             } else {
                 final String msg = "HTTP " + c.code;
@@ -132,7 +132,7 @@ final class UpdateImpl implements Update {
             }
         } catch (IOException e) {
             log("check io: " + e.getMessage());
-            final String msg = "сеть: " + e.getMessage();
+            final String msg = "network: " + e.getMessage();
             emit(() -> { Listener p = persistent; if (p != null) p.onError(msg); },
                  () -> l.onError(msg));
         } catch (Exception e) {
@@ -190,8 +190,8 @@ final class UpdateImpl implements Update {
         final String url = assetUrl;
         final String tag = assetName;
         if (url == null) {
-            emit(() -> { Listener p = persistent; if (p != null) p.onError("нет APK в релизе"); },
-                 () -> l.onError("нет APK в релизе"));
+            emit(() -> { Listener p = persistent; if (p != null) p.onError("No APK asset in release"); },
+                 () -> l.onError("No APK asset in release"));
             return;
         }
         Thread t = new Thread(() -> downloadIn(url, tag, l), "update-dl");
@@ -213,7 +213,7 @@ final class UpdateImpl implements Update {
                  () -> l.onDownloaded(f));
         } catch (IOException e) {
             log("download io: " + e.getMessage());
-            final String msg = "скачивание: " + e.getMessage();
+            final String msg = "download: " + e.getMessage();
             emit(() -> { Listener p = persistent; if (p != null) p.onError(msg); },
                  () -> l.onError(msg));
         }
