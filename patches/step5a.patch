@@ -1,0 +1,142 @@
+diff --git a/app/src/main/java/ru/minisip/app/SettingsFragment.java b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -17,10 +17,13 @@ import android.text.style.RelativeSizeSpan;
+ import android.util.TypedValue;
+ import android.view.DragEvent;
++import android.view.Gravity;
+ import android.view.LayoutInflater;
+ import android.view.MotionEvent;
+ import android.view.View;
+ import android.view.ViewGroup;
++import android.widget.EditText;
+ import android.widget.FrameLayout;
+ import android.widget.LinearLayout;
++import android.widget.PopupMenu;
+ import android.widget.TextView;
+ 
+ import androidx.activity.result.ActivityResultLauncher;
+@@ -78,8 +81,11 @@ public final class SettingsFragment extends Fragment {
+     private TextView status, vpnStatus;
+     private MaterialButton connect, disconnect, call, hang, audioBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
+     private LinearLayout vpnMainSpoilerContainer, vpnAdvancedSpoilerContainer, sipSpoilerContainer;
+ 
++    private LogArea sipLog, callLog, vpnLog;
++
+     /** Одна и та же ссылка нужна, чтобы в onPause снимать только свой колбэк. */
+     private final Runnable renderer = this::render;
+ 
+@@ -108,7 +114,7 @@ public final class SettingsFragment extends Fragment {
+         // --- Блок 1: Настройка АТС сервера ---
+         Block sipBlock = createBlock(0);
+-        title(sipBlock.container, "SIP server settings", 0);
++        sipLog = title(sipBlock.container, "SIP server settings", 0);
+ 
+         sipSpoilerContainer = new LinearLayout(ctx);
+         sipSpoilerContainer.setOrientation(LinearLayout.VERTICAL);
+@@ -130,10 +136,12 @@ public final class SettingsFragment extends Fragment {
+         connect = button(sipBlock.container, "Connect", false, v -> doConnect());
+         disconnect = button(sipBlock.container, "Disconnect", true, v -> app.disconnect(page));
+         status = body(sipBlock.container, dp(8));
+ 
++        sipBlock.container.addView(sipLog.panel, row(dp(8)));
++
+         // --- Блок 2: Номер телефона и источник звука ---
+         Block callBlock = createBlock(1);
+-        title(callBlock.container, "Number and voice source", 0);
++        callLog = title(callBlock.container, "Number and voice source", 0);
+         number = field(callBlock.container, "Number", null, "", InputType.TYPE_CLASS_PHONE, false);
+         number.setTextSize(TypedValue.COMPLEX_UNIT_SP, 35f);
+         number.setPadding(dp(16), dp(16), dp(16), dp(16));
+@@ -151,10 +159,12 @@ public final class SettingsFragment extends Fragment {
+         hang = button(callBlock.container, "Discard", true, v -> app.hangup(page));
+         audioBtn = button(callBlock.container, "Voice source", true, v -> pickOutput());
+         muteBtn = button(callBlock.container, "Mute microphone 🎤", true, v -> toggleMute());
+ 
++        callBlock.container.addView(callLog.panel, row(dp(8)));
++
+         // --- Блок 3: Настройка VPN ---
+         Block vpnBlock = createBlock(2);
+-        title(vpnBlock.container, "VPN settings (IKEv2)", 0);
++        vpnLog = title(vpnBlock.container, "VPN settings (IKEv2)", 0);
+ 
+         vpnMainSpoilerContainer = new LinearLayout(ctx);
+         vpnMainSpoilerContainer.setOrientation(LinearLayout.VERTICAL);
+@@ -211,6 +221,8 @@ public final class SettingsFragment extends Fragment {
+         vpnConnect = button(vpnBlock.container, "VPN connect", false, v -> doVpnConnect());
+         vpnDisconnect = button(vpnBlock.container, "VPN disconnect", true, v -> app.vpnDisconnect(page));
+         vpnStatus = body(vpnBlock.container, dp(8));
+ 
++        vpnBlock.container.addView(vpnLog.panel, row(dp(8)));
++
+         setupCardDragAndDrop(sipBlock.card, 0, col);
+         setupCardDragAndDrop(callBlock.card, 1, col);
+         setupCardDragAndDrop(vpnBlock.card, 2, col);
+@@ -382,12 +394,62 @@ public final class SettingsFragment extends Fragment {
+         return p;
+     }
+ 
+     private void title(LinearLayout parent, String text, int top) {
+-        TextView t = new TextView(parent.getContext());
+-        t.setText(text);
+-        t.setTextAppearance(android.R.style.TextAppearance_Medium);
+-        parent.addView(t, row(top));
+-    }
++        Context ctx = parent.getContext();
++        LinearLayout head = new LinearLayout(ctx);
++        head.setOrientation(LinearLayout.HORIZONTAL);
++        head.setGravity(Gravity.CENTER_VERTICAL);
++
++        TextView t = new TextView(ctx);
++        t.setText(text);
++        t.setTextAppearance(android.R.style.TextAppearance_Medium);
++        head.addView(t, new LinearLayout.LayoutParams(0,
++                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
++
++        TextView more = new TextView(ctx);
++        more.setText("\u22EE");                 // ⋮
++        more.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
++        int pad = dp(10);
++        more.setPadding(pad, 0, pad, 0);
++        more.setClickable(true);
++        more.setFocusable(true);
++        head.addView(more);
++
++        parent.addView(head, row(top));
++
++        LinearLayout panel = new LinearLayout(ctx);
++        panel.setOrientation(LinearLayout.VERTICAL);
++        panel.setVisibility(View.GONE);
++        EditText log = new EditText(ctx);
++        log.setKeyListener(null);               // только чтение
++        log.setTextIsSelectable(true);
++        log.setGravity(Gravity.TOP | Gravity.START);
++        log.setTextAppearance(android.R.style.TextAppearance_Small);
++        log.setHint("Log is empty");
++        log.setPadding(dp(8), dp(8), dp(8), dp(8));
++        panel.addView(log, new LinearLayout.LayoutParams(
++                ViewGroup.LayoutParams.MATCH_PARENT, dp(180)));
++
++        more.setOnClickListener(v -> {
++            PopupMenu pm = new PopupMenu(ctx, v);
++            pm.getMenu().add("Log");
++            pm.setOnMenuItemClickListener(item -> {
++                boolean show = panel.getVisibility() == View.GONE;
++                panel.setVisibility(show ? View.VISIBLE : View.GONE);
++                return true;
++            });
++            pm.show();
++        });
++
++        return new LogArea(panel, log);
++    }
++
++    /** Панель лога блока: контейнер (показ/скрытие) и поле для текста. */
++    private static final class LogArea {
++        final LinearLayout panel;
++        final EditText text;
++        LogArea(LinearLayout p, EditText t) { panel = p; text = t; }
++    }
+ 
+     private TextView body(LinearLayout parent, int top) {
+         TextView t = new TextView(parent.getContext());

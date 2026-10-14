@@ -1,0 +1,155 @@
+diff --git a/app/src/main/java/ru/minisip/app/MainActivity.java b/app/src/main/java/ru/minisip/app/MainActivity.java
+--- a/app/src/main/java/ru/minisip/app/MainActivity.java
++++ b/app/src/main/java/ru/minisip/app/MainActivity.java
+@@ -6,11 +6,13 @@
+ import android.os.Build;
+ import android.os.Bundle;
++import android.view.Gravity;
+ import android.view.ViewGroup;
+ import android.widget.Button;
+ import android.widget.FrameLayout;
++import android.widget.Toast;
+ 
+ import android.content.SharedPreferences;
+ import android.net.Uri;
+@@ -36,6 +38,9 @@
+     private ViewPager2 pager;
+     private Pages pages;
++    private UpdateBar updateBar;
++    /** tag последнего релиза — только для отображения в строке прогресса. */
++    private String lastUpdateTag = "";
+ 
+     @Override
+     protected void onCreate(Bundle b) {
+@@ -74,6 +79,36 @@
+         root.addView(pager, new FrameLayout.LayoutParams(
+                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+         setContentView(root);
++
++        // Полоса обновления: одна на приложение, внизу поверх ViewPager2, ужимает его снизу.
++        updateBar = new UpdateBar(this);
++        FrameLayout.LayoutParams barLp = new FrameLayout.LayoutParams(
++                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++        barLp.gravity = Gravity.BOTTOM;
++        root.addView(updateBar, barLp);
++        updateBar.attachInset(pager);
++        pager.setClipToPadding(false);
++
++        final App app = (App) getApplication();
++        app.update().setListener(new Update.Listener() {
++            @Override public void onChecked(Update.Result r) {
++                if (r.hasUpdate) {
++                    lastUpdateTag = r.tag == null ? "" : r.tag;
++                    updateBar.showProgress(0, lastUpdateTag);
++                }
++                // noStable и «последняя версия» обрабатывает SettingsFragment (шаг 7)
++            }
++            @Override public void onProgress(int percent) {
++                updateBar.showProgress(percent, lastUpdateTag);
++            }
++            @Override public void onDownloaded(java.io.File apk) {
++                updateBar.showInstall(v -> app.update().install());
++            }
++            @Override public void onError(String reason) {
++                Toast.makeText(MainActivity.this, reason, Toast.LENGTH_LONG).show();
++                updateBar.postDelayed(updateBar::hide, 3000);
++            }
++        });
+ 
+         if (b == null) {
+             if (Build.VERSION.SDK_INT >= 33) {
+diff --git a/app/src/main/java/ru/minisip/app/UpdateBar.java b/app/src/main/java/ru/minisip/app/UpdateBar.java
+new file mode 100644
+--- /dev/null
++++ b/app/src/main/java/ru/minisip/app/UpdateBar.java
+@@ -0,0 +1,79 @@
++package ru.minisip.app;
++
++import android.content.Context;
++import android.graphics.Color;
++import android.view.Gravity;
++import android.view.View;
++import android.widget.LinearLayout;
++import android.widget.ProgressBar;
++import android.widget.TextView;
++
++/**
++ * Полоса внизу экрана: прогресс скачивания APK либо кнопка «Установить».
++ * Одна на приложение, живёт в MainActivity. Видна только при активном обновлении;
++ * пока видна — ужимает ViewPager2 снизу (padding + clipToPadding=false), чтобы контент
++ * страниц не заходил под полосу.
++ */
++final class UpdateBar extends LinearLayout {
++
++    private static final int HEIGHT_DP = 48;
++
++    private final ProgressBar progress;
++    private final TextView label;
++    private View insetTarget;
++
++    UpdateBar(Context ctx) {
++        super(ctx);
++        setOrientation(HORIZONTAL);
++        setGravity(Gravity.CENTER_VERTICAL);
++        setBackgroundColor(0xF0222222);                 // плотный тёмный фон
++        int pad = dp(12);
++        setPadding(pad, pad, pad, pad);
++        setVisibility(GONE);
++
++        progress = new ProgressBar(ctx, null, android.R.attr.progressBarStyleHorizontal);
++        progress.setMax(100);
++        progress.setIndeterminate(false);
++        addView(progress, new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f));
++
++        label = new TextView(ctx);
++        label.setTextColor(Color.WHITE);
++        label.setTextSize(14f);
++        LayoutParams lp = new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
++        lp.leftMargin = dp(12);
++        addView(label, lp);
++    }
++
++    /** Кого ужимать снизу, когда полоса видна (обычно ViewPager2). */
++    void attachInset(View v) {
++        insetTarget = v;
++    }
++
++    @Override
++    public void setVisibility(int v) {
++        super.setVisibility(v);
++        if (insetTarget == null) return;
++        int px = v == VISIBLE ? dp(HEIGHT_DP) : 0;
++        insetTarget.setPadding(insetTarget.getPaddingLeft(), insetTarget.getPaddingTop(),
++                insetTarget.getPaddingRight(), px);
++    }
++
++    /** Прогресс скачивания. percent=-1 — длина неизвестна. tag — строка релиза (может быть пустой). */
++    void showProgress(int percent, String tag) {
++        progress.setVisibility(VISIBLE);
++        label.setClickable(false);
++        label.setFocusable(false);
++        label.setOnClickListener(null);
++        String pct = percent < 0 ? "" : " — " + percent + "%";
++        label.setText("Скачивание " + (tag == null ? "" : tag) + pct);
++        if (percent >= 0) progress.setProgress(percent);
++        setVisibility(VISIBLE);
++    }
++
++    /** Скачано: на той же полосе — кликабельная надпись «Установить». */
++    void showInstall(OnClickListener onInstall) {
++        progress.setVisibility(GONE);
++        label.setText("Установить");
++        label.setClickable(true);
++        label.setFocusable(true);
++        label.setOnClickListener(onInstall);
++        setVisibility(VISIBLE);
++    }
++
++    void hide() {
++        setVisibility(GONE);
++    }
++
++    private int dp(int v) {
++        return (int) (v * getResources().getDisplayMetrics().density);
++    }
++}

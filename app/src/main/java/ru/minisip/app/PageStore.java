@@ -3,6 +3,8 @@ package ru.minisip.app;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -30,6 +32,43 @@ final class PageStore {
     static boolean configured(Context c, int page) {
         SharedPreferences p = prefs(c, page);
         return !p.getString("server", "").trim().isEmpty() && !p.getString("login", "").trim().isEmpty();
+    }
+
+    /** Один контакт перевода. login обязателен, name — то, что видно в списке. */
+    static final class Refer {
+        final String login;
+        final String name;
+
+        Refer(String login, String name) {
+            this.login = login == null ? "" : login.trim();
+            this.name = name == null ? "" : name.trim();
+        }
+
+        /** Подпись строки в UI: name, иначе login. */
+        String label() {
+            return name.isEmpty() ? login : name;
+        }
+    }
+
+    /** Список контактов перевода страницы. Хранение: строки "login\tname", разделённые '\n'. */
+    static List<Refer> refers(Context c, int page) {
+        List<Refer> out = new ArrayList<>();
+        String raw = prefs(c, page).getString("refers", "");
+        for (String line : raw.split("\n")) {
+            if (line.isEmpty()) continue;
+            int t = line.indexOf('\t');
+            out.add(t < 0 ? new Refer(line, "") : new Refer(line.substring(0, t), line.substring(t + 1)));
+        }
+        return out;
+    }
+
+    static void setRefers(Context c, int page, List<Refer> list) {
+        StringBuilder sb = new StringBuilder();
+        for (Refer r : list) {
+            if (r.login.isEmpty()) continue;
+            sb.append(r.login).append('\t').append(r.name).append('\n');
+        }
+        prefs(c, page).edit().putString("refers", sb.toString()).apply();
     }
 
     /** Удаляет указанную страницу, сдвигая последующие страницы назад. */

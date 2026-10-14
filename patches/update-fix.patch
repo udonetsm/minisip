@@ -1,0 +1,143 @@
+diff --git a/app/src/main/java/ru/minisip/app/UpdateBar.java b/app/src/main/java/ru/minisip/app/UpdateBar.java
+--- a/app/src/main/java/ru/minisip/app/UpdateBar.java
++++ b/app/src/main/java/ru/minisip/app/UpdateBar.java
+@@ -60,22 +60,42 @@
+     /** Прогресс скачивания. percent=-1 — длина неизвестна. tag — строка релиза (может быть пустой). */
+     void showProgress(int percent, String tag) {
+         progress.setVisibility(VISIBLE);
++        configureLabel(false);
+         label.setClickable(false);
+         label.setFocusable(false);
+         label.setOnClickListener(null);
+         String pct = percent < 0 ? "" : " — " + percent + "%";
+-        label.setText("Скачивание " + (tag == null ? "" : tag) + pct);
++        label.setText("Downloading " + (tag == null ? "" : tag) + pct);
+         if (percent >= 0) progress.setProgress(percent);
+         setVisibility(VISIBLE);
+     }
+ 
+-    /** Скачано: на той же полосе — кликабельная надпись «Установить». */
++    /** Скачано: на той же полосе — кликабельная надпись «Install» на всю ширину. */
+     void showInstall(OnClickListener onInstall) {
+         progress.setVisibility(GONE);
+-        label.setText("Установить");
++        configureLabel(true);
++        label.setText("Install");
+         label.setClickable(true);
+         label.setFocusable(true);
+         label.setOnClickListener(onInstall);
+         setVisibility(VISIBLE);
+     }
+ 
++    /**
++     * fullWidth=true — «Install» на всю ширину полосы (progress скрыт, label занимает всё),
++     * fullWidth=false — текст прогресса справа от ProgressBar, ширина по содержимому.
++     */
++    private void configureLabel(boolean fullWidth) {
++        LayoutParams lp = (LayoutParams) label.getLayoutParams();
++        if (fullWidth) {
++            lp.width = 0;
++            lp.weight = 1f;
++            lp.leftMargin = 0;
++        } else {
++            lp.width = LayoutParams.WRAP_CONTENT;
++            lp.weight = 0f;
++            lp.leftMargin = dp(12);
++        }
++        label.setLayoutParams(lp);
++        label.setGravity(Gravity.CENTER);
++    }
++
+     void hide() {
+         setVisibility(GONE);
+     }
+diff --git a/app/src/main/java/ru/minisip/update/UpdateImpl.java b/app/src/main/java/ru/minisip/update/UpdateImpl.java
+--- a/app/src/main/java/ru/minisip/update/UpdateImpl.java
++++ b/app/src/main/java/ru/minisip/update/UpdateImpl.java
+@@ -112,21 +112,21 @@
+                 if (stable) {
+                     r.noStable = true;
+                     final Result fr = r;
+                     emit(() -> { Listener p = persistent; if (p != null) p.onChecked(fr); },
+                          () -> l.onChecked(fr));
+                 } else {
+-                    emit(() -> { Listener p = persistent; if (p != null) p.onError("релизов пока нет"); },
+-                         () -> l.onError("релизов пока нет"));
++                    emit(() -> { Listener p = persistent; if (p != null) p.onError("No releases yet"); },
++                         () -> l.onError("No releases yet"));
+                 }
+             } else {
+                 final String msg = "HTTP " + c.code;
+                 emit(() -> { Listener p = persistent; if (p != null) p.onError(msg); },
+                      () -> l.onError(msg));
+             }
+         } catch (IOException e) {
+             log("check io: " + e.getMessage());
+-            final String msg = "сеть: " + e.getMessage();
++            final String msg = "network: " + e.getMessage();
+             emit(() -> { Listener p = persistent; if (p != null) p.onError(msg); },
+                  () -> l.onError(msg));
+         } catch (Exception e) {
+@@ -238,8 +238,8 @@
+         final String url = assetUrl;
+         final String tag = assetName;
+         if (url == null) {
+-            emit(() -> { Listener p = persistent; if (p != null) p.onError("нет APK в релизе"); },
+-                 () -> l.onError("нет APK в релизе"));
++            emit(() -> { Listener p = persistent; if (p != null) p.onError("No APK asset in release"); },
++                 () -> l.onError("No APK asset in release"));
+             return;
+         }
+@@ -262,7 +262,7 @@
+         } catch (IOException e) {
+             log("download io: " + e.getMessage());
+-            final String msg = "скачивание: " + e.getMessage();
++            final String msg = "download: " + e.getMessage();
+             emit(() -> { Listener p = persistent; if (p != null) p.onError(msg); },
+                  () -> l.onError(msg));
+         }
+diff --git a/app/src/main/java/ru/minisip/app/SettingsFragment.java b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -668,29 +668,29 @@
+     private void showChannelDialog() {
+         String[] names = {"Stable", "Pre-release"};
+         int checked = "prerelease".equals(app.update().channel()) ? 1 : 0;
+         new MaterialAlertDialogBuilder(requireContext())
+-                .setTitle("Канал обновлений")
++                .setTitle("Update channel")
+                 .setSingleChoiceItems(names, checked, (d, which) ->
+                         app.update().setChannel(which == 1 ? "prerelease" : "stable"))
+-                .setPositiveButton("Проверить", (d, w) -> app.update().check(checkListener))
+-                .setNegativeButton("Отмена", null)
++                .setPositiveButton("Check", (d, w) -> app.update().check(checkListener))
++                .setNegativeButton("Cancel", null)
+                 .show();
+     }
+ 
+     /**
+      * Локальный слушатель check(). Полоса в MainActivity подключена постоянным слушателем
+      * и уже показывает скачивание; здесь — только случаи, когда полосы не будет.
+      */
+     private final Update.Listener checkListener = new Update.Listener() {
+         @Override
+         public void onChecked(Update.Result r) {
+             if (r == null || r.hasUpdate) return;   // показ полосы — не наша забота
+             if (r.noStable) {
+                 MainActivity.showCustomConfirmDialog(requireContext(),
+-                        "Стабильных версий пока нет",
+-                        "Проверить пре-релизы?",
++                        "No stable versions yet",
++                        "Check pre-releases?",
+                         () -> {
+                             app.update().setChannel("prerelease");
+                             app.update().check(checkListener);
+                         },
+                         null);
+                 return;
+             }
+-            Toast.makeText(requireContext(), "У вас последняя версия", Toast.LENGTH_SHORT).show();
++            Toast.makeText(requireContext(), "You have the latest version", Toast.LENGTH_SHORT).show();
+         }
+         // onError показывает MainActivity (Toast + скрытие полосы) — здесь не дублируем
+     };

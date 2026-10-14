@@ -1,0 +1,80 @@
+diff --git a/app/src/main/java/ru/minisip/app/App.java b/app/src/main/java/ru/minisip/app/App.java
+--- a/app/src/main/java/ru/minisip/app/App.java
++++ b/app/src/main/java/ru/minisip/app/App.java
+@@ -29,6 +29,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener {
+     private Vpn vpn;
+     private Udp sipUdp, rtpUdp;            // сокеты SIP и RTP: их привязываем к VPN
+     private LogBuffer vpnLog;              // лог VPN: один на приложение, живёт в памяти
++    private LogBuffer callLog;             // лог звонка: события Sip.Listener и команды пользователя
+     private String sipHost, sipUser, sipPass;
+     private int sipPort;
+ 
+@@ -72,6 +73,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener {
+         vpn.setListener(this);
+         vpnLog = LogBuffer.create(500);
+         vpn.setLogSink(vpnLog);
++        callLog = LogBuffer.create(500);
+         try {                                // смена основной сети системы: SIP-сокет надо переоткрыть
+             getSystemService(ConnectivityManager.class).registerDefaultNetworkCallback(
+                     new ConnectivityManager.NetworkCallback() {
+@@ -84,6 +86,11 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener {
+         return vpnLog;
+     }
+ 
++    /** Кольцевой лог блока «Звонок»: страница настроек читает его для панели "Log". */
++    LogBuffer callLog() {
++        return callLog;
++    }
++
+     /**
+      * Появилась новая основная сеть. Пока локального VPN нет, SIP идёт стеком системы, а его сокет
+      * и адрес в Via/Contact остались от старой сети: сам SipImpl заметит это лишь через ~2 минуты
+@@ -351,6 +358,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener {
+     void dial(int page, String number) {
+         if (state != IDLE || !allowed(page)) return;
+         lastPage = page;
++        callLog.log("dial " + number);
+         if (!registered) {
+             status = "🔴 Error: no network";
+             changed();
+@@ -365,6 +373,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener {
+     void hangup(int page) {
+         if (state == IDLE || lastPage != page) return;
++        callLog.log("hangup (state=" + state + ")");
+         sip.hangup();
+     }
+ 
+@@ -405,6 +414,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener {
+     @Override
+     public void onRegistered(boolean ok, String info) {
+         main.post(() -> {
++            callLog.log("registered=" + ok + (ok ? "" : " (" + info + ")"));
+             registered = ok;
+             connecting = false;
+             status = ok ? "🟢 Connected" : "🔴 Error: " + info;
+@@ -414,6 +424,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener {
+     @Override
+     public void onRinging() {
+         main.post(() -> {
++            callLog.log("ringing");
+             if (state == CALLING) {
+                 status = registered ? "🟢 Connected | 🟡 Calling..." : "🟡 Calling...";
+                 changed();
+@@ -423,6 +434,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener {
+     @Override
+     public void onConnected() {
+         main.post(() -> {
++            callLog.log("call connected");
+             state = TALK;
+             status = "🟢 Connected | 🟢 Call in progress";
+             changed();
+@@ -431,6 +443,9 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener {
+     @Override
+     public void onEnded(String reason) {
+-        main.post(() -> finish("Ended: " + reason));
++        main.post(() -> {
++            callLog.log("call ended: " + reason);
++            finish("Ended: " + reason);
++        });
+     }
+ }

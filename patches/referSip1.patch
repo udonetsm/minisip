@@ -1,0 +1,17 @@
+diff --git a/app/src/main/java/ru/minisip/sip/Sip.java b/app/src/main/java/ru/minisip/sip/Sip.java
+--- a/app/src/main/java/ru/minisip/sip/Sip.java
++++ b/app/src/main/java/ru/minisip/sip/Sip.java
+@@ -38,6 +38,13 @@ public interface Sip {
+ 
+     void call(String number);
+ 
++    /**
++     * Blind transfer: REFER на target в рамках активного диалога.
++     * target — логин (тогда domain берётся из текущей регистрации) или полный sip-URI.
++     * Результат перевода приходит через {@link Listener#onEnded(String)}.
++     */
++    void transfer(String target);
++
+     /** Отмена / отбой — по состоянию вызова. */
+     void hangup();
+ 

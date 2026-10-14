@@ -48,6 +48,13 @@ This block manages connection to your PBX phone server.
 
 > 💡 **Input Guard**: As soon as PBX is connected (`🟢 Connected`), `Server`, `Login`, and `Password` fields are automatically locked against accidental modifications. To edit settings, tap `Disconnect` first.
 
+### Transfer Contacts List (`Refers`):
+In the `⋮` (three dots) menu of the `SIP server settings` block header, select **`Refers`**:
+* **Contacts Panel**: Opens a saved list of transfer targets for quick call forwarding.
+* **Button `+ Add refer`**: Adds a new transfer entry (`Login` and `Name`).
+* **Edit and Delete**: Tap the pencil icon (`✎`) to edit an entry, or the cross icon (`✕`) to delete it.
+* **Usage During Calls**: Tapping any contact name/number in the `Refers` list during an active call prompts a transfer confirmation (*"Transfer call to..."*).
+
 ---
 
 ## 📞 4. Block 2: Number and Voice Source (Number and Voice Source)
@@ -63,7 +70,13 @@ This block is used for dialing phone numbers and controlling audio during calls.
   - `Earpiece` — Earpiece speaker (for holding phone to your ear).
   - `Speakerphone` — Loudspeaker / speakerphone mode.
 * **Button `Mute microphone 🎤` / `Unmute microphone 🎙️`**: Instantly mutes or unmutes the microphone during a call. When muted, PCM silence frames are transmitted over RTP, ensuring the remote party hears complete silence.
-  
+
+### Call Transfer (Blind Transfer):
+1. During an active call (`🟢 Call in progress`), open the **`Refers`** list from the `⋮` menu of the PBX settings block.
+2. Tap the desired transfer contact.
+3. Tap **`Yes`** in the confirmation dialog to initiate the transfer.
+4. The app sends a `REFER` request with the target URI to the PBX. Upon receiving PBX confirmation (`202 Accepted` and `NOTIFY 200 OK`), the initial call automatically terminates.
+
 ### Smart Features During Calls:
 * **Proximity Sensor**: Holding the phone to your ear automatically turns off the screen to prevent accidental cheek touches.
 * **Music Pause (Audio Focus)**: Playing music or YouTube videos automatically pause when a call starts and resume after hanging up.

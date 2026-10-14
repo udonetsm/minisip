@@ -1,0 +1,27 @@
+--- a/app/src/main/java/ru/minisip/app/App.java
++++ b/app/src/main/java/ru/minisip/app/App.java
+@@ -32,6 +32,7 @@
+     private Udp sipUdp, rtpUdp;            // сокеты SIP и RTP: их привязываем к VPN
+     private LogBuffer vpnLog;              // лог VPN: один на приложение, живёт в памяти
+     private LogBuffer callLog;             // лог звонка: события Sip.Listener и команды пользователя
++    private LogBuffer sipLog;              // лог SIP: регистрация, вызов, ответы сервера
+     private String sipHost, sipUser, sipPass;
+     private int sipPort;
+@@ -97,6 +98,8 @@
+         vpnLog = LogBuffer.create(500);
+         vpn.setLogSink(vpnLog);
+         callLog = LogBuffer.create(500);
++        sipLog = LogBuffer.create(500);
++        sip.setLogSink(sipLog);
+         try {                                // смена основной сети системы: SIP-сокет надо переоткрыть
+@@ -117,6 +120,11 @@
+     LogBuffer callLog() {
+         return callLog;
+     }
+ 
++    /** Кольцевой лог блока «SIP сервер»: страница настроек читает его для панели "Log". */
++    LogBuffer sipLog() {
++        return sipLog;
++    }
++
+     /**

@@ -1,0 +1,15 @@
+diff --git a/app/src/main/java/ru/minisip/app/SettingsFragment.java b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -92,6 +92,12 @@ public final class SettingsFragment extends Fragment {
+             if (a != null && app != null) a.setText(app.vpnLog().text());
+     };
+ 
++    /** Мост LogBuffer -> поле панели для блока «Звонок». */
++    private final Runnable callLogUpdate = () -> {
++        LogArea a = callLog;
++        if (a != null && app != null) a.setText(app.callLog().text());
++    };
++
+     private final ActivityResultLauncher<String> micPermission = registerForActivityResult(
+             new ActivityResultContracts.RequestPermission(), granted -> {

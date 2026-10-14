@@ -1,0 +1,149 @@
+diff --git a/app/src/main/java/ru/minisip/sip/SipImpl.java b/app/src/main/java/ru/minisip/sip/SipImpl.java
+--- a/app/src/main/java/ru/minisip/sip/SipImpl.java
++++ b/app/src/main/java/ru/minisip/sip/SipImpl.java
+@@
+         boolean ringing;
+         Tx tx;
++        int referCseq;
++        ScheduledFuture<?> referTimer;
+     }
+@@
+     @Override
++    public void transfer(String target) {
++        post(() -> {
++            Call k = call;
++            if (k == null || k.state != CONNECTED) {
++                log("transfer: no active call");
++                return;
++            }
++            if (k.referCseq > 0) {
++                log("transfer already in progress");
++                return;
++            }
++            String t = target == null ? "" : target.trim();
++            if (t.isEmpty()) return;
++            String uri = t.startsWith("sip:") ? t
++                    : "sip:" + (t.contains("@") ? t : t + "@" + host);
++            k.referCseq = ++k.cseq;
++            log("REFER → " + uri);
++            Tx tx = new Tx(refer(k, uri), k.dh, k.dp, () -> {
++                log("transfer: no response");
++                k.referCseq = 0;
++            });
++            bg.put(k.id + "|" + k.referCseq + "|REFER", tx);
++            tx.start();
++        });
++    }
++
++    @Override
+     public void hangup() {
+@@
+         } else if (cm.equals("INVITE")) {
+             onInviteResp(m);
++        } else if (cm.equals("REFER")) {
++            onReferResp(m);
+         } else if (m.status() >= 200) {          // BYE, CANCEL
+@@
+             case "OPTIONS":
+                 send(response(m, 200, "OK", null,
+                         hdrs("Allow: INVITE, ACK, CANCEL, BYE, OPTIONS"), ""), h, p);
+                 break;
++            case "NOTIFY":
++                send(response(m, 200, "OK", null, null, ""), h, p);
++                if (same && "refer".equals(Msg.eventName(m.get("event")))) {
++                    int code = sipfragCode(m.body);
++                    if (code >= 200) onReferFinal(k, code, sipfragReason(m.body));
++                }
++                break;
+             default:
+@@
+     /** Ответ на вызов, которого у нас уже нет (отменили, гонка CANCEL/200): добиваем без состояния. */
+     private void stray(Msg m) {
+@@
+     private String ack2xx(Call k) {
+         List<String> l = hdrs("Via: " + via(branch()), "Max-Forwards: 70");
+         for (String r : k.route) l.add("Route: " + r);
+         l.addAll(hdrs("From: " + k.from, "To: " + k.to, "Call-ID: " + k.id,
+                 "CSeq: " + k.cseq + " ACK"));
+         return msg("ACK " + k.target + " SIP/2.0", "", l);
+     }
+ 
++    /** REFER в рамках диалога: Refer-To как sip-URI, CSeq — из k.referCseq. */
++    private String refer(Call k, String target) {
++        List<String> l = hdrs("Via: " + via(branch()), "Max-Forwards: 70");
++        for (String r : k.route) l.add("Route: " + r);
++        l.addAll(hdrs("From: " + k.from, "To: " + k.to, "Call-ID: " + k.id,
++                "CSeq: " + k.referCseq + " REFER", "Contact: " + contact(),
++                "Refer-To: <" + target + ">", "User-Agent: minisip"));
++        return msg("REFER " + k.target + " SIP/2.0", "", l);
++    }
++
++    /** 202 Accepted — приняли к исполнению; ждём NOTIFY (refer). Прочее — конец перевода. */
++    private void onReferResp(Msg m) {
++        Call k = call;
++        if (k == null || !k.id.equals(m.get("call-id")) || k.referCseq != m.cseq()) return;
++        int c = m.status();
++        if (c < 200) return;
++        Tx t = bg.remove(m.key());
++        if (t != null) t.stop();
++        if (c >= 300) {
++            log("transfer failed: " + c + " " + m.reason());
++            k.referCseq = 0;
++            return;
++        }
++        log("202 Accepted");
++        k.referTimer = ex.schedule(() -> guard(() -> {
++            if (k.referCseq == 0) return;
++            log("transfer: no NOTIFY");
++            onReferFinal(k, 0, "no notify");
++        }), 32, TimeUnit.SECONDS);
++    }
++
++    /** Финальный NOTIFY refer (или таймаут): шлём BYE, отдаём onEnded. */
++    private void onReferFinal(Call k, int code, String reason) {
++        if (k.referCseq == 0) return;
++        k.referCseq = 0;
++        if (k.referTimer != null) {
++            k.referTimer.cancel(false);
++            k.referTimer = null;
++        }
++        if (call != k) return;
++        String msg = code == 0 ? "transfer " + reason
++                : code < 300 ? "transferred"
++                : "transfer failed: " + code + " " + reason;
++        log(msg);
++        bye(k);
++        end(k, msg);
++    }
++
++    /** Тело message/sipfrag: "SIP/2.0 200 OK" → код. 0 — не sipfrag. */
++    private static int sipfragCode(String body) {
++        if (body == null) return 0;
++        String line = body.split("\r?\n", 2)[0].trim();
++        String[] p = line.split(" ", 3);
++        if (p.length < 2 || !p[0].startsWith("SIP/")) return 0;
++        try {
++            return Integer.parseInt(p[1]);
++        } catch (RuntimeException e) {
++            return 0;
++        }
++    }
++
++    private static String sipfragReason(String body) {
++        if (body == null) return "";
++        String line = body.split("\r?\n", 2)[0].trim();
++        String[] p = line.split(" ", 3);
++        return p.length > 2 ? p[2] : "";
++    }
++
+     /** ACK на финальный не-2xx ответ собирается из самого ответа. */
+@@
+         call = null;
+         if (k.tx != null) k.tx.stop();
++        if (k.referTimer != null) {
++            k.referTimer.cancel(false);
++            k.referTimer = null;
++        }
+         media.stop();
+         lis.onEnded(reason);
+     }

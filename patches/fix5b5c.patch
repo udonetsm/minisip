@@ -1,0 +1,27 @@
+diff --git a/app/src/main/java/ru/minisip/app/SettingsFragment.java b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -98,15 +98,15 @@ public final class SettingsFragment extends Fragment {
+             new ActivityResultContracts.RequestPermission(), granted -> {
+                 if (!granted && status != null) status.setText("Microphone permission required");
+             });
+ 
++    /** Отложенное сохранение на Android ≤ 9, пока пользователь не выдаст разрешение. */
++    private Runnable pendingSave;
+     /** Разрешение на внешнее хранилище для Android ≤ 9; после выдачи продолжаем отложенное сохранение. */
+     private final ActivityResultLauncher<String> storagePermission = registerForActivityResult(
+             new ActivityResultContracts.RequestPermission(), granted -> {
+                 Runnable r = pendingSave;
+                 pendingSave = null;
+                 if (granted && r != null) r.run();
+             });
+-    private Runnable pendingSave;
+ 
+     @Override
+     public void onCreate(@Nullable Bundle b) {
+@@ -762,7 +762,7 @@ public final class SettingsFragment extends Fragment {
+-    private void title(LinearLayout parent, String text, int top) {
++    private LogArea title(LinearLayout parent, String text, int top) {
+         Context ctx = parent.getContext();
+         LinearLayout head = new LinearLayout(ctx);
+         head.setOrientation(LinearLayout.HORIZONTAL);

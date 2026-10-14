@@ -35,6 +35,13 @@ public interface Sip {
 
     void call(String number);
 
+    /**
+     * Blind transfer: REFER на target в рамках активного диалога.
+     * target — логин (тогда domain берётся из текущей регистрации) или полный sip-URI.
+     * Результат перевода приходит через {@link Listener#onEnded(String)}.
+     */
+    void transfer(String target);
+
     /** Отмена / отбой — по состоянию вызова. */
     void hangup();
 

@@ -23,6 +23,8 @@ final class Msg {
         COMPACT.put("m", "contact");
         COMPACT.put("c", "content-type");
         COMPACT.put("l", "content-length");
+        COMPACT.put("r", "refer-to");
+        COMPACT.put("o", "event");
     }
 
     final String first;
@@ -173,5 +175,12 @@ final class Msg {
         if (c >= 0) u = u.substring(c + 1);
         int at = u.indexOf('@');
         return at >= 0 ? u.substring(0, at) : u;
+    }
+
+    /** Имя события из заголовка Event: "refer" из "refer;id=123". Пустая строка, если null. */
+    static String eventName(String hdr) {
+        if (hdr == null) return "";
+        int c = hdr.indexOf(';');
+        return (c < 0 ? hdr : hdr.substring(0, c)).trim().toLowerCase(Locale.ROOT);
     }
 }

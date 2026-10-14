@@ -1,0 +1,213 @@
+diff --git a/app/src/main/java/ru/minisip/vpn/Vpn.java b/app/src/main/java/ru/minisip/vpn/Vpn.java
+--- a/app/src/main/java/ru/minisip/vpn/Vpn.java
++++ b/app/src/main/java/ru/minisip/vpn/Vpn.java
+@@ -2,6 +2,8 @@
+ 
+ import android.content.Context;
+ 
++import ru.minisip.log.LogSink;
++
+ /**
+  * IKEv2-клиент (общий ключ или логин/пароль, ESP поверх UDP 4500) и интерфейс tun.
+  * Ни от каких наших пакетов не зависит. Наружу — только встроенные типы.
+@@ -28,6 +30,8 @@
+     default int pingEvaluated() { return 0; }
+     default void setStrict(boolean on) {}
+ 
++    /** Куда писать журнал событий (null — никуда). Строки без секретов. */
++    default void setLogSink(LogSink s) {}
++
+     void setListener(Listener l);
+     /** true — подключена АТС: wake lock и жёсткий watchdog. false — обычный VPN. */
+ 
+diff --git a/app/src/main/java/ru/minisip/vpn/VpnImpl.java b/app/src/main/java/ru/minisip/vpn/VpnImpl.java
+--- a/app/src/main/java/ru/minisip/vpn/VpnImpl.java
++++ b/app/src/main/java/ru/minisip/vpn/VpnImpl.java
+@@ -9,6 +9,8 @@
+ 
+ import java.util.concurrent.CountDownLatch;
+ import java.util.concurrent.TimeUnit;
++
++import ru.minisip.log.LogSink;
+ 
+ /**
+  * Связывает публичный интерфейс, системный сервис и Tunnel.
+@@ -47,6 +49,7 @@
+     private final Context ctx;
+     private final NetWatch watch;
+     private volatile Listener lis = new Listener() {};
++    private volatile LogSink sink;
+     private volatile Tunnel tunnel;                 // действующий (или поднимающийся) сеанс; null — сеанса нет
+     private TunService svc;                // живой экземпляр сервиса сеанса
+     private String host, identity, psk, password, ca, apps, healthcheckIp;
+@@ -66,6 +69,17 @@
+         lis = l;
+     }
+ 
++    @Override
++    public void setLogSink(LogSink s) {
++        sink = s;
++    }
++
++    /** Одна точка журнала: logcat и панель лога. Секреты сюда не передавать. */
++    private void log(String m) {
++        Log.i(TAG, m);
++        LogSink s = sink;
++        if (s != null) s.log(m);
++    }
++
+     @Override
+     public synchronized boolean mobike() {
+         Tunnel t = tunnel;
+@@ -95,7 +109,7 @@
+     public synchronized void setStrict(boolean on) {
+         if (strict == on) return;
+         strict = on;
+-        Log.i(TAG, "mode: " + (on ? "PBX (strict watchdog)" : "plain VPN (soft watchdog)") + ", wake lock always");
++        log("mode: " + (on ? "PBX (strict watchdog)" : "plain VPN (soft watchdog)") + ", wake lock always");
+         Tunnel t = tunnel;
+         if (t != null) t.strict = on;
+         updateWake();
+@@ -118,11 +132,11 @@
+             }
+             if (!wl.isHeld()) {
+                 wl.acquire();
+-                Log.i(TAG, "wake lock acquired");
++                log("wake lock acquired");
+             }
+         } else if (wl != null && wl.isHeld()) {
+             wl.release();
+-            Log.i(TAG, "wake lock released");
++            log("wake lock released");
+         }
+     }
+ 
+@@ -195,7 +209,7 @@
+         if (!want) return false;
+         want = false;
+         this.svc = s;
+-        Log.i(TAG, "service ready, starting connection to " + host + ", online=" + watch.online());
++        log("service ready, starting connection to " + host + ", online=" + watch.online());
+         updateWake();
+         watch.start(this::networkChanged);
+         startRecovery(0, false);
+@@ -208,7 +222,7 @@
+      */
+     synchronized void revoked(TunService s) {
+-        Log.i(TAG, "onRevoke from " + System.identityHashCode(s) + ", current "
++        log("onRevoke from " + System.identityHashCode(s) + ", current "
+                 + (svc == null ? "none" : String.valueOf(System.identityHashCode(svc))));
+         if (s != svc) return;
+         cancel("VPN was revoked by the system or another app");
+@@ -220,7 +234,7 @@
+     /** Сеть под VPN изменилась (другая, пропала, вернулась). Под замком. */
+     private synchronized void networkChanged() {
+-        Log.i(TAG, "networkChanged: running=" + running + " want=" + want + " svc=" + (svc != null)
++        log("networkChanged: running=" + running + " want=" + want + " svc=" + (svc != null)
+                 + " tunnel=" + (tunnel != null ? "up=" + tunnel.isUp() + " mobike=" + tunnel.mobike() : "none"));
+         if (!running || want || svc == null) return;
+         boolean on = watch.online();
+@@ -234,21 +248,21 @@
+             if (t != null && t.isUp() && t.mobike()) {
+                 // MOBIKE: SA и tun переживают пропажу сети; по возвращении сети — migrate. Если сервер
+                 // за это время забыл SA, migrate не подтвердится и будет обычный реконнект.
+-                Log.i(TAG, "network lost: MOBIKE tunnel kept, waiting for the network");
++                log("network lost: MOBIKE tunnel kept, waiting for the network");
+                 kept++;
+                 return;
+             }
+-            Log.i(TAG, "network lost: restarting");
++            log("network lost: restarting");
+             restart("network lost");
+             return;
+         }
+         if (!good && (t == null || !t.isUp())) {
+-            Log.i(TAG, "networkChanged: online but not validated, waiting");
++            log("networkChanged: online but not validated, waiting");
+             return;
+         }
+         if (t != null && t.isUp()) {
+             if (t.mobike()) {
+                 final int g = gen;
+                 watch.mark();
+-                Log.i(TAG, "network changed: MOBIKE update");
++                log("network changed: MOBIKE update");
+                 migs++;
+                 t.migrate(ok -> onMigrated(t, g, ok));
+@@ -266,11 +280,11 @@
+         if (g != gen || tunnel != t) return;
+         if (ok) {
+-            Log.i(TAG, "MOBIKE update done");
++            log("MOBIKE update done");
+             String f = t.iface();
+             if (f != null) lis.onUp(f);                   // App перепривяжет сокеты
+         } else {
+-            Log.i(TAG, "MOBIKE update failed: full reconnect");
++            log("MOBIKE update failed: full reconnect");
+             restart("network changed");
+         }
+     }
+@@ -278,7 +292,7 @@
+     /** Полное переподключение с нуля (старый Tunnel молчит). Под замком. */
+     private void restart(String reason) {
+-        Log.i(TAG, "restart: " + reason);
++        log("restart: " + reason);
+         gen++;
+         Thread r = recovery;
+         recovery = null;
+@@ -345,7 +359,7 @@
+         t.pingMs = PING_MS;
+-        t.log = m -> Log.i(TAG, m);
++        t.log = this::log;
+         t.pathEvents = g;
+         g.owner = t;
+         tunnel = t;
+@@ -384,8 +398,8 @@
+                 boolean finished = gd.done.await(ATTEMPT_MS, TimeUnit.MILLISECONDS);
+-                Log.i(TAG, "attempt " + attempts + ": finished=" + finished + " ok=" + gd.ok
+-                        + " retryable=" + gd.retryable + " why=" + gd.why);
++                log("attempt " + attempts + ": finished=" + finished + " ok=" + gd.ok
++                        + " retryable=" + gd.retryable + " why=" + gd.why);
+                 if (finished && gd.ok) {
+                     synchronized (this) {
+                         if (recovery == Thread.currentThread()) recovery = null;
+@@ -428,7 +442,7 @@
+                 if (tunnel != owner) return;
+                 heals++;
+-                Log.i(TAG, "heal #" + heals + ": " + why);
++                log("heal #" + heals + ": " + why);
+             }
+         }
+ 
+@@ -437,13 +451,13 @@
+             synchronized (VpnImpl.this) {
+                 if (tunnel != owner) return;
+                 silences++;
+-                Log.i(TAG, "silence #" + silences + ": " + why);
++                log("silence #" + silences + ": " + why);
+             }
+         }
+ 
+         @Override
+         public void onUp(String iface) {
+-            Log.i(TAG, "tunnel up: " + iface);
++            log("tunnel up: " + iface);
+             synchronized (VpnImpl.this) {
+                 if (tunnel != owner) return;
+                 ok = true;
+@@ -454,7 +468,7 @@
+         @Override
+         public void onDown(String reason) {
+-            Log.i(TAG, "tunnel down: " + reason + " (wasUp=" + ok + ")");
++            log("tunnel down: " + reason + " (wasUp=" + ok + ")");
+             why = reason;
+             Tunnel o = owner;
+             retryable = o != null && o.retryable;
+@@ -475,7 +489,7 @@
+         @Override
+         public void onReconnecting(String reason) {
+-            Log.i(TAG, "tunnel lost: " + reason);
++            log("tunnel lost: " + reason);
+             synchronized (VpnImpl.this) {
+                 if (tunnel != owner) return;
+                 tunnel = null;

@@ -1,0 +1,129 @@
+diff --git a/app/src/main/java/ru/minisip/update/Update.java b/app/src/main/java/ru/minisip/update/Update.java
+--- a/app/src/main/java/ru/minisip/update/Update.java
++++ b/app/src/main/java/ru/minisip/update/Update.java
+@@ -41,6 +41,9 @@
+     /** "stable" или "prerelease". Сохраняется в prefs. */
+     void setChannel(String channel);
+ 
+     String channel();
+ 
++    /** Постоянный слушатель (полоса обновления в MainActivity). null снимает. */
++    void setListener(Listener l);
++
+     /** GET к выбранному каналу. При hasUpdate=true сам зовёт download(). */
+     void check(Listener l);
+ 
+diff --git a/app/src/main/java/ru/minisip/update/UpdateImpl.java b/app/src/main/java/ru/minisip/update/UpdateImpl.java
+--- a/app/src/main/java/ru/minisip/update/UpdateImpl.java
++++ b/app/src/main/java/ru/minisip/update/UpdateImpl.java
+@@ -24,6 +24,7 @@
+     private final Handler main = new Handler(Looper.getMainLooper());
+     private volatile LogSink sink;
+     private volatile String channel;
++    private volatile Listener persistent;  // постоянный слушатель (полоса в MainActivity)
+     private volatile String assetUrl;      // browser_download_url APK из последнего успешного check()
+     private volatile String assetName;     // tag_name для отображения в прогрессе
+ 
+@@ -42,6 +43,21 @@
+     public void setLogSink(LogSink s) {
+         sink = s;
+     }
+ 
++    @Override
++    public void setListener(Listener l) {
++        persistent = l;
++    }
++
++    /** Событие уходит и постоянному слушателю (полоса), и локальному из check/download. */
++    private void emit(Runnable toPersistent, Runnable toLocal) {
++        Listener p = persistent;
++        main.post(() -> {
++            if (p != null) toPersistent.run();
++            if (toLocal != null) toLocal.run();
++        });
++    }
++
+     /** Одна точка журнала: logcat и панель лога. Секреты сюда не передавать. */
+     private void log(String m) {
+         Log.i(TAG, m);
+         LogSink s = sink;
+         if (s != null) s.log(m);
+     }
+ 
+@@ -88,7 +104,8 @@
+             r.hasUpdate = r.releaseMs > last;
+             log("check ok: tag=" + r.tag + " ms=" + r.releaseMs + " last=" + last
+                     + " hasUpdate=" + r.hasUpdate);
+             final Result fr = r;
+-            main.post(() -> l.onChecked(fr));
++            emit(() -> { Listener p = persistent; if (p != null) p.onChecked(fr); },
++                 () -> l.onChecked(fr));
+             if (r.hasUpdate) download(l);
+         } catch (Http.Code c) {
+             log("check http " + c.code + ": " + c.getMessage());
+             if (c.code == 404) {
+                 if (stable) {
+                     r.noStable = true;
+                     final Result fr = r;
+-                    main.post(() -> l.onChecked(fr));
++                    emit(() -> { Listener p = persistent; if (p != null) p.onChecked(fr); },
++                         () -> l.onChecked(fr));
+                 } else {
+-                    main.post(() -> l.onError("релизов пока нет"));
++                    emit(() -> { Listener p = persistent; if (p != null) p.onError("релизов пока нет"); },
++                         () -> l.onError("релизов пока нет"));
+                 }
+             } else {
+                 final String msg = "HTTP " + c.code;
+-                main.post(() -> l.onError(msg));
++                emit(() -> { Listener p = persistent; if (p != null) p.onError(msg); },
++                     () -> l.onError(msg));
+             }
+         } catch (IOException e) {
+             log("check io: " + e.getMessage());
+             final String msg = "сеть: " + e.getMessage();
+-            main.post(() -> l.onError(msg));
++            emit(() -> { Listener p = persistent; if (p != null) p.onError(msg); },
++                 () -> l.onError(msg));
+         } catch (Exception e) {
+             log("check ex: " + e);
+             final String msg = String.valueOf(e.getMessage());
+-            main.post(() -> l.onError(msg));
++            emit(() -> { Listener p = persistent; if (p != null) p.onError(msg); },
++                 () -> l.onError(msg));
+         }
+     }
+@@ -232,16 +249,20 @@
+     public void download(Listener l) {
+         final String url = assetUrl;
+         final String tag = assetName;
+         if (url == null) {
+-            main.post(() -> l.onError("нет APK в релизе"));
++            emit(() -> { Listener p = persistent; if (p != null) p.onError("нет APK в релизе"); },
++                 () -> l.onError("нет APK в релизе"));
+             return;
+         }
+         Thread t = new Thread(() -> downloadIn(url, tag, l), "update-dl");
+         t.setDaemon(true);
+         t.start();
+     }
+@@ -254,12 +275,14 @@
+         File dst = apkFile();
+         try {
+-            Http.download(url, dst, pc -> main.post(() -> l.onProgress(pc)));
++            Http.download(url, dst, pc ->
++                    emit(() -> { Listener p = persistent; if (p != null) p.onProgress(pc); },
++                         () -> l.onProgress(pc)));
+             log("download ok: " + dst.length() + " bytes -> " + dst.getAbsolutePath());
+             final File f = dst;
+-            main.post(() -> l.onDownloaded(f));
++            emit(() -> { Listener p = persistent; if (p != null) p.onDownloaded(f); },
++                 () -> l.onDownloaded(f));
+         } catch (IOException e) {
+             log("download io: " + e.getMessage());
+             final String msg = "скачивание: " + e.getMessage();
+-            main.post(() -> l.onError(msg));
++            emit(() -> { Listener p = persistent; if (p != null) p.onError(msg); },
++                 () -> l.onError(msg));
+         }
+     }
