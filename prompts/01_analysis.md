@@ -36,7 +36,7 @@
 - `PageStore.java`: Хранение и управление многостраничными настройками и списком контактов перевода (`Refers`) в `SharedPreferences`.
   - `prefs(c, page)`, `count()`, `setCount()`, `configured()`, `refers(c, page)`, `setRefers(c, page, list)`, `deletePage()`.
 - `SettingsFragment.java`: Фрагмент карточки настроек (SIP, Звонок, VPN, Refers, Логи) с поддержкой Drag-and-Drop блоков.
-  - `doConnect()`, `doCall()`, `toggleMute()`, `doVpnConnect()`, `toggleRefers()`, `renderRefers()`, `editRefer()`, `confirmTransfer()`, `pickApps()`, `pickOutput()`, `render()`.
+  - `doConnect()`, `doCall()`, `toggleMute()`, `doVpnConnect()`, `showRefersDialog()`, `pickSpeaker()`, `pickApps()`, `render()`.
 - `UpdateBar.java`: UI-плашка прогресса скачивания и установки APK.
   - `attachInset()`, `showProgress()`, `showInstall()`, `hide()`.
 

@@ -44,37 +44,41 @@ This block manages connection to your PBX phone server.
 * **Field `Password`**: Password for your SIP account.
 * **Button `Connect`**: Sends registration request to the PBX server.
 * **Button `Disconnect`**: Unregisters and disconnects from the PBX server.
+* **Button `Refers`**: Opens the transfer contacts manager dialog.
 * **Status Text**: Displays current PBX connection state (e.g. `🟢 Connected` or `🔴 Disconnected`).
 
 > 💡 **Input Guard**: As soon as PBX is connected (`🟢 Connected`), `Server`, `Login`, and `Password` fields are automatically locked against accidental modifications. To edit settings, tap `Disconnect` first.
 
-### Transfer Contacts List (`Refers`):
-In the `⋮` (three dots) menu of the `SIP server settings` block header, select **`Refers`**:
-* **Contacts Panel**: Opens a saved list of transfer targets for quick call forwarding.
-* **Button `+ Add refer`**: Adds a new transfer entry (`Login` and `Name`).
-* **Edit and Delete**: Tap the pencil icon (`✎`) to edit an entry, or the cross icon (`✕`) to delete it.
-* **Usage During Calls**: Tapping any contact name/number in the `Refers` list during an active call prompts a transfer confirmation (*"Transfer call to..."*).
+### Transfer Contacts Dialog (`Refers`):
+Tapping the **`Refers`** button below `Disconnect` opens the transfer contact manager:
+* **Login and Name Fields**: Each contact row contains an editable Login and Name field. Edits are saved on the fly.
+* **Button `Transfer`**: During an active call, tapping `Transfer` next to a contact prompts confirmation (*"Transfer to login?"*) and executes an immediate blind transfer.
+* **Icon `✕`**: Removes the contact row from the list.
+* **Button `Add`**: Adds a new empty contact row at the bottom of the dialog.
 
 ---
 
 ## 📞 4. Block 2: Number and Voice Source (Number and Voice Source)
 
-This block is used for dialing phone numbers and controlling audio during calls.
+This block is used for dialing phone numbers, making calls, and controlling audio routing.
 
-### Fields and Buttons:
-* **Field `Number`**: Large input field for the phone number you wish to call. Digits are automatically displayed in extra-large font (`35 sp`).
-* **Button `Call`**: Initiates an outgoing call.
-  - *Note*: If you are not connected to PBX (`🟢 Connected`), the `Call` button is disabled to prevent unnecessary battery drain.
-* **Button `Discard`**: Ends or cancels the current call.
-* **Button `Voice source`**: Switches audio output source on the fly:
-  - `Earpiece` — Earpiece speaker (for holding phone to your ear).
-  - `Speakerphone` — Loudspeaker / speakerphone mode.
-* **Button `Mute microphone 🎤` / `Unmute microphone 🎙️`**: Instantly mutes or unmutes the microphone during a call. When muted, PCM silence frames are transmitted over RTP, ensuring the remote party hears complete silence.
+### Improved Button Layout & Controls:
+* **Field `Number`**: Large input field for the phone number with extra-large digits (`35 sp`).
+* **Two-Column Call Row**:
+  * **Button `📞 Call`** (Left) — Initiates an outgoing call. Enabled when registered on PBX (`🟢 Connected`).
+  * **Button `🚫 Discard`** (Right) — Cancels dialing or hangs up an active call. Highlighted in translucent red background (70% opacity) with white text.
+* **Two-Column Audio Output Row**:
+  * **Button `📢 Speaker`** (Left) — Switches audio output to loudspeaker/speakerphone.
+  * **Button `👂 Earpiece`** (Right) — Switches audio output to earpiece speaker.
+  * *Active Selection*: The active audio output button is highlighted with a thick **green border** (`3 dp`).
+* **Microphone Mute Button**:
+  * **`🤫 Mute mic`** — Tap to mute microphone (microphone is active).
+  * **`👄 Unmute mic`** — Tap to restore microphone (microphone is muted).
 
 ### Call Transfer (Blind Transfer):
-1. During an active call (`🟢 Call in progress`), open the **`Refers`** list from the `⋮` menu of the PBX settings block.
-2. Tap the desired transfer contact.
-3. Tap **`Yes`** in the confirmation dialog to initiate the transfer.
+1. During an active call (`🟢 Call in progress`), tap the **`Refers`** button in the PBX settings block.
+2. Tap the **`Transfer`** button next to the target contact in the dialog.
+3. Tap **`Yes`** in the confirmation dialog to initiate transfer.
 4. The app sends a `REFER` request with the target URI to the PBX. Upon receiving PBX confirmation (`202 Accepted` and `NOTIFY 200 OK`), the initial call automatically terminates.
 
 ### Smart Features During Calls:
@@ -170,7 +174,7 @@ In all confirmation popup dialogs:
 The app features an integrated updater for checking and installing updates directly from GitHub Releases.
 
 ### Checking for Updates:
-1. Scroll to the bottom of any settings page to find the version label (e.g., `v0.1`).
+1. Scroll to the bottom of any settings page to find the version label (e.g., `v2.0.7`).
 2. Press and hold the version label for **2 seconds**.
 3. A dialog will prompt you to choose an update channel:
    - **`Stable`** — Official stable release builds.
