@@ -1,0 +1,56 @@
+diff --git a/app/src/main/java/ru/minisip/app/SettingsFragment.java b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -91,1 +91,1 @@
+-    private MaterialButton connect, disconnect, refersBtn, call, hang, audioBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
++    private MaterialButton connect, disconnect, refersBtn, call, hang, spkBtn, earBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
+@@ -224,2 +224,18 @@
+-        audioBtn = button(callBlock.container, "Voice source", true, v -> pickOutput());
++        LinearLayout audioRow = new LinearLayout(ctx);
++        audioRow.setOrientation(LinearLayout.HORIZONTAL);
++        LinearLayout.LayoutParams arLp = new LinearLayout.LayoutParams(
++                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++        arLp.topMargin = dp(8);
++        callBlock.container.addView(audioRow, arLp);
++
++        spkBtn = button(audioRow, "📢 Speaker", true, v -> pickSpeaker(true));
++        LinearLayout.LayoutParams spkLp = new LinearLayout.LayoutParams(0,
++                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
++        spkLp.rightMargin = dp(8);
++        spkBtn.setLayoutParams(spkLp);
++
++        earBtn = button(audioRow, "👂 Earpiece", true, v -> pickSpeaker(false));
++        earBtn.setLayoutParams(new LinearLayout.LayoutParams(0,
++                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
++
+         muteBtn = button(callBlock.container, "Mute microphone 🎤", true, v -> toggleMute());
+@@ -440,1 +456,1 @@
+-        connect = disconnect = refersBtn = call = hang = audioBtn = vpnConnect = vpnDisconnect = vpnAppsBtn = vpnMainBtn = vpnAdvancedBtn = sipAdvancedBtn = deleteBtn = null;
++        connect = disconnect = refersBtn = call = hang = spkBtn = earBtn = vpnConnect = vpnDisconnect = vpnAppsBtn = vpnMainBtn = vpnAdvancedBtn = sipAdvancedBtn = deleteBtn = null;
+@@ -692,16 +708,5 @@
+-    /** Диалог выбора, куда направлять звук разговора. Применяется сразу, в том числе посреди вызова. */
+-    private void pickOutput() {
+-        String[] names = {"Earpiece", "Speakerphone"};
+-        int checked = prefs.getBoolean("speaker", false) ? 1 : 0;
+-        new MaterialAlertDialogBuilder(requireContext())
+-                .setTitle("Audio output")
+-                .setSingleChoiceItems(names, checked, (d, which) -> {
+-                    boolean speaker = which == 1;
+-                    prefs.edit().putBoolean("speaker", speaker).apply();
+-                    if (!(app.busy() && app.lastPage != page)) app.setSpeaker(speaker);
+-                    render();
+-                    d.dismiss();
+-                })
+-                .setNegativeButton("Cancel", null)
+-                .show();
+-    }
++    /** Переключение источника звука: применяется сразу, в том числе посреди вызова. */
++    private void pickSpeaker(boolean speaker) {
++        prefs.edit().putBoolean("speaker", speaker).apply();
++        if (!(app.busy() && app.lastPage != page)) app.setSpeaker(speaker);
++        render();
++    }
+@@ -858,3 +863,0 @@
+-        audioBtn.setEnabled(!other);
+-        audioBtn.setText("Audio output: " + (prefs.getBoolean("speaker", false)
+-                ? "Speakerphone" : "Earpiece"));

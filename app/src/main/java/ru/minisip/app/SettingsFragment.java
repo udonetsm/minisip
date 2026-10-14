@@ -37,6 +37,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
 import androidx.core.widget.NestedScrollView;
 import androidx.fragment.app.Fragment;
 
@@ -87,12 +88,10 @@ public final class SettingsFragment extends Fragment {
 
     private TextInputEditText server, login, pass, number, vpnServer, vpnLogin, vpnPass, vpnKey, vpnCa, vpnHealthcheck;
     private TextView status, vpnStatus;
-    private MaterialButton connect, disconnect, call, hang, audioBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
+    private MaterialButton connect, disconnect, refersBtn, call, hang, spkBtn, earBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
     private LinearLayout vpnMainSpoilerContainer, vpnAdvancedSpoilerContainer, sipSpoilerContainer;
 
     private LogArea sipLog, callLog, vpnLog;
-    private LinearLayout refersPanel;
-    private LinearLayout refersRows;
 
     /** Строка версии внизу страницы: long-press 2 с открывает диалог канала обновлений. */
     private TextView versionLabel;
@@ -160,7 +159,7 @@ public final class SettingsFragment extends Fragment {
 
         // --- Блок 1: Настройка АТС сервера ---
         Block sipBlock = createBlock(0);
-        sipLog = title(sipBlock.container, "SIP server settings", 0, this::toggleRefers);
+        sipLog = title(sipBlock.container, "SIP server settings", 0);
 
         sipSpoilerContainer = new LinearLayout(ctx);
         sipSpoilerContainer.setOrientation(LinearLayout.VERTICAL);
@@ -182,20 +181,11 @@ public final class SettingsFragment extends Fragment {
 
         connect = button(sipBlock.container, "Connect", false, v -> doConnect());
         disconnect = button(sipBlock.container, "Disconnect", true, v -> app.disconnect(page));
+        refersBtn = button(sipBlock.container, "Refers", true, v -> showRefersDialog());
         status = body(sipBlock.container, dp(8));
 
         sipBlock.container.addView(sipLog.panel, row(dp(8)));
 
-        refersPanel = new LinearLayout(ctx);
-        refersPanel.setOrientation(LinearLayout.VERTICAL);
-        refersPanel.setVisibility(View.GONE);
-        refersRows = new LinearLayout(ctx);
-        refersRows.setOrientation(LinearLayout.VERTICAL);
-        refersPanel.addView(refersRows);
-        MaterialButton addRefer = smallButton(ctx, "+ Add refer");
-        addRefer.setOnClickListener(v -> editRefer(-1));
-        refersPanel.addView(addRefer, row(dp(4)));
-        sipBlock.container.addView(refersPanel, row(dp(8)));
 
         // --- Блок 2: Номер телефона и источник звука ---
         Block callBlock = createBlock(1);
@@ -207,13 +197,47 @@ public final class SettingsFragment extends Fragment {
             ((TextInputLayout) number.getParent()).setHintTextAppearance(android.R.style.TextAppearance_Medium);
         }
 
-        call = button(callBlock.container, "Call", false, v -> doCall());
+        LinearLayout callRow = new LinearLayout(ctx);
+        callRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams crLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        crLp.topMargin = dp(8);
+        callBlock.container.addView(callRow, crLp);
+
+        call = button(callRow, "📞 Call", false, v -> doCall());
         call.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
         call.setPadding(0, dp(18), 0, dp(18));
+        LinearLayout.LayoutParams callLp = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        callLp.rightMargin = dp(8);
+        call.setLayoutParams(callLp);
 
-        hang = button(callBlock.container, "Discard", true, v -> app.hangup(page));
-        audioBtn = button(callBlock.container, "Voice source", true, v -> pickOutput());
-        muteBtn = button(callBlock.container, "Mute microphone 🎤", true, v -> toggleMute());
+        hang = button(callRow, "🚫 Discard", true, v -> app.hangup(page));
+        hang.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
+        hang.setPadding(0, dp(18), 0, dp(18));
+        int hangColor = 0xB3D32F2F;   // красный, 70% непрозрачности
+        hang.setBackgroundTintList(android.content.res.ColorStateList.valueOf(hangColor));
+        hang.setStrokeColor(android.content.res.ColorStateList.valueOf(0xB3D32F2F));
+        hang.setTextColor(0xFFFFFFFF);
+        hang.setLayoutParams(new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout audioRow = new LinearLayout(ctx);
+        audioRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams arLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        arLp.topMargin = dp(8);
+        callBlock.container.addView(audioRow, arLp);
+
+        spkBtn = button(audioRow, "📢 Speaker", true, v -> pickSpeaker(true));
+        LinearLayout.LayoutParams spkLp = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        spkLp.rightMargin = dp(8);
+        spkBtn.setLayoutParams(spkLp);
+
+        earBtn = button(audioRow, "👂 Earpiece", true, v -> pickSpeaker(false));
+        earBtn.setLayoutParams(new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        muteBtn = button(callBlock.container, "🤫Mute mic", true, v -> toggleMute());
 
         callBlock.container.addView(callLog.panel, row(dp(8)));
 
@@ -428,10 +452,8 @@ public final class SettingsFragment extends Fragment {
         super.onDestroyView();
         server = login = pass = number = vpnServer = vpnLogin = vpnPass = vpnKey = vpnCa = vpnHealthcheck = null;
         status = vpnStatus = null;
-        connect = disconnect = call = hang = audioBtn = vpnConnect = vpnDisconnect = vpnAppsBtn = vpnMainBtn = vpnAdvancedBtn = sipAdvancedBtn = deleteBtn = null;
+        connect = disconnect = refersBtn = call = hang = spkBtn = earBtn = vpnConnect = vpnDisconnect = vpnAppsBtn = vpnMainBtn = vpnAdvancedBtn = sipAdvancedBtn = deleteBtn = null;
         vpnMainSpoilerContainer = vpnAdvancedSpoilerContainer = sipSpoilerContainer = null;
-        refersPanel = null;
-        refersRows = null;
         versionLabel = null;
         updateLog = null;
         gestureHandler.removeCallbacks(channelDialogRunnable);
@@ -681,21 +703,131 @@ public final class SettingsFragment extends Fragment {
                 .show();
     }
 
-    /** Диалог выбора, куда направлять звук разговора. Применяется сразу, в том числе посреди вызова. */
-    private void pickOutput() {
-        String[] names = {"Earpiece", "Speakerphone"};
-        int checked = prefs.getBoolean("speaker", false) ? 1 : 0;
-        new MaterialAlertDialogBuilder(requireContext())
-                .setTitle("Audio output")
-                .setSingleChoiceItems(names, checked, (d, which) -> {
-                    boolean speaker = which == 1;
-                    prefs.edit().putBoolean("speaker", speaker).apply();
-                    if (!(app.busy() && app.lastPage != page)) app.setSpeaker(speaker);
-                    render();
-                    d.dismiss();
-                })
+    /** Переключение источника звука: применяется сразу, в том числе посреди вызова. */
+    private void pickSpeaker(boolean speaker) {
+        prefs.edit().putBoolean("speaker", speaker).apply();
+        if (!(app.busy() && app.lastPage != page)) app.setSpeaker(speaker);
+        render();
+    }
+
+    /** Диалог со списком Refers: строки правятся на месте, Use — blind transfer, ✕ — удалить. */
+    private void showRefersDialog() {
+        final Context ctx = requireContext();
+        final LinearLayout box = new LinearLayout(ctx);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(16);
+        box.setPadding(pad, pad, pad, 0);
+
+        final NestedScrollView scroll = new NestedScrollView(ctx);
+        scroll.addView(box, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        final List<PageStore.Refer> working = PageStore.refers(ctx, page);
+        final AlertDialog[] holder = new AlertDialog[1];
+        final Runnable[] rebuild = new Runnable[1];
+
+        rebuild[0] = () -> {
+            if (working.isEmpty()) working.add(new PageStore.Refer("", ""));
+            box.removeAllViews();
+            for (int i = 0; i < working.size(); i++) {
+                final int idx = i;
+                LinearLayout row = new LinearLayout(ctx);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+
+                EditText login = new EditText(ctx);
+                login.setHint("Login");
+                login.setInputType(InputType.TYPE_CLASS_TEXT);
+                login.setText(working.get(i).login);
+                login.setLayoutParams(new LinearLayout.LayoutParams(0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                login.addTextChangedListener(new TextWatcher() {
+                    @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+                    @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+                    @Override public void afterTextChanged(Editable s) {
+                        PageStore.Refer old = working.get(idx);
+                        working.set(idx, new PageStore.Refer(s.toString(), old.name));
+                        PageStore.setRefers(ctx, page, working);
+                    }
+                });
+                row.addView(login);
+
+                EditText name = new EditText(ctx);
+                name.setHint("Name");
+                name.setInputType(InputType.TYPE_CLASS_TEXT);
+                name.setText(working.get(i).name);
+                name.setLayoutParams(new LinearLayout.LayoutParams(0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                name.addTextChangedListener(new TextWatcher() {
+                    @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+                    @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+                    @Override public void afterTextChanged(Editable s) {
+                        PageStore.Refer old = working.get(idx);
+                        working.set(idx, new PageStore.Refer(old.login, s.toString()));
+                        PageStore.setRefers(ctx, page, working);
+                    }
+                });
+                row.addView(name);
+
+                MaterialButton use = new MaterialButton(ctx);
+                use.setText("Transfer");
+                use.setOnClickListener(v -> {
+                    if (app.state != App.TALK || app.lastPage != page) {
+                        Toast.makeText(ctx, "No active call", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    String loginStr = working.get(idx).login;
+                    final AlertDialog parent = holder[0];
+                    MainActivity.showCustomConfirmDialog(ctx,
+                            "Transfer call",
+                            "Transfer to " + loginStr + "?",
+                            () -> {
+                                app.transfer(page, loginStr);
+                                if (parent != null) parent.dismiss();
+                            },
+                            null);
+                });
+                row.addView(use);
+
+                TextView del = new TextView(ctx);
+                del.setText("\u2715");
+                del.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
+                del.setPadding(dp(10), dp(6), dp(10), dp(6));
+                del.setClickable(true);
+                del.setOnClickListener(v -> {
+                    working.remove(idx);
+                    PageStore.setRefers(ctx, page, working);
+                    rebuild[0].run();
+                });
+                row.addView(del);
+
+                box.addView(row);
+            }
+        };
+
+        AlertDialog d = new MaterialAlertDialogBuilder(ctx)
+                .setTitle("Refers")
+                .setView(scroll)
+                .setPositiveButton("Add", null)
                 .setNegativeButton("Cancel", null)
-                .show();
+                .create();
+        holder[0] = d;
+        d.setOnShowListener(x -> {
+            android.view.Window w = d.getWindow();
+            if (w != null) {
+                w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
+                w.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+            }
+            d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                PageStore.Refer last = working.isEmpty() ? null : working.get(working.size() - 1);
+                if (last != null && last.login.isEmpty() && last.name.isEmpty()) return;
+                working.add(new PageStore.Refer("", ""));
+                PageStore.setRefers(ctx, page, working);
+                rebuild[0].run();
+            });
+        });
+        rebuild[0].run();
+        d.show();
     }
 
     private void render() {
@@ -726,14 +858,25 @@ public final class SettingsFragment extends Fragment {
         String busy = "Busy: session in use by page " + (app.lastPage + 1);
         status.setText(mine ? app.status : other ? busy : "Disconnected");
         vpnStatus.setText(mine ? app.vpnStatus : other ? busy : "VPN: disconnected");
-        call.setVisibility(idle ? View.VISIBLE : View.GONE);
-        hang.setVisibility(idle ? View.GONE : View.VISIBLE);
-        call.setEnabled(!other && reg);
-        audioBtn.setEnabled(!other);
-        audioBtn.setText("Audio output: " + (prefs.getBoolean("speaker", false)
-                ? "Speakerphone" : "Earpiece"));
+        call.setEnabled(!other && !inCall && reg);
+        hang.setEnabled(!other && inCall);
         muteBtn.setEnabled(!other);
-        muteBtn.setText(prefs.getBoolean("muted", false) ? "Unmute microphone 🎙️" : "Mute microphone 🎤");
+        muteBtn.setText(prefs.getBoolean("muted", false) ? "👄 Unmute mic" : "🤫 Mute mic");
+        boolean spk = prefs.getBoolean("speaker", false);
+        int audioGreen = 0xFF2E7D32;
+        android.content.res.ColorStateList greenTint =
+                android.content.res.ColorStateList.valueOf(audioGreen);
+        if (spk) {
+            spkBtn.setStrokeColor(greenTint);
+            spkBtn.setStrokeWidth(dp(3));
+            earBtn.setStrokeColor(android.content.res.ColorStateList.valueOf(0x33808080));
+            earBtn.setStrokeWidth(dp(1));
+        } else {
+            earBtn.setStrokeColor(greenTint);
+            earBtn.setStrokeWidth(dp(3));
+            spkBtn.setStrokeColor(android.content.res.ColorStateList.valueOf(0x33808080));
+            spkBtn.setStrokeWidth(dp(1));
+        }
         connect.setEnabled(!other && idle && !reg && !conn);
         disconnect.setEnabled(reg || conn);
         // VPN: подключить можно только когда он не поднят и нет вызова; отключить — когда поднят или поднимается
@@ -903,117 +1046,6 @@ public final class SettingsFragment extends Fragment {
         }
     }
 
-    /** Показ/скрытие таблицы Refers под блоком SIP (toggle, как у логов). */
-    private void toggleRefers() {
-        if (refersPanel == null) return;
-        boolean show = refersPanel.getVisibility() == View.GONE;
-        if (show) renderRefers();
-        refersPanel.setVisibility(show ? View.VISIBLE : View.GONE);
-    }
-
-    /** Перерисовка таблицы из PageStore. */
-    private void renderRefers() {
-        if (refersRows == null) return;
-        Context ctx = requireContext();
-        refersRows.removeAllViews();
-        List<PageStore.Refer> list = PageStore.refers(ctx, page);
-        for (int i = 0; i < list.size(); i++) {
-            final int idx = i;
-            PageStore.Refer r = list.get(i);
-            LinearLayout row = new LinearLayout(ctx);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-
-            TextView label = new TextView(ctx);
-            label.setText(r.login + " | " + r.label());
-            label.setTextAppearance(android.R.style.TextAppearance_Small);
-            label.setPadding(dp(8), dp(8), dp(8), dp(8));
-            label.setClickable(true);
-            label.setOnClickListener(v -> confirmTransfer(r));
-            row.addView(label, new LinearLayout.LayoutParams(0,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-            TextView edit = new TextView(ctx);
-            edit.setText("\u270E");
-            edit.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
-            edit.setPadding(dp(10), dp(6), dp(10), dp(6));
-            edit.setClickable(true);
-            edit.setOnClickListener(v -> editRefer(idx));
-            row.addView(edit);
-
-            TextView del = new TextView(ctx);
-            del.setText("\u2715");
-            del.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
-            del.setPadding(dp(10), dp(6), dp(10), dp(6));
-            del.setClickable(true);
-            del.setOnClickListener(v -> deleteRefer(idx));
-            row.addView(del);
-
-            refersRows.addView(row);
-        }
-    }
-
-    /** Тап по строке — confirm и blind transfer. */
-    private void confirmTransfer(PageStore.Refer r) {
-        if (app.state != App.TALK || app.lastPage != page) {
-            Toast.makeText(requireContext(), "No active call", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        MainActivity.showCustomConfirmDialog(requireContext(),
-                "Transfer call",
-                "Transfer to " + r.login + " (" + r.label() + ")?",
-                () -> app.transfer(page, r.login),
-                null);
-    }
-
-    /** Диалог добавления (index < 0) или правки записи. */
-    private void editRefer(int index) {
-        Context ctx = requireContext();
-        List<PageStore.Refer> list = PageStore.refers(ctx, page);
-        PageStore.Refer existing = index >= 0 && index < list.size() ? list.get(index) : null;
-
-        LinearLayout box = new LinearLayout(ctx);
-        box.setOrientation(LinearLayout.VERTICAL);
-        int pad = dp(16);
-        box.setPadding(pad, pad, pad, 0);
-
-        EditText login = new EditText(ctx);
-        login.setHint("Login");
-        login.setInputType(InputType.TYPE_CLASS_TEXT);
-        if (existing != null) login.setText(existing.login);
-        box.addView(login);
-
-        EditText name = new EditText(ctx);
-        name.setHint("Name");
-        name.setInputType(InputType.TYPE_CLASS_TEXT);
-        if (existing != null) name.setText(existing.name);
-        box.addView(name);
-
-        new MaterialAlertDialogBuilder(ctx)
-                .setTitle(existing == null ? "Add refer" : "Edit refer")
-                .setView(box)
-                .setPositiveButton("Save", (d, w) -> {
-                    String l = login.getText().toString().trim();
-                    String n = name.getText().toString().trim();
-                    if (l.isEmpty()) return;
-                    List<PageStore.Refer> cur = PageStore.refers(ctx, page);
-                    if (existing == null) cur.add(new PageStore.Refer(l, n));
-                    else if (index < cur.size()) cur.set(index, new PageStore.Refer(l, n));
-                    PageStore.setRefers(ctx, page, cur);
-                    renderRefers();
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    private void deleteRefer(int index) {
-        Context ctx = requireContext();
-        List<PageStore.Refer> list = PageStore.refers(ctx, page);
-        if (index >= 0 && index < list.size()) list.remove(index);
-        PageStore.setRefers(ctx, page, list);
-        renderRefers();
-    }
-
     private void confirmDeletePage() {
         if (PageStore.count(requireContext()) <= 1) return;
         MainActivity.showCustomConfirmDialog(requireContext(),
@@ -1043,10 +1075,6 @@ public final class SettingsFragment extends Fragment {
     }
 
     private LogArea title(LinearLayout parent, String text, int top) {
-        return title(parent, text, top, null);
-    }
-
-    private LogArea title(LinearLayout parent, String text, int top, Runnable onRefers) {
         Context ctx = parent.getContext();
         LinearLayout head = new LinearLayout(ctx);
         head.setOrientation(LinearLayout.HORIZONTAL);
@@ -1074,12 +1102,7 @@ public final class SettingsFragment extends Fragment {
         more.setOnClickListener(v -> {
             PopupMenu pm = new PopupMenu(ctx, v);
             pm.getMenu().add("Log");
-            if (onRefers != null) pm.getMenu().add("Refers");
             pm.setOnMenuItemClickListener(item -> {
-                if (onRefers != null && "Refers".contentEquals(item.getTitle())) {
-                    onRefers.run();
-                    return true;
-                }
                 boolean show = area.panel.getVisibility() == View.GONE;
                 area.panel.setVisibility(show ? View.VISIBLE : View.GONE);
                 return true;
@@ -1092,7 +1115,7 @@ public final class SettingsFragment extends Fragment {
 
     /** Панель лога блока: контейнер, поле для текста и кнопки. */
     private final class LogArea {
-        volatile boolean enabled = false;   // было true: пока пользователь не включил — не пишем в поле
+        volatile boolean enabled = false;
         final LinearLayout panel;
         final EditText text;
         final MaterialButton toggle;
@@ -1104,14 +1127,13 @@ public final class SettingsFragment extends Fragment {
             panel = new LinearLayout(ctx);
             panel.setOrientation(LinearLayout.VERTICAL);
             panel.setVisibility(View.GONE);
-            // шапка панели: крестик закрытия справа
             LinearLayout head = new LinearLayout(ctx);
             head.setOrientation(LinearLayout.HORIZONTAL);
             head.setGravity(Gravity.END);
             int cp = dp(10);
 
             TextView down = new TextView(ctx);
-            down.setText("\u25BC");                  // ▼
+            down.setText("\u25BC");
             down.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
             down.setPadding(cp, dp(2), cp, dp(2));
             down.setClickable(true);
@@ -1120,7 +1142,7 @@ public final class SettingsFragment extends Fragment {
             head.addView(down);
 
             TextView close = new TextView(ctx);
-            close.setText("\u2715");                 // ✕
+            close.setText("\u2715");
             close.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
             close.setPadding(cp, dp(2), cp, dp(2));
             close.setClickable(true);
@@ -1129,7 +1151,7 @@ public final class SettingsFragment extends Fragment {
             head.addView(close);
             panel.addView(head);
             text = new EditText(ctx);
-            text.setKeyListener(null);              // только чтение
+            text.setKeyListener(null);
             text.setTextIsSelectable(true);
             text.setGravity(Gravity.TOP | Gravity.START);
             text.setTextAppearance(android.R.style.TextAppearance_Small);
@@ -1152,15 +1174,12 @@ public final class SettingsFragment extends Fragment {
                 return false;
             });
 
-            // Ненавязчивая рамка вокруг поля: тонкая заливка + контур. Видна и на светлом,
-            // и на тёмном фоне (полупрозрачный серый ложится поверх любого тона).
             android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
-            bg.setColor(0x14808080);              // ~8% серого поверх фона страницы
-            bg.setStroke(dp(1), 0x33808080);      // рамка чуть плотнее заливки
+            bg.setColor(0x14808080);
+            bg.setStroke(dp(1), 0x33808080);
             bg.setCornerRadius(dp(8));
             text.setBackground(bg);
 
-            // Центр — поле лога, по бокам по 15% — пустые полосы (там жест уходит странице).
             LinearLayout band = new LinearLayout(ctx);
             band.setOrientation(LinearLayout.HORIZONTAL);
             View left = new View(ctx);
@@ -1202,13 +1221,12 @@ public final class SettingsFragment extends Fragment {
         void setText(String s) {
             text.post(() -> {
                 if (!enabled) return;
-                boolean near = isNearBottom();   // решение принимаем ДО обновления текста
+                boolean near = isNearBottom();
                 text.setText(s);
                 if (near) scrollToBottom();
             });
         }
 
-        /** Авто-скролл разрешён, пока видна хотя бы одна из последних 4 строк; как только ушли — стоп. */
         private boolean isNearBottom() {
             android.text.Layout l = text.getLayout();
             int lc = text.getLineCount();
@@ -1219,7 +1237,6 @@ public final class SettingsFragment extends Fragment {
             return keepTop < text.getScrollY() + view - 1;
         }
 
-        /** Максимально возможный scrollY для текущего содержимого. */
         private int maxScroll() {
             android.text.Layout l = text.getLayout();
             if (l == null) return 0;
@@ -1243,7 +1260,6 @@ public final class SettingsFragment extends Fragment {
         return b;
     }
 
-    /** Сохранить текст панели в Documents/minisip/. На Android ≤ 9 сначала спрашиваем разрешение. */
     private void saveLog(String prefix, LogArea area) {
         String text = area.text.getText().toString();
         if (text.trim().isEmpty()) {
@@ -1270,11 +1286,6 @@ public final class SettingsFragment extends Fragment {
         return t;
     }
 
-    /**
-     * Поле Material (outlined). secret — пароль: символы скрыты, справа кнопка-глаз «Показать пароль».
-     * Внимание: у полей с паролем нельзя вызывать setSingleLine(true) после setInputType —
-     * это сбрасывает скрытие символов. Однострочность и так задана типом ввода.
-     */
     private TextInputEditText field(LinearLayout parent, String hint, String helper, String value,
                                     int inputType, boolean secret) {
         TextInputLayout til = new TextInputLayout(parent.getContext());

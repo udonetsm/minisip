@@ -1,0 +1,23 @@
+diff --git a/app/src/main/java/ru/minisip/app/SettingsFragment.java b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -864,16 +864,16 @@
+         boolean spk = prefs.getBoolean("speaker", false);
+         int audioGreen = 0xFF2E7D32;
+         android.content.res.ColorStateList greenTint =
+                 android.content.res.ColorStateList.valueOf(audioGreen);
+         if (spk) {
+-            spkBtn.setBackgroundTintList(greenTint);
+-            earBtn.setBackgroundTintList(null);
++            spkBtn.setStrokeColor(greenTint);
++            spkBtn.setStrokeWidth(dp(3));
++            earBtn.setStrokeColor(android.content.res.ColorStateList.valueOf(0x33808080));
++            earBtn.setStrokeWidth(dp(1));
+         } else {
+-            earBtn.setBackgroundTintList(greenTint);
+-            spkBtn.setBackgroundTintList(null);
++            earBtn.setStrokeColor(greenTint);
++            earBtn.setStrokeWidth(dp(3));
++            spkBtn.setStrokeColor(android.content.res.ColorStateList.valueOf(0x33808080));
++            spkBtn.setStrokeWidth(dp(1));
+         }

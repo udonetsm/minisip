@@ -1,0 +1,146 @@
+diff --git a/app/src/main/java/ru/minisip/app/SettingsFragment.java b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -74,7 +74,7 @@
+     private TextInputEditText server, login, pass, number, vpnServer, vpnLogin, vpnPass, vpnKey, vpnCa, vpnHealthcheck;
+     private TextView status, vpnStatus;
+-    private MaterialButton connect, disconnect, call, hang, audioBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
++    private MaterialButton connect, disconnect, refersBtn, call, hang, audioBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
+     private LinearLayout vpnMainSpoilerContainer, vpnAdvancedSpoilerContainer, sipSpoilerContainer;
+ 
+     private LogArea sipLog, callLog, vpnLog;
+@@ -175,6 +175,7 @@
+ 
+         connect = button(sipBlock.container, "Connect", false, v -> doConnect());
+         disconnect = button(sipBlock.container, "Disconnect", true, v -> app.disconnect(page));
++        refersBtn = button(sipBlock.container, "Refers", true, v -> showRefersDialog());
+         status = body(sipBlock.container, dp(8));
+ 
+         sipBlock.container.addView(sipLog.panel, row(dp(8)));
+@@ -415,7 +416,7 @@
+         server = login = pass = number = vpnServer = vpnLogin = vpnPass = vpnKey = vpnCa = vpnHealthcheck = null;
+         status = vpnStatus = null;
+-        connect = disconnect = call = hang = audioBtn = vpnConnect = vpnDisconnect = vpnAppsBtn = vpnMainBtn = vpnAdvancedBtn = sipAdvancedBtn = deleteBtn = null;
++        connect = disconnect = refersBtn = call = hang = audioBtn = vpnConnect = vpnDisconnect = vpnAppsBtn = vpnMainBtn = vpnAdvancedBtn = sipAdvancedBtn = deleteBtn = null;
+         vpnMainSpoilerContainer = vpnAdvancedSpoilerContainer = sipSpoilerContainer = null;
+         versionLabel = null;
+         updateLog = null;
+@@ -692,6 +693,117 @@
+                 })
+                 .setNegativeButton("Cancel", null)
+                 .show();
+     }
+ 
++    /** Диалог со списком Refers: строки правятся на месте, Use — blind transfer, ✕ — удалить. */
++    private void showRefersDialog() {
++        final Context ctx = requireContext();
++        final LinearLayout box = new LinearLayout(ctx);
++        box.setOrientation(LinearLayout.VERTICAL);
++        int pad = dp(16);
++        box.setPadding(pad, pad, pad, 0);
++
++        final NestedScrollView scroll = new NestedScrollView(ctx);
++        scroll.addView(box, new ViewGroup.LayoutParams(
++                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
++
++        final List<PageStore.Refer> working = PageStore.refers(ctx, page);
++        final AlertDialog[] holder = new AlertDialog[1];
++        final Runnable[] rebuild = new Runnable[1];
++
++        rebuild[0] = () -> {
++            box.removeAllViews();
++            for (int i = 0; i < working.size(); i++) {
++                final int idx = i;
++                LinearLayout row = new LinearLayout(ctx);
++                row.setOrientation(LinearLayout.HORIZONTAL);
++                row.setGravity(Gravity.CENTER_VERTICAL);
++
++                EditText login = new EditText(ctx);
++                login.setHint("Login");
++                login.setInputType(InputType.TYPE_CLASS_TEXT);
++                login.setText(working.get(i).login);
++                login.setLayoutParams(new LinearLayout.LayoutParams(0,
++                        ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
++                login.addTextChangedListener(new TextWatcher() {
++                    @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
++                    @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
++                    @Override public void afterTextChanged(Editable s) {
++                        PageStore.Refer old = working.get(idx);
++                        working.set(idx, new PageStore.Refer(s.toString(), old.name));
++                        PageStore.setRefers(ctx, page, working);
++                    }
++                });
++                row.addView(login);
++
++                EditText name = new EditText(ctx);
++                name.setHint("Name");
++                name.setInputType(InputType.TYPE_CLASS_TEXT);
++                name.setText(working.get(i).name);
++                name.setLayoutParams(new LinearLayout.LayoutParams(0,
++                        ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
++                name.addTextChangedListener(new TextWatcher() {
++                    @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
++                    @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
++                    @Override public void afterTextChanged(Editable s) {
++                        PageStore.Refer old = working.get(idx);
++                        working.set(idx, new PageStore.Refer(old.login, s.toString()));
++                        PageStore.setRefers(ctx, page, working);
++                    }
++                });
++                row.addView(name);
++
++                MaterialButton use = new MaterialButton(ctx);
++                use.setText("Use");
++                use.setOnClickListener(v -> {
++                    if (app.state != App.TALK || app.lastPage != page) {
++                        Toast.makeText(ctx, "No active call", Toast.LENGTH_SHORT).show();
++                        return;
++                    }
++                    String loginStr = working.get(idx).login;
++                    final AlertDialog parent = holder[0];
++                    MainActivity.showCustomConfirmDialog(ctx,
++                            "Transfer call",
++                            "Transfer to " + loginStr + "?",
++                            () -> {
++                                app.transfer(page, loginStr);
++                                if (parent != null) parent.dismiss();
++                            },
++                            null);
++                });
++                row.addView(use);
++
++                TextView del = new TextView(ctx);
++                del.setText("\u2715");
++                del.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
++                del.setPadding(dp(10), dp(6), dp(10), dp(6));
++                del.setClickable(true);
++                del.setOnClickListener(v -> {
++                    working.remove(idx);
++                    PageStore.setRefers(ctx, page, working);
++                    rebuild[0].run();
++                });
++                row.addView(del);
++
++                box.addView(row);
++            }
++        };
++
++        AlertDialog d = new MaterialAlertDialogBuilder(ctx)
++                .setTitle("Refers")
++                .setView(scroll)
++                .setPositiveButton("Add", null)
++                .setNegativeButton("Cancel", null)
++                .create();
++        holder[0] = d;
++        d.setOnShowListener(x -> d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
++            working.add(new PageStore.Refer("", ""));
++            PageStore.setRefers(ctx, page, working);
++            rebuild[0].run();
++        }));
++        rebuild[0].run();
++        d.show();
++    }
++
+     private void render() {
+         if (getView() == null || status == null) return;
+         // Подключением владеет одна страница. Чужую сессию эта страница не видит и управлять ею не может.

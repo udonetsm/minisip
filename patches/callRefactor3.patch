@@ -1,0 +1,8 @@
+diff --git a/app/src/main/java/ru/minisip/app/SettingsFragment.java b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -196,7 +196,7 @@
+-        call = button(callBlock.container, "🟢📞 Call", false, v -> doCall());
++        call = button(callBlock.container, "📞 Call", false, v -> doCall());
+         call.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
+         call.setPadding(0, dp(18), 0, dp(18));

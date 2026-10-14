@@ -1,0 +1,17 @@
+diff --git a/app/src/main/java/ru/minisip/app/SettingsFragment.java b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -233,14 +233,14 @@
+-        call = button(callBlock.container, "Call", false, v -> doCall());
++        call = button(callBlock.container, "🟢📞 Call", false, v -> doCall());
+         call.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
+         call.setPadding(0, dp(18), 0, dp(18));
+ 
+-        hang = button(callBlock.container, "Discard", true, v -> app.hangup(page));
++        hang = button(callBlock.container, "🚫 Discard", true, v -> app.hangup(page));
+         hang.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
+         hang.setPadding(0, dp(18), 0, dp(18));
+         int hangColor = 0xB3D32F2F;   // красный, 70% непрозрачности
+         hang.setBackgroundTintList(android.content.res.ColorStateList.valueOf(hangColor));
+         hang.setStrokeColor(android.content.res.ColorStateList.valueOf(hangColor));
+         hang.setTextColor(0xFFFFFFFF);
