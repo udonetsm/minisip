@@ -499,11 +499,11 @@ public final class SettingsFragment extends Fragment {
         String[] names = {"Stable", "Pre-release"};
         int checked = "prerelease".equals(app.update().channel()) ? 1 : 0;
         new MaterialAlertDialogBuilder(requireContext())
-                .setTitle("Канал обновлений")
+                .setTitle("Update channel")
                 .setSingleChoiceItems(names, checked, (d, which) ->
                         app.update().setChannel(which == 1 ? "prerelease" : "stable"))
-                .setPositiveButton("Проверить", (d, w) -> app.update().check(checkListener))
-                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Check", (d, w) -> app.update().check(checkListener))
+                .setNegativeButton("Cancel", null)
                 .show();
     }
 
@@ -517,8 +517,8 @@ public final class SettingsFragment extends Fragment {
             if (r == null || r.hasUpdate) return;   // показ полосы — не наша забота
             if (r.noStable) {
                 MainActivity.showCustomConfirmDialog(requireContext(),
-                        "Стабильных версий пока нет",
-                        "Проверить пре-релизы?",
+                        "No stable versions yet",
+                        "Check pre-releases?",
                         () -> {
                             app.update().setChannel("prerelease");
                             app.update().check(checkListener);
@@ -526,7 +526,7 @@ public final class SettingsFragment extends Fragment {
                         null);
                 return;
             }
-            Toast.makeText(requireContext(), "У вас последняя версия", Toast.LENGTH_SHORT).show();
+            Toast.makeText(requireContext(), "You have the latest version", Toast.LENGTH_SHORT).show();
         }
         // onError показывает MainActivity (Toast + скрытие полосы) — здесь не дублируем
     };

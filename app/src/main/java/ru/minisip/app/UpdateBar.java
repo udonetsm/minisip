@@ -61,23 +61,44 @@ final class UpdateBar extends LinearLayout {
     /** Прогресс скачивания. percent=-1 — длина неизвестна. tag — строка релиза (может быть пустой). */
     void showProgress(int percent, String tag) {
         progress.setVisibility(VISIBLE);
+        configureLabel(false);
         label.setClickable(false);
         label.setFocusable(false);
         label.setOnClickListener(null);
         String pct = percent < 0 ? "" : " — " + percent + "%";
-        label.setText("Скачивание " + (tag == null ? "" : tag) + pct);
+        label.setText("Downloading " + (tag == null ? "" : tag) + pct);
         if (percent >= 0) progress.setProgress(percent);
         setVisibility(VISIBLE);
     }
 
-    /** Скачано: на той же полосе — кликабельная надпись «Установить». */
+    /** Скачано: на той же полосе — кликабельная надпись «Install» на всю ширину. */
     void showInstall(OnClickListener onInstall) {
         progress.setVisibility(GONE);
-        label.setText("Установить");
+        configureLabel(true);
+        label.setText("Install");
         label.setClickable(true);
         label.setFocusable(true);
         label.setOnClickListener(onInstall);
         setVisibility(VISIBLE);
+    }
+
+    /**
+     * fullWidth=true — «Install» на всю ширину полосы (progress скрыт, label занимает всё),
+     * fullWidth=false — текст прогресса справа от ProgressBar, ширина по содержимому.
+     */
+    private void configureLabel(boolean fullWidth) {
+        LayoutParams lp = (LayoutParams) label.getLayoutParams();
+        if (fullWidth) {
+            lp.width = 0;
+            lp.weight = 1f;
+            lp.leftMargin = 0;
+        } else {
+            lp.width = LayoutParams.WRAP_CONTENT;
+            lp.weight = 0f;
+            lp.leftMargin = dp(12);
+        }
+        label.setLayoutParams(lp);
+        label.setGravity(Gravity.CENTER);
     }
 
     void hide() {
