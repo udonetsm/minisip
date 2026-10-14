@@ -14,6 +14,7 @@ import ru.minisip.screen.Screen;
 import ru.minisip.sip.Sip;
 import ru.minisip.log.LogBuffer;
 import ru.minisip.vpn.Vpn;
+import ru.minisip.update.Update;
 
 /**
  * Корень композиции: единственное место, где собираются реализации.
@@ -32,6 +33,8 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     private LogBuffer vpnLog;              // лог VPN: один на приложение, живёт в памяти
     private LogBuffer callLog;             // лог звонка: события Sip.Listener и команды пользователя
     private LogBuffer sipLog;              // лог SIP: регистрация, вызов, ответы сервера
+    private Update update;                 // проверка и установка обновлений с GitHub Releases
+    private LogBuffer updateLog;           // лог обновлений: один на приложение
     private String sipHost, sipUser, sipPass;
     private int sipPort;
 
@@ -85,6 +88,9 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         callLog = LogBuffer.create(500);
         sipLog = LogBuffer.create(500);
         sip.setLogSink(sipLog);
+        updateLog = LogBuffer.create(500);
+        update = Update.create(this);
+        update.setLogSink(updateLog);
         try {                                // смена основной сети системы: SIP-сокет надо переоткрыть
             getSystemService(ConnectivityManager.class).registerDefaultNetworkCallback(
                     new ConnectivityManager.NetworkCallback() {
@@ -110,6 +116,16 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     /** Кольцевой лог блока «SIP сервер»: страница настроек читает его для панели "Log". */
     LogBuffer sipLog() {
         return sipLog;
+    }
+
+    /** Кольцевой лог проверки и установки обновлений: страница настроек читает его для панели "Log". */
+    LogBuffer updateLog() {
+        return updateLog;
+    }
+
+    /** Проверка и установка APK-обновлений с GitHub Releases. Один на приложение. */
+    Update update() {
+        return update;
     }
 
     /**

@@ -48,6 +48,7 @@ import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
 
 import ru.minisip.log.LogFile;
+import ru.minisip.update.Update;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
@@ -90,6 +91,15 @@ public final class SettingsFragment extends Fragment {
     private LinearLayout vpnMainSpoilerContainer, vpnAdvancedSpoilerContainer, sipSpoilerContainer;
 
     private LogArea sipLog, callLog, vpnLog;
+
+    /** Строка версии внизу страницы: long-press 2 с открывает диалог канала обновлений. */
+    private TextView versionLabel;
+    private LogArea updateLog;
+
+    /** Отложенный показ диалога канала: срабатывает через 2 с удержания на строке версии. */
+    private final Runnable channelDialogRunnable = () -> {
+        if (isAdded()) showChannelDialog();
+    };
 
     /** Одна и та же ссылка нужна, чтобы в onPause снимать только свой колбэк. */
     private final Runnable renderer = this::render;
@@ -275,6 +285,58 @@ public final class SettingsFragment extends Fragment {
             }
         }
 
+        // Строка версии: под всеми блоками. Долгое удержание 2 с — диалог канала обновлений.
+        LinearLayout verRow = new LinearLayout(ctx);
+        verRow.setOrientation(LinearLayout.HORIZONTAL);
+        verRow.setGravity(Gravity.CENTER_VERTICAL);
+        versionLabel = new TextView(ctx);
+        versionLabel.setText("v" + appVersion());
+        versionLabel.setTextAppearance(android.R.style.TextAppearance_Small);
+        versionLabel.setGravity(Gravity.CENTER);
+        versionLabel.setMinHeight(dp(32));
+        int vp = dp(8);
+        versionLabel.setPadding(vp, vp, vp, vp);
+        versionLabel.setOnTouchListener((v, ev) -> {
+            switch (ev.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    gestureHandler.postDelayed(channelDialogRunnable, 2000);
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (Math.abs(ev.getY() - v.getHeight() / 2f) > dp(20)) {
+                        gestureHandler.removeCallbacks(channelDialogRunnable);
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    gestureHandler.removeCallbacks(channelDialogRunnable);
+                    return true;
+            }
+            return false;
+        });
+        verRow.addView(versionLabel, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView moreVer = new TextView(ctx);
+        moreVer.setText("\u22EE");
+        moreVer.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
+        moreVer.setPadding(dp(10), 0, dp(10), 0);
+        moreVer.setClickable(true);
+        moreVer.setFocusable(true);
+        verRow.addView(moreVer);
+        col.addView(verRow, row(dp(8)));
+
+        updateLog = new LogArea(ctx);
+        moreVer.setOnClickListener(v -> {
+            PopupMenu pm = new PopupMenu(ctx, v);
+            pm.getMenu().add("Log");
+            pm.setOnMenuItemClickListener(item -> {
+                boolean show = updateLog.panel.getVisibility() == View.GONE;
+                updateLog.panel.setVisibility(show ? View.VISIBLE : View.GONE);
+                return true;
+            });
+            pm.show();
+        });
+        col.addView(updateLog.panel, row(dp(8)));
+
         // Кнопка удаления страницы
         deleteBtn = button(col, "Delete Page 🗑", true, v -> confirmDeletePage());
         deleteBtn.setBackgroundColor(0xFFD32F2F);
@@ -355,6 +417,9 @@ public final class SettingsFragment extends Fragment {
         status = vpnStatus = null;
         connect = disconnect = call = hang = audioBtn = vpnConnect = vpnDisconnect = vpnAppsBtn = vpnMainBtn = vpnAdvancedBtn = sipAdvancedBtn = deleteBtn = null;
         vpnMainSpoilerContainer = vpnAdvancedSpoilerContainer = sipSpoilerContainer = null;
+        versionLabel = null;
+        updateLog = null;
+        gestureHandler.removeCallbacks(channelDialogRunnable);
     }
 
     @Override
@@ -390,6 +455,15 @@ public final class SettingsFragment extends Fragment {
             sipLog.setText(app.sipLog().text());
             app.sipLog().setListener(sipLogUpdate);
         }
+        if (updateLog != null) {
+            updateLog.onEnable = () -> {
+                if (updateLog != null) updateLog.setText(app.updateLog().text());
+            };
+            updateLog.onClear = () -> app.updateLog().clear();
+            updateLog.onSave = () -> saveLog("update", updateLog);
+            updateLog.setText(app.updateLog().text());
+            app.updateLog().setListener(updateLog.onEnable);
+        }
         app.onChange = renderer;     // событиями App живёт только видимая страница
         render();
     }
@@ -399,11 +473,63 @@ public final class SettingsFragment extends Fragment {
         if (app != null) app.vpnLog().setListener(null);
         if (app != null) app.callLog().setListener(null);
         if (app != null) app.sipLog().setListener(null);
+        if (app != null) app.updateLog().setListener(null);
         if (app.onChange == renderer) app.onChange = null;
         super.onPause();
     }
 
     // ---------- действия ----------
+
+    /** versionName установленного APK — для подписи под блоками. */
+    private String appVersion() {
+        try {
+            return requireContext().getPackageManager()
+                    .getPackageInfo(requireContext().getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "?";
+        }
+    }
+
+    /**
+     * Диалог канала обновлений. Single-choice Stable / Pre-release, кнопка «Проверить»
+     * сохраняет выбор и запускает check(). Ответ с hasUpdate=true обрабатывает полоса в
+     * MainActivity; здесь — только «последняя версия» и 404-stable.
+     */
+    private void showChannelDialog() {
+        String[] names = {"Stable", "Pre-release"};
+        int checked = "prerelease".equals(app.update().channel()) ? 1 : 0;
+        new MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Канал обновлений")
+                .setSingleChoiceItems(names, checked, (d, which) ->
+                        app.update().setChannel(which == 1 ? "prerelease" : "stable"))
+                .setPositiveButton("Проверить", (d, w) -> app.update().check(checkListener))
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    /**
+     * Локальный слушатель check(). Полоса в MainActivity подключена постоянным слушателем
+     * и уже показывает скачивание; здесь — только случаи, когда полосы не будет.
+     */
+    private final Update.Listener checkListener = new Update.Listener() {
+        @Override
+        public void onChecked(Update.Result r) {
+            if (r == null || r.hasUpdate) return;   // показ полосы — не наша забота
+            if (r.noStable) {
+                MainActivity.showCustomConfirmDialog(requireContext(),
+                        "Стабильных версий пока нет",
+                        "Проверить пре-релизы?",
+                        () -> {
+                            app.update().setChannel("prerelease");
+                            app.update().check(checkListener);
+                        },
+                        null);
+                return;
+            }
+            Toast.makeText(requireContext(), "У вас последняя версия", Toast.LENGTH_SHORT).show();
+        }
+        // onError показывает MainActivity (Toast + скрытие полосы) — здесь не дублируем
+    };
 
     private void doConnect() {
         String s = text(server).trim();
