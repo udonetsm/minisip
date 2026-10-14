@@ -7,9 +7,11 @@ import android.content.Intent;
 import android.graphics.Typeface;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.Toast;
 
 import android.content.SharedPreferences;
 import android.net.Uri;
@@ -25,6 +27,8 @@ import androidx.viewpager2.adapter.FragmentStateAdapter;
 import androidx.viewpager2.widget.ViewPager2;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
+import ru.minisip.update.Update;
 
 /**
  * Пустая главная активити: на ней лежит лента страниц-фрагментов (SettingsFragment).
@@ -42,6 +46,9 @@ public final class MainActivity extends AppCompatActivity {
 
     private ViewPager2 pager;
     private Pages pages;
+    private UpdateBar updateBar;
+    /** tag последнего релиза — только для отображения в строке прогресса. */
+    private String lastUpdateTag = "";
 
     @Override
     protected void onCreate(Bundle b) {
@@ -85,6 +92,36 @@ public final class MainActivity extends AppCompatActivity {
         root.addView(pager, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
+
+        // Полоса обновления: одна на приложение, внизу поверх ViewPager2, ужимает его снизу.
+        updateBar = new UpdateBar(this);
+        FrameLayout.LayoutParams barLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        barLp.gravity = Gravity.BOTTOM;
+        root.addView(updateBar, barLp);
+        updateBar.attachInset(pager);
+        pager.setClipToPadding(false);
+
+        final App app = (App) getApplication();
+        app.update().setListener(new Update.Listener() {
+            @Override public void onChecked(Update.Result r) {
+                if (r.hasUpdate) {
+                    lastUpdateTag = r.tag == null ? "" : r.tag;
+                    updateBar.showProgress(0, lastUpdateTag);
+                }
+                // noStable и «последняя версия» обрабатывает SettingsFragment (шаг 7)
+            }
+            @Override public void onProgress(int percent) {
+                updateBar.showProgress(percent, lastUpdateTag);
+            }
+            @Override public void onDownloaded(java.io.File apk) {
+                updateBar.showInstall(v -> app.update().install());
+            }
+            @Override public void onError(String reason) {
+                Toast.makeText(MainActivity.this, reason, Toast.LENGTH_LONG).show();
+                updateBar.postDelayed(updateBar::hide, 3000);
+            }
+        });
 
         if (b == null) {
             if (Build.VERSION.SDK_INT >= 33) {
