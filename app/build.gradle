@@ -2,6 +2,34 @@ plugins {
     id 'com.android.application'
 }
 
+// Версия из локального git-тега (того же, что привязан к релизу на GitHub).
+//   на теге v2.0.5        → versionName "2.0.5",        versionCode 20500
+//   +3 коммита (тест)     → versionName "2.0.5-3-gabc", versionCode 20500
+//   без тегов             → versionName "abc1234",      versionCode 1
+def gitDescribe = { ->
+    try {
+        def out = providers.exec {
+            commandLine 'git', 'describe', '--tags', '--always', '--dirty=-dirty'
+            ignoreExitValue = true
+        }
+        def s = out.standardOutput.asText.get().trim()
+        if (s.isEmpty()) s = System.getenv('GITHUB_REF_NAME') ?: ''
+        return s.isEmpty() ? '0.0.0' : s
+    } catch (Exception e) {
+        def env = System.getenv('GITHUB_REF_NAME') ?: ''
+        return env.isEmpty() ? '0.0.0' : env
+    }
+}
+
+def rawTag = gitDescribe()
+def vName  = rawTag.startsWith('v') ? rawTag.substring(1) : rawTag
+def vBase  = vName.split('-')[0]
+def vParts = vBase.tokenize('.').collect { it.isInteger() ? it.toInteger() : 0 }
+def vCode  = vParts.size() >= 3
+        ? vParts[0] * 10000 + vParts[1] * 100 + vParts[2]
+        : (vParts.size() == 2 ? vParts[0] * 10000 + vParts[1] * 100 : 1)
+if (vCode < 1) vCode = 1
+
 android {
     namespace 'ru.minisip'
     compileSdk 35
@@ -10,8 +38,8 @@ android {
         applicationId 'ru.minisip'
         minSdk 27
         targetSdk 34
-        versionCode 1
-        versionName '0.1'
+        versionCode vCode
+        versionName vName
     }
 
     compileOptions {
@@ -20,7 +48,6 @@ android {
     }
 }
 
-// Ни одной внешней зависимости: только платформа Android.
 dependencies {
     implementation 'com.google.android.material:material:1.12.0'
 }
