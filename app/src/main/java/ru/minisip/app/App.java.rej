@@ -1,0 +1,10 @@
+--- app/src/main/java/ru/minisip/app/App.java
++++ app/src/main/java/ru/minisip/app/App.java
+@@ -409,7 +418,6 @@
+         stopService(new Intent(this, CallService.class));
+         changed();
+     }
+ 
+     private void changed() {
+-        vpn.setStrict(true);
+         if (onChange != null) onChange.run();

@@ -34,6 +34,11 @@ final class Esp {
         this.block = s.block();
     }
 
+     /** Наш исходящий SPI (он же SPI_R старого SA — нужен для INFORMATIONAL DELETE). */
+    long spiOut() { return spiOut; }
+    
+    /** Наш входящий SPI (для логов и DELETE). */
+    long spiIn() { return spiIn; }
     /**
      * IP-пакет b[0..n) -> готовый пакет ESP (его кладут в UDP как есть).
      * synchronized: исходящее теперь зовут два потока (tun -> сокет и ping из таймеров), а номер общий.

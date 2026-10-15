@@ -115,6 +115,11 @@ final class VpnImpl implements Vpn {
         updateWake();
     }
 
+    @Override
+    public synchronized boolean isStrict() {
+        return strict;
+    }
+
     /**
      * Partial wake lock держим ВСЕГДА, пока VPN запущен (туннель поднят или идёт переподключение),
      * независимо от режима strict: иначе при сне CPU замолкает поток vpn-keep, NAT-запись
@@ -488,6 +493,14 @@ final class VpnImpl implements Vpn {
             synchronized (VpnImpl.this) {
                 if (tunnel != owner) return;
                 lis.onPingLoss(lostCount);
+            }
+        }
+	
+        @Override
+        public void onRekey(String info) {
+            synchronized (VpnImpl.this) {
+                if (tunnel != owner) return;
+                lis.onRekey(info);
             }
         }
     }

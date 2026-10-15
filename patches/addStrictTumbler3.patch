@@ -1,0 +1,79 @@
+diff --git a/app/src/main/java/ru/minisip/app/SettingsFragment.java b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -23,6 +23,7 @@
+ import android.view.DragEvent;
+ import android.view.Gravity;
+ import android.view.LayoutInflater;
++import android.view.MenuItem;
+ import android.view.MotionEvent;
+ import android.view.View;
+ import android.view.ViewGroup;
+@@ -258,7 +259,7 @@
+         // --- Блок 3: Настройка VPN ---
+         Block vpnBlock = createBlock(2);
+-        vpnLog = title(vpnBlock.container, "VPN settings (IKEv2)", 0);
++        vpnLog = titleVpn(vpnBlock.container, "VPN settings (IKEv2)", 0);
+ 
+         vpnMainSpoilerContainer = new LinearLayout(ctx);
+         vpnMainSpoilerContainer.setOrientation(LinearLayout.VERTICAL);
+@@ -620,5 +621,58 @@
+         return area;
+     }
+ 
++    /**
++     * Заголовок блока VPN: в ⋮-меню, кроме «Log», есть чекбокс strict-режима.
++     * strict хранится per-page в prefs под ключом "vpnStrict" (по умолчанию включён);
++     * при активном VPN применяется к живому туннелю сразу.
++     */
++    private LogArea titleVpn(LinearLayout parent, String text, int top) {
++        Context ctx = parent.getContext();
++        LinearLayout head = new LinearLayout(ctx);
++        head.setOrientation(LinearLayout.HORIZONTAL);
++        head.setGravity(Gravity.CENTER_VERTICAL);
++
++        TextView t = new TextView(ctx);
++        t.setText(text);
++        t.setTextAppearance(android.R.style.TextAppearance_Medium);
++        head.addView(t, new LinearLayout.LayoutParams(0,
++                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
++
++        TextView more = new TextView(ctx);
++        more.setText("\u22EE");                 // ⋮
++        more.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
++        int pad = dp(10);
++        more.setPadding(pad, 0, pad, 0);
++        more.setClickable(true);
++        more.setFocusable(true);
++        head.addView(more);
++
++        parent.addView(head, row(top));
++
++        LogArea area = new LogArea(ctx);
++
++        more.setOnClickListener(v -> {
++            PopupMenu pm = new PopupMenu(ctx, v);
++            pm.getMenu().add("Log");
++            MenuItem strict = pm.getMenu().add("Strict mode");
++            strict.setCheckable(true);
++            strict.setChecked(prefs.getBoolean("vpnStrict", true));
++            pm.setOnMenuItemClickListener(item -> {
++                if ("Log".contentEquals(item.getTitle())) {
++                    boolean show = area.panel.getVisibility() == View.GONE;
++                    area.panel.setVisibility(show ? View.VISIBLE : View.GONE);
++                    return true;
++                }
++                boolean next = !item.isChecked();
++                item.setChecked(next);
++                prefs.edit().putBoolean("vpnStrict", next).apply();
++                if (app.vpnUp || app.vpnConnecting) app.setVpnStrict(next);
++                return true;
++            });
++            pm.show();
++        });
++
++        return area;
++    }
++
+     /** Панель лога блока: контейнер, поле для текста и кнопки. */
+     private final class LogArea {

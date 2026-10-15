@@ -23,6 +23,7 @@ import android.util.TypedValue;
 import android.view.DragEvent;
 import android.view.Gravity;
 import android.view.LayoutInflater;
+import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -207,6 +208,8 @@ public final class SettingsFragment extends Fragment {
         call = button(callRow, "📞 Call", false, v -> doCall());
         call.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
         call.setPadding(0, dp(18), 0, dp(18));
+        call.setBackgroundTintList(stateful(0xFF1976D2, 0x33808080));
+        call.setTextColor(stateful(0xFFFFFFFF, 0x99FFFFFF));
         LinearLayout.LayoutParams callLp = new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         callLp.rightMargin = dp(8);
@@ -215,10 +218,9 @@ public final class SettingsFragment extends Fragment {
         hang = button(callRow, "🚫 Discard", true, v -> app.hangup(page));
         hang.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
         hang.setPadding(0, dp(18), 0, dp(18));
-        int hangColor = 0xB3D32F2F;   // красный, 70% непрозрачности
-        hang.setBackgroundTintList(android.content.res.ColorStateList.valueOf(hangColor));
-        hang.setStrokeColor(android.content.res.ColorStateList.valueOf(0xB3D32F2F));
-        hang.setTextColor(0xFFFFFFFF);
+        hang.setBackgroundTintList(stateful(0xB3D32F2F, 0x33808080));
+        hang.setStrokeColor(stateful(0xB3D32F2F, 0x33808080));
+        hang.setTextColor(stateful(0xFFFFFFFF, 0x99FFFFFF));
         hang.setLayoutParams(new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         LinearLayout audioRow = new LinearLayout(ctx);
@@ -243,7 +245,7 @@ public final class SettingsFragment extends Fragment {
 
         // --- Блок 3: Настройка VPN ---
         Block vpnBlock = createBlock(2);
-        vpnLog = title(vpnBlock.container, "VPN settings (IKEv2)", 0);
+        vpnLog = titleVpn(vpnBlock.container, "VPN settings (IKEv2)", 0);
 
         vpnMainSpoilerContainer = new LinearLayout(ctx);
         vpnMainSpoilerContainer.setOrientation(LinearLayout.VERTICAL);
@@ -926,6 +928,13 @@ public final class SettingsFragment extends Fragment {
         }
         vpnDisconnect.setEnabled(vUp || vConn);
     }
+    
+        /** Двухцветный ColorStateList: цвет для enabled, цвет для disabled. */
+    private static android.content.res.ColorStateList stateful(int enabled, int disabled) {
+        return new android.content.res.ColorStateList(
+                new int[][]{ { android.R.attr.state_enabled }, {} },
+                new int[]{ enabled, disabled });
+    }
 
     private static void setFieldEnabled(TextInputEditText field, boolean enabled) {
         if (field != null) {
@@ -1133,6 +1142,60 @@ public final class SettingsFragment extends Fragment {
             pm.setOnMenuItemClickListener(item -> {
                 boolean show = area.panel.getVisibility() == View.GONE;
                 area.panel.setVisibility(show ? View.VISIBLE : View.GONE);
+                return true;
+            });
+            pm.show();
+        });
+
+        return area;
+    }
+
+    /**
+     * Заголовок блока VPN: в ⋮-меню, кроме «Log», есть чекбокс strict-режима.
+     * strict хранится per-page в prefs под ключом "vpnStrict" (по умолчанию включён);
+     * при активном VPN применяется к живому туннелю сразу.
+     */
+    private LogArea titleVpn(LinearLayout parent, String text, int top) {
+        Context ctx = parent.getContext();
+        LinearLayout head = new LinearLayout(ctx);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView t = new TextView(ctx);
+        t.setText(text);
+        t.setTextAppearance(android.R.style.TextAppearance_Medium);
+        head.addView(t, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView more = new TextView(ctx);
+        more.setText("\u22EE");                 // ⋮
+        more.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
+        int pad = dp(10);
+        more.setPadding(pad, 0, pad, 0);
+        more.setClickable(true);
+        more.setFocusable(true);
+        head.addView(more);
+
+        parent.addView(head, row(top));
+
+        LogArea area = new LogArea(ctx);
+
+        more.setOnClickListener(v -> {
+            PopupMenu pm = new PopupMenu(ctx, v);
+            pm.getMenu().add("Log");
+            MenuItem strict = pm.getMenu().add("Strict mode");
+            strict.setCheckable(true);
+            strict.setChecked(prefs.getBoolean("vpnStrict", false));
+            pm.setOnMenuItemClickListener(item -> {
+                if ("Log".contentEquals(item.getTitle())) {
+                    boolean show = area.panel.getVisibility() == View.GONE;
+                    area.panel.setVisibility(show ? View.VISIBLE : View.GONE);
+                    return true;
+                }
+                boolean next = !item.isChecked();
+                item.setChecked(next);
+                prefs.edit().putBoolean("vpnStrict", next).apply();
+                if (app.lastPage == page && (app.vpnUp || app.vpnConnecting)) app.setVpnStrict(next);
                 return true;
             });
             pm.show();

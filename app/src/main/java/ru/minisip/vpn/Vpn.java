@@ -25,11 +25,17 @@ public interface Vpn {
         default void onReconnecting(String reason, int attempt) {}
         default void onReconnecting(String reason) { onReconnecting(reason, 1); }
         default void onPingLoss(int lostCount) {}
+
+        /** Перегенерация ключей (Child/IKE rekey) или связанное событие; info — краткое описание. */
+        default void onRekey(String info) {}
+    
     }
     default String dpdState() { return ""; }
     default String extraStats() { return ""; }
     default int pingEvaluated() { return 0; }
     default void setStrict(boolean on) {}
+    /** Текущий режим watchdog: true — PBX (жёсткий), false — обычный VPN (мягкий). */
+    default boolean isStrict() { return false; }
 
     /** Куда писать журнал событий (null — никуда). Строки без секретов. */
     default void setLogSink(LogSink s) {}

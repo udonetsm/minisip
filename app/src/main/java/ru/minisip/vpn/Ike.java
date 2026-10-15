@@ -676,4 +676,384 @@ final class Ike {
         l.add(notify(N_NAT_DST, Crypto.sha1(spiI, spiR, srv, p)));
         return l;
     }
+
+    // =====================================================================
+    // Child SA rekey (RFC 7296 §2.8.2). Инициатор: наш CREATE_CHILD_SA с PFS.
+    // =====================================================================
+
+    /** Номер нашего CREATE_CHILD_SA; -1 — rekey не идёт. */
+    private int childRekeyId = -1;
+    /** Наш новый входящий SPI (SPI_I), уходит в SA-предложение. */
+    private byte[] childRekeySpiI;
+    /** Новый исходящий SPI от сервера (SPI_R), из ответа. */
+    private byte[] childRekeySpiR;
+    private byte[] childRekeyNi;                // наш nonce
+    private byte[] childRekeyNr;                // nonce сервера
+    private BigInteger childRekeyX;             // наша DH-пара (PFS)
+    private byte[] childRekeyKe;                // наш KEi
+
+    /** Идёт ли сейчас наш rekey Child SA. */
+    boolean childRekeyPending() { return childRekeyId >= 0; }
+
+    /** Номер текущего rekey-запроса (для сверки в Tunnel.onIke). -1 — нет. */
+    int childRekeyId() { return childRekeyId; }
+
+    /**
+     * Payload'ы CREATE_CHILD_SA для Child rekey (RFC 7296 §2.8.2): SA, Ni, KEi, TSi, TSR.
+     * PFS включён — KE обязателен. Вызывающий сам шлёт через seal(CHILD, false, childRekeyId(), pls).
+     * null — rekey уже идёт.
+     */
+    List<Pl> rekeyChildPl() {
+        if (childRekeyId >= 0) return null;
+        childRekeyId = nextId();
+        childRekeySpiI = new byte[4];
+        do { Crypto.RND.nextBytes(childRekeySpiI); } while (u32(childRekeySpiI, 0) == 0);
+        childRekeyNi = Crypto.random(32);
+        childRekeyX = Crypto.dhPrivate();
+        childRekeyKe = Crypto.dhPublic(childRekeyX);
+        byte[] ke = new byte[4 + Crypto.DH_BYTES];
+        put16(ke, 0, Crypto.DH_GROUP);
+        System.arraycopy(childRekeyKe, 0, ke, 4, childRekeyKe.length);
+        List<Pl> l = new ArrayList<>();
+        l.add(new Pl(SA, saEsp(childRekeySpiI)));
+        l.add(new Pl(NONCE, childRekeyNi));
+        l.add(new Pl(KE, ke));
+        l.add(new Pl(TSI, ts()));
+        l.add(new Pl(TSR, ts()));
+        return l;
+    }
+
+    /**
+     * Разбор ответа на CREATE_CHILD_SA (Child rekey). null — ошибка (текст в error); иначе новый Esp
+     * с новыми SPI. Старый Esp остаётся у вызывающего, пока тот его не заменит (make-before-break).
+     */
+    Esp onRekeyChildResponse(Rx r) {
+        byte[] nrNew = null, ke = null;
+        Chosen sa = null;
+        for (Pl p : r.pl) {
+            if (p.type == NOTIFY && p.body.length >= 4 && u16(p.body, 2) < 16384) {
+                error = notifyText(u16(p.body, 2));
+                return null;
+            }
+            if (p.type == SA) sa = parseSa(p.body, 3);
+            else if (p.type == NONCE) nrNew = p.body;
+            else if (p.type == KE && p.body.length == 4 + Crypto.DH_BYTES) {
+                ke = Arrays.copyOfRange(p.body, 4, p.body.length);
+            }
+        }
+        if (sa == null || nrNew == null || ke == null || sa.spi.length != 4
+                || !sa.suite.supported(false) || sa.dh != Crypto.DH_GROUP || sa.esn > 0) {
+            error = "bad CREATE_CHILD_SA reply (Child rekey)";
+            return null;
+        }
+        byte[] g = Crypto.dhShared(childRekeyX, ke);
+        if (g == null) { error = "bad DH in Child rekey reply"; return null; }
+        childRekeySpiR = sa.spi;
+        childRekeyNr = nrNew;
+        Crypto.Suite c = sa.suite;
+        int e = c.encKeyLen(), i = c.integKeyLen();
+        // RFC 7296 §2.17: с PFS KEYMAT = prf+(SK_d, g^ir_new | Ni | Nr)
+        byte[] k = suite.prfPlus(skD, cat(g, childRekeyNi, childRekeyNr), 2 * (e + i));
+        Crypto.Box out = new Crypto.Box(c,
+                Arrays.copyOfRange(k, 0, e),
+                Arrays.copyOfRange(k, 2 * e, 2 * e + i));
+        Crypto.Box in = new Crypto.Box(c,
+                Arrays.copyOfRange(k, e, 2 * e),
+                Arrays.copyOfRange(k, 2 * e + i, 2 * (e + i)));
+        long newSpiOut = u32(childRekeySpiR, 0);
+        long newSpiIn = u32(childRekeySpiI, 0);
+        childRekeyId = -1;
+        return new Esp(c, out, in, newSpiOut, newSpiIn);
+    }
+
+    
+    /** Сброс незавершённого rekey: таймаут ответа или проигранная коллизия. */
+    void abortChildRekey() {
+        childRekeyId = -1;
+        childRekeySpiI = childRekeySpiR = childRekeyNi = childRekeyNr = childRekeyKe = null;
+        childRekeyX = null;
+    }
+    
+    // =====================================================================
+    // IKE SA rekey (RFC 7296 §2.8). Инициатор: наш CREATE_CHILD_SA с новым SPIi.
+    // DH обязателен — на новом IKE SA обеспечивается PFS (RFC 7296 §2.18).
+    // =====================================================================
+
+    /** Номер нашего CREATE_CHILD_SA для IKE rekey; -1 — не идёт. */
+    private int ikeRekeyId = -1;
+    private byte[] ikeRekeySpiI;       // наш новый 8-байтный SPI (в SA-предложении)
+    private byte[] ikeRekeySpiR;       // SPI сервера (из ответа)
+    private byte[] ikeRekeyNi, ikeRekeyNr;
+    private BigInteger ikeRekeyX;
+    private byte[] ikeRekeyKe;
+
+    boolean ikeRekeyPending() { return ikeRekeyId >= 0; }
+    int ikeRekeyId() { return ikeRekeyId; }
+
+    /**
+     * Результат разбора ответа на IKE SA rekey: новые SPI и ключи, но БЕЗ установки.
+     * Установка (замена spiI/spiR/boxOut/boxIn/skD/skPi/skPr) — задача Tunnel, шаг 4b.
+     */
+    static final class IkeRekeyMaterial {
+        byte[] newSpiI, newSpiR;
+        Crypto.Suite newSuite;
+        Crypto.Box newBoxOut, newBoxIn;
+        byte[] newSkD, newSkPi, newSkPr;
+    }
+
+    /** SA для IKE SA rekey: то же, что saIke(), но с 8-байтным SPI инициатора в предложении. */
+    private static byte[] saIkeRekey(byte[] spi) {
+        int[][] cbc = {{T_ENCR, 12, 256}, {T_ENCR, 12, 128}, {T_PRF, 5, 0}, {T_PRF, 2, 0},
+                {T_INTEG, 12, 0}, {T_INTEG, 2, 0}, {T_DH, Crypto.DH_GROUP, 0}};
+        int[][] gcm = {{T_ENCR, 20, 256}, {T_ENCR, 20, 128}, {T_PRF, 5, 0}, {T_PRF, 2, 0},
+                {T_DH, Crypto.DH_GROUP, 0}};
+        return cat(proposal(true, 1, 1, spi, cbc), proposal(false, 2, 1, spi, gcm));
+    }
+
+    /**
+     * Payload'ы CREATE_CHILD_SA для IKE SA rekey (RFC 7296 §2.8): SA, Ni, KEi.
+     * DH обязателен (PFS). TSi/TSR в этом обмене отсутствуют.
+     * null — rekey уже идёт.
+     */
+    List<Pl> rekeyIkePl() {
+        if (ikeRekeyId >= 0) return null;
+        ikeRekeyId = nextId();
+        ikeRekeySpiI = Crypto.random(8);
+        ikeRekeyNi = Crypto.random(32);
+        ikeRekeyX = Crypto.dhPrivate();
+        ikeRekeyKe = Crypto.dhPublic(ikeRekeyX);
+        byte[] ke = new byte[4 + Crypto.DH_BYTES];
+        put16(ke, 0, Crypto.DH_GROUP);
+        System.arraycopy(ikeRekeyKe, 0, ke, 4, ikeRekeyKe.length);
+        List<Pl> l = new ArrayList<>();
+        l.add(new Pl(SA, saIkeRekey(ikeRekeySpiI)));
+        l.add(new Pl(NONCE, ikeRekeyNi));
+        l.add(new Pl(KE, ke));
+        return l;
+    }
+
+    /**
+     * Разбор ответа на IKE SA rekey. Возвращает IkeRekeyMaterial, ничего не устанавливает.
+     * null — ошибка (текст в error).
+     */
+    IkeRekeyMaterial onRekeyIkeResponse(Rx r) {
+        byte[] nrNew = null, ke = null;
+        Chosen sa = null;
+        for (Pl p : r.pl) {
+            if (p.type == NOTIFY && p.body.length >= 4 && u16(p.body, 2) < 16384) {
+                error = notifyText(u16(p.body, 2));
+                return null;
+            }
+            if (p.type == SA) sa = parseSa(p.body, 1);
+            else if (p.type == NONCE) nrNew = p.body;
+            else if (p.type == KE && p.body.length == 4 + Crypto.DH_BYTES) {
+                ke = Arrays.copyOfRange(p.body, 4, p.body.length);
+            }
+        }
+        if (sa == null || nrNew == null || ke == null || sa.spi.length != 8
+                || !sa.suite.supported(true) || sa.dh != Crypto.DH_GROUP) {
+            error = "bad CREATE_CHILD_SA reply (IKE rekey)";
+            return null;
+        }
+        byte[] g = Crypto.dhShared(ikeRekeyX, ke);
+        if (g == null) { error = "bad DH in IKE rekey reply"; return null; }
+        ikeRekeySpiR = sa.spi;
+        ikeRekeyNr = nrNew;
+        // RFC 7296 §2.18: SKEYSEED = prf(Ni | Nr, g^ir_new),
+        // keymat = prf+(SKEYSEED, Ni | Nr | SPIi | SPIr).
+        Crypto.Suite c = sa.suite;
+        byte[] seed = c.prf(cat(ikeRekeyNi, ikeRekeyNr), g);
+        int pr = c.prfLen(), il = c.integKeyLen(), el = c.encKeyLen();
+        byte[] k = c.prfPlus(seed, cat(ikeRekeyNi, ikeRekeyNr, ikeRekeySpiI, ikeRekeySpiR),
+                3 * pr + 2 * il + 2 * el);
+        int o = 0;
+        IkeRekeyMaterial m = new IkeRekeyMaterial();
+        m.newSpiI = ikeRekeySpiI;
+        m.newSpiR = ikeRekeySpiR;
+        m.newSuite = c;
+        m.newSkD = Arrays.copyOfRange(k, o, o += pr);
+        byte[] ai = Arrays.copyOfRange(k, o, o += il);
+        byte[] ar = Arrays.copyOfRange(k, o, o += il);
+        byte[] ei = Arrays.copyOfRange(k, o, o += el);
+        byte[] er = Arrays.copyOfRange(k, o, o += el);
+        m.newSkPi = Arrays.copyOfRange(k, o, o += pr);
+        m.newSkPr = Arrays.copyOfRange(k, o, o + pr);
+        m.newBoxOut = new Crypto.Box(c, ei, ai);
+        m.newBoxIn = new Crypto.Box(c, er, ar);
+        ikeRekeyId = -1;
+        return m;
+    }
+
+    /** Сброс незавершённого IKE rekey: таймаут ответа или проигранная коллизия. */
+    void abortIkeRekey() {
+        ikeRekeyId = -1;
+        ikeRekeySpiI = ikeRekeySpiR = ikeRekeyNi = ikeRekeyNr = ikeRekeyKe = null;
+        ikeRekeyX = null;
+    }
+
+    /** Тип входящего CREATE_CHILD_SA: 1 = IKE SA rekey (SA proto=1, 8-байтный SPI), 3 = ESP, 0 = непонятно. */
+    int peekRekeyProto(Rx r) {
+        for (Pl p : r.pl) {
+            if (p.type == SA) return p.body.length >= 6 ? (p.body[5] & 0xff) : 0;
+        }
+        return 0;
+    }
+
+    /** Ответ респондера на входящий IKE SA rekey: payload'ы ответа + новый материал ключей. */
+    static final class IkeRekeyResp {
+        List<Pl> pls;
+        IkeRekeyMaterial material;
+    }
+
+    /**
+     * Обработка входящего CREATE_CHILD_SA (IKE SA rekey) от сервера — мы респондер.
+     * Разбирает SA/Ni/KEi (SA proto=1, SPI 8 байт), генерит Nr/KEr/SPIr, считает новые ключи.
+     * Возвращает payload'ы ответа и материал; установка ключей — installRekeyedKeys() у вызывающего.
+     */
+    IkeRekeyResp onIncomingIkeRekey(Rx r) {
+        byte[] ni = null, ke = null;
+        Chosen sa = null;
+        for (Pl p : r.pl) {
+            if (p.type == SA) sa = parseSa(p.body, 1);
+            else if (p.type == NONCE) ni = p.body;
+            else if (p.type == KE && p.body.length == 4 + Crypto.DH_BYTES) {
+                ke = Arrays.copyOfRange(p.body, 4, p.body.length);
+            }
+        }
+        if (sa == null || ni == null || ke == null || sa.spi.length != 8
+                || !sa.suite.supported(true) || sa.dh != Crypto.DH_GROUP) {
+            error = "bad incoming CREATE_CHILD_SA (IKE rekey)";
+            return null;
+        }
+        BigInteger x = Crypto.dhPrivate();
+        byte[] kePub = Crypto.dhPublic(x);
+        byte[] g = Crypto.dhShared(x, ke);
+        if (g == null) { error = "bad DH in incoming IKE rekey"; return null; }
+        byte[] newSpiR = Crypto.random(8);          // наш SPI (мы респондер)
+        byte[] nr = Crypto.random(32);
+        List<Pl> pls = new ArrayList<>();
+        pls.add(new Pl(SA, saIkeRekey(newSpiR)));
+        pls.add(new Pl(NONCE, nr));
+        byte[] keB = new byte[4 + Crypto.DH_BYTES];
+        put16(keB, 0, Crypto.DH_GROUP);
+        System.arraycopy(kePub, 0, keB, 4, kePub.length);
+        pls.add(new Pl(KE, keB));
+        // RFC 7296 §2.18: keymat = prf+(prf(Ni|Nr, g^ir'), Ni|Nr|SPIi|SPIr).
+        // Мы респондер: SPIi = SPI сервера, SPIr = наш новый. Box'ы — респондерские (er/ar — out, ei/ai — in).
+        Crypto.Suite c = sa.suite;
+        byte[] seed = c.prf(cat(ni, nr), g);
+        int pr = c.prfLen(), il = c.integKeyLen(), el = c.encKeyLen();
+        byte[] k = c.prfPlus(seed, cat(ni, nr, sa.spi, newSpiR), 3 * pr + 2 * il + 2 * el);
+        int o = 0;
+        IkeRekeyMaterial m = new IkeRekeyMaterial();
+        m.newSpiI = sa.spi;
+        m.newSpiR = newSpiR;
+        m.newSuite = c;
+        m.newSkD = Arrays.copyOfRange(k, o, o += pr);
+        byte[] ai = Arrays.copyOfRange(k, o, o += il);
+        byte[] ar = Arrays.copyOfRange(k, o, o += il);
+        byte[] ei = Arrays.copyOfRange(k, o, o += el);
+        byte[] er = Arrays.copyOfRange(k, o, o += el);
+        m.newSkPi = Arrays.copyOfRange(k, o, o += pr);
+        m.newSkPr = Arrays.copyOfRange(k, o, o + pr);
+        m.newBoxOut = new Crypto.Box(c, er, ar);
+        m.newBoxIn = new Crypto.Box(c, ei, ai);
+        IkeRekeyResp resp = new IkeRekeyResp();
+        resp.pls = pls;
+        resp.material = m;
+        return resp;
+    }
+    
+    /** SPI старого (заменяемого) IKE SA — нужны для DELETE. */
+    byte[] oldSpiI, oldSpiR;
+
+    /**
+     * Устанавливает новые ключи после успешного IKE SA rekey. Атомарно: SPI, suite, boxOut/In,
+     * skD/skPi/skPr. Сбрасывает nextId=0 и peerNext=0: у нового SA своё пространство номеров
+     * (RFC 7296 §2.8). Старые SPI сохраняются в oldSpiI/oldSpiR.
+     */
+    void installRekeyedKeys(IkeRekeyMaterial m) {
+        oldSpiI = spiI;
+        oldSpiR = spiR;
+        spiI = m.newSpiI;
+        spiR = m.newSpiR;
+        suite = m.newSuite;
+        boxOut = m.newBoxOut;
+        boxIn = m.newBoxIn;
+        skD = m.newSkD;
+        skPi = m.newSkPi;
+        skPr = m.newSkPr;
+        nextId = 0;
+        peerNext = 0;
+        ackFloor = 0;
+    }
+    
+
+    // =====================================================================
+    // Child SA rekey: мы респондер (сервер инициировал).
+    // =====================================================================
+
+    /** Результат разбора входящего CREATE_CHILD_SA: payload'ы ответа и новый Esp. */
+    static final class ChildRekeyResp {
+        List<Pl> pls;
+        Esp esp;
+    }
+
+    /**
+     * Обработка входящего CREATE_CHILD_SA (Child rekey) от сервера — мы респондер.
+     * Разбирает SA/Ni/KEi, генерит Nr/KEi/SPI, считает KEYMAT, возвращает payload'ы ответа + Esp.
+     * null — ошибка (текст в error).
+     */
+    ChildRekeyResp onIncomingChildRekey(Rx r) {
+        byte[] ni = null, ke = null;
+        Chosen sa = null;
+        for (Pl p : r.pl) {
+            if (p.type == SA) sa = parseSa(p.body, 3);
+            else if (p.type == NONCE) ni = p.body;
+            else if (p.type == KE && p.body.length == 4 + Crypto.DH_BYTES) {
+                ke = Arrays.copyOfRange(p.body, 4, p.body.length);
+            }
+        }
+        if (sa == null || ni == null || sa.spi.length != 4
+                || !sa.suite.supported(false) || sa.esn > 0) {
+            error = "bad incoming CREATE_CHILD_SA";
+            return null;
+        }
+        // PFS (RFC 7296 §2.8.2): KE обязателен, мы всегда предлагаем DH group 14.
+        if (ke == null || sa.dh != Crypto.DH_GROUP) {
+            error = "incoming rekey without DH group 14 (PFS required)";
+            return null;
+        }
+        BigInteger x = Crypto.dhPrivate();
+        byte[] kePub = Crypto.dhPublic(x);
+        byte[] g = Crypto.dhShared(x, ke);
+        if (g == null) { error = "bad DH in incoming rekey"; return null; }
+        byte[] spiNew = new byte[4];
+        do { Crypto.RND.nextBytes(spiNew); } while (u32(spiNew, 0) == 0);
+        byte[] nr = Crypto.random(32);
+        List<Pl> pls = new ArrayList<>();
+        pls.add(new Pl(SA, saEsp(spiNew)));
+        pls.add(new Pl(NONCE, nr));
+        byte[] keB = new byte[4 + Crypto.DH_BYTES];
+        put16(keB, 0, Crypto.DH_GROUP);
+        System.arraycopy(kePub, 0, keB, 4, kePub.length);
+        pls.add(new Pl(KE, keB));
+        pls.add(new Pl(TSI, ts()));
+        pls.add(new Pl(TSR, ts()));
+        // RFC 7296 §2.17: с PFS KEYMAT = prf+(SK_d, g^ir_new | Ni | Nr).
+        // Мы респондер: out = вторая половина, in = первая (симметрично complete()).
+        Crypto.Suite c = sa.suite;
+        int e = c.encKeyLen(), i = c.integKeyLen();
+        byte[] k = suite.prfPlus(skD, cat(g, ni, nr), 2 * (e + i));
+        Crypto.Box in = new Crypto.Box(c,
+                Arrays.copyOfRange(k, 0, e),
+                Arrays.copyOfRange(k, 2 * e, 2 * e + i));
+        Crypto.Box out = new Crypto.Box(c,
+                Arrays.copyOfRange(k, e, 2 * e),
+                Arrays.copyOfRange(k, 2 * e + i, 2 * (e + i)));
+        ChildRekeyResp resp = new ChildRekeyResp();
+        resp.pls = pls;
+        resp.esp = new Esp(c, out, in, u32(sa.spi, 0), u32(spiNew, 0));
+        return resp;
+    }    
 }

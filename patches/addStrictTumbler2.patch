@@ -1,0 +1,40 @@
+diff --git a/app/src/main/java/ru/minisip/app/App.java b/app/src/main/java/ru/minisip/app/App.java
+--- a/app/src/main/java/ru/minisip/app/App.java
++++ b/app/src/main/java/ru/minisip/app/App.java
+@@ -185,9 +185,9 @@
+     void vpnConnect(int page, String host, String login, String password, String psk, String ca, String apps, String healthcheckIp) {
+-        vpn.setStrict(true);
+         if (state != IDLE || vpnUp || vpnConnecting || !allowed(page)) return;
+         lastPage = page;
+         vpnConnecting = true;
+         vpnStatus = "🟡 VPN: connecting...";
+         changed();
++        vpn.setStrict(PageStore.prefs(this, page).getBoolean("vpnStrict", true));
+         vpn.connect(host, login, password, psk, ca, apps, healthcheckIp);
+     }
+@@ -228,7 +228,16 @@
+     boolean vpnMobike() {
+         return vpn.mobike();
+     }
+ 
++    /** Режим watchdog: true — PBX (жёсткий), false — обычный VPN (мягкий). Применяется сразу. */
++    void setVpnStrict(boolean on) {
++        vpn.setStrict(on);
++    }
++
++    boolean isVpnStrict() {
++        return vpn.isStrict();
++    }
++
+     int getVpnLossCount() {
+         return vpnLossCount;
+     }
+@@ -400,7 +409,6 @@
+         stopService(new Intent(this, CallService.class));
+         changed();
+     }
+ 
+     private void changed() {
+-        vpn.setStrict(true);
+         if (onChange != null) onChange.run();
+     }

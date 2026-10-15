@@ -1,0 +1,96 @@
+--- a/app/src/main/java/ru/minisip/vpn/Ike.java
++++ b/app/src/main/java/ru/minisip/vpn/Ike.java
+@@ -365,4 +365,78 @@ final class Ike {
+         l.add(notify(N_NAT_DST, Crypto.sha1(spiI, spiR, srv, p)));
+         return l;
+     }
++
++    // =====================================================================
++    // Child SA rekey (RFC 7296 §2.8.2). Инициатор: наш CREATE_CHILD_SA с PFS.
++    // =====================================================================
++
++    /** Номер нашего CREATE_CHILD_SA; -1 — rekey не идёт. */
++    private int childRekeyId = -1;
++    /** Наш новый входящий SPI (SPI_I), уходит в SA-предложение. */
++    private byte[] childRekeySpiI;
++    /** Новый исходящий SPI от сервера (SPI_R), из ответа. */
++    private byte[] childRekeySpiR;
++    private byte[] childRekeyNi;                // наш nonce
++    private byte[] childRekeyNr;                // nonce сервера
++    private BigInteger childRekeyX;             // наша DH-пара (PFS)
++    private byte[] childRekeyKe;                // наш KEi
++
++    /** Идёт ли сейчас наш rekey Child SA. */
++    boolean childRekeyPending() { return childRekeyId >= 0; }
++
++    /** Номер текущего rekey-запроса (для сверки в Tunnel.onIke). -1 — нет. */
++    int childRekeyId() { return childRekeyId; }
++
++    /**
++     * Payload'ы CREATE_CHILD_SA для Child rekey (RFC 7296 §2.8.2): SA, Ni, KEi, TSi, TSR.
++     * PFS включён — KE обязателен. Вызывающий сам шлёт через seal(CHILD, false, childRekeyId(), pls).
++     * null — rekey уже идёт.
++     */
++    List<Pl> rekeyChildPl() {
++        if (childRekeyId >= 0) return null;
++        childRekeyId = nextId();
++        childRekeySpiI = new byte[4];
++        do { Crypto.RND.nextBytes(childRekeySpiI); } while (u32(childRekeySpiI, 0) == 0);
++        childRekeyNi = Crypto.random(32);
++        childRekeyX = Crypto.dhPrivate();
++        childRekeyKe = Crypto.dhPublic(childRekeyX);
++        byte[] ke = new byte[4 + Crypto.DH_BYTES];
++        put16(ke, 0, Crypto.DH_GROUP);
++        System.arraycopy(childRekeyKe, 0, ke, 4, childRekeyKe.length);
++        List<Pl> l = new ArrayList<>();
++        l.add(new Pl(SA, saEsp(childRekeySpiI)));
++        l.add(new Pl(NONCE, childRekeyNi));
++        l.add(new Pl(KE, ke));
++        l.add(new Pl(TSI, ts()));
++        l.add(new Pl(TSR, ts()));
++        return l;
++    }
++
++    /**
++     * Разбор ответа на CREATE_CHILD_SA (Child rekey). null — ошибка (текст в error); иначе новый Esp
++     * с новыми SPI. Старый Esp остаётся у вызывающего, пока тот его не заменит (make-before-break).
++     */
++    Esp onRekeyChildResponse(Rx r) {
++        byte[] nrNew = null, ke = null;
++        Chosen sa = null;
++        for (Pl p : r.pl) {
++            if (p.type == NOTIFY && p.body.length >= 4 && u16(p.body, 2) < 16384) {
++                error = notifyText(u16(p.body, 2));
++                return null;
++            }
++            if (p.type == SA) sa = parseSa(p.body, 3);
++            else if (p.type == NONCE) nrNew = p.body;
++            else if (p.type == KE && p.body.length == 4 + Crypto.DH_BYTES) {
++                ke = Arrays.copyOfRange(p.body, 4, p.body.length);
++            }
++        }
++        if (sa == null || nrNew == null || ke == null || sa.spi.length != 4
++                || !sa.suite.supported(false) || sa.dh != Crypto.DH_GROUP || sa.esn > 0) {
++            error = "bad CREATE_CHILD_SA reply (Child rekey)";
++            return null;
++        }
++        byte[] g = Crypto.dhShared(childRekeyX, ke);
++        if (g == null) { error = "bad DH in Child rekey reply"; return null; }
++        childRekeySpiR = sa.spi;
++        childRekeyNr = nrNew;
++        Crypto.Suite c = sa.suite;
++        int e = c.encKeyLen(), i = c.integKeyLen();
++        // RFC 7296 §2.17: с PFS KEYMAT = prf+(SK_d, g^ir_new | Ni | Nr)
++        byte[] k = suite.prfPlus(skD, cat(g, childRekeyNi, childRekeyNr), 2 * (e + i));
++        Crypto.Box out = new Crypto.Box(c,
++                Arrays.copyOfRange(k, 0, e),
++                Arrays.copyOfRange(k, 2 * e, 2 * e + i));
++        Crypto.Box in = new Crypto.Box(c,
++                Arrays.copyOfRange(k, e, 2 * e),
++                Arrays.copyOfRange(k, 2 * e + i, 2 * (e + i)));
++        long newSpiOut = u32(childRekeySpiR, 0);
++        long newSpiIn = u32(childRekeySpiI, 0);
++        childRekeyId = -1;
++        return new Esp(c, out, in, newSpiOut, newSpiIn);
++    }
+ }

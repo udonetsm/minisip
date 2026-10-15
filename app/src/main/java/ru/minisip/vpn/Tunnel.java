@@ -50,9 +50,23 @@ final class Tunnel {
 
     // настраиваемое для проверок
     int ikePort = 500, natPort = 4500;
-    int rto = 3000, tries = 4;
-    int keepMs = 10000, dpdMs = 10000, deadMs = 30000;   // keepMs короче таймаута UDP-NAT оператора
-    /**
+    int rto = 4000, tries = 5;
+    /** База экспоненциального retransmit IKE (RFC 7296 §2.4), совпадает с strongSwan. */
+    static final double RTO_BASE = 1.8;
+    int keepMs = 10000, dpdMs = 15000, deadMs = 30000;   // keepMs короче таймаута UDP-NAT оператора
+    
+    /** Время жизни Child SA: 1 ч (strongSwan default, RFC 7296 §2.8.2). */
+    int childLifetimeMs = 3_600_000;
+    /** Сколько держим старый Esp для приёма после rekey (пока сервер не обработал наш DELETE). */
+    static final long ESP_OLD_KEEP_MS = 10_000;
+    /** Таймаут ответа на наш CREATE_CHILD_SA. */
+    static final long CHILD_REKEY_TIMEOUT_MS = 30_000;   
+    
+    /** Время жизни IKE SA: 3 ч (strongSwan default, RFC 7296 §2.8). */
+    int ikeLifetimeMs = 3 * 3_600_000;
+    /** Таймаут ответа на наш CREATE_CHILD_SA (IKE SA rekey). */
+    static final long IKE_REKEY_TIMEOUT_MS = 30_000;
+	/**
      * Необязательный ping через туннель: адрес (null — выключено). pingLoss промахов подряд — сначала
      * лечение (MOBIKE-refresh, а без MOBIKE — keepalive и DPD на том же сокете), не помогло — реконнект
      * через onReconnecting.
@@ -147,6 +161,15 @@ final class Tunnel {
     private InetAddress srv;
     private Ike ike;
     private Esp esp;
+        /** Старый Esp после rekey: принимаем пакеты, пока сервер не удалит старый SPI. */
+    private volatile Esp espOld;
+    private volatile long espOldAt;
+    /** Когда триггерить наш Child rekey; 0 — ждём ответа. */
+    private volatile long childRekeyAt;
+    private volatile long childRekeySentAt;
+        /** Когда триггерить наш IKE SA rekey; 0 — ждём ответа. */
+    private volatile long ikeRekeyAt;
+    private volatile long ikeRekeySentAt;
     private Thread main, rx, tx, kp;
     /** Отдельный поток NAT-keepalive: не зависит от online, DPD, watchdog и остального в timers(). */
     private final Object keepLock = new Object();
@@ -206,6 +229,11 @@ final class Tunnel {
         synchronized (keepLock) {
             keepLock.notifyAll();
         }
+    }
+
+        /** Jitter ±10% (RFC 7296 §2.8.1): rekey у двух пиров не должен совпадать. */
+    private static long jitter(long base) {
+        return base + (long) ((Crypto.RND.nextDouble() - 0.5) * 0.2 * base);
     }
 
     /**
@@ -341,7 +369,9 @@ final class Tunnel {
             kp = daemon(this::keepLoop, "vpn-keep");
             up = true;
             ev.onUp(name);
-            timers();
+            childRekeyAt = System.currentTimeMillis() + jitter(childLifetimeMs);
+            ikeRekeyAt = System.currentTimeMillis() + jitter(ikeLifetimeMs);
+   	    timers();
         } catch (IOException | RuntimeException e) {
             retryable = true;
             lost(closed.get() ? "disconnected" : "network error: " + e.getMessage());
@@ -372,10 +402,15 @@ final class Tunnel {
 
     private byte[] exchange(byte[] req, int port, boolean marker, int id) throws IOException {
         byte[] buf = new byte[RX_BUF];
+        double timeout = rto;
         for (int i = 0; i < tries; i++) {
             alive();
             send(req, port, marker);
-            long end = System.currentTimeMillis() + rto;
+            if (i > 0) {
+                Log l = log;
+                if (l != null) l.d("retransmit #" + i + " (id=" + id + "): wait " + (long) timeout + "ms");
+            }
+            long end = System.currentTimeMillis() + (long) timeout;
             for (long left; (left = end - System.currentTimeMillis()) > 0; ) {
                 sock.setSoTimeout((int) left);
                 DatagramPacket p = new DatagramPacket(buf, buf.length);
@@ -395,6 +430,7 @@ final class Tunnel {
                 }
                 return d;
             }
+            timeout *= RTO_BASE;
         }
         return null;
     }
@@ -465,6 +501,10 @@ final class Tunnel {
                         onIke(Arrays.copyOfRange(buf, 4, n));
                     } else {
                         byte[] ip = esp.unwrap(buf, n);
+                        if (ip == null) {
+                            Esp old = espOld;
+                            if (old != null) ip = old.unwrap(buf, n);
+                        }
                         if (ip != null) {
                             lastRx = System.currentTimeMillis();
                             lastEspRx = lastRx;
@@ -529,6 +569,53 @@ final class Tunnel {
                 + " id=" + x.id + " payloads=" + x.pl.size());
         if (x.response) {
             ike.acked(x.id);
+	       	if (ike.childRekeyPending() && x.id == ike.childRekeyId()) {
+                Esp ne = ike.onRekeyChildResponse(x);
+                if (ne != null) {
+                    Esp oe = esp;
+                    esp = ne;
+                    if (oe != null) {
+                        espOld = oe;
+                        espOldAt = System.currentTimeMillis();
+                        byte[] db = new byte[8];
+                        db[0] = 3; db[1] = 4; db[2] = 0; db[3] = 1;
+                        Crypto.put32(db, 4, oe.spiOut());
+                        byte[] del = Crypto.cat(new byte[4], ike.seal(Ike.INFO, false, ike.nextId(),
+                                Collections.singletonList(new Ike.Pl(Ike.DELETE, db))));
+                        sendQuiet(del, natPort);
+                        if (l != null) l.d("rekey Child done: newSpiOut=" + ne.spiOut()
+                                + " oldSpiOut=" + oe.spiOut());
+                        	ev.onRekey("Child rekey done: spi " + oe.spiOut() + " -> " + ne.spiOut());
+                    }
+                    childRekeyAt = System.currentTimeMillis() + jitter(childLifetimeMs);
+                } else {
+                    if (l != null) l.d("rekey Child failed: " + ike.error);
+                    ev.onRekey("Child rekey failed: " + ike.error);
+                    ike.abortChildRekey();
+                    childRekeyAt = System.currentTimeMillis() + 30_000;
+                }
+		            if (ike.ikeRekeyPending() && x.id == ike.ikeRekeyId()) {
+                Ike.IkeRekeyMaterial ikem = ike.onRekeyIkeResponse(x);
+                if (ikem != null) {
+                    ike.installRekeyedKeys(ikem);
+                    // DELETE старого IKE SA на новом SA: proto=1 (IKE), spiSize=0, num=1, без SPI
+                    byte[] db = new byte[]{1, 0, 0, 0};
+                    byte[] del = Crypto.cat(new byte[4], ike.seal(Ike.INFO, false, ike.nextId(),
+                            Collections.singletonList(new Ike.Pl(Ike.DELETE, db))));
+                    sendQuiet(del, natPort);
+                    if (l != null) l.d("IKE rekey done: DELETE old SA sent, nextId=0");
+                    ev.onRekey("IKE rekey done");
+                    ikeRekeyAt = System.currentTimeMillis() + jitter(ikeLifetimeMs);
+                } else {
+                    if (l != null) l.d("IKE rekey failed: " + ike.error);
+                    ev.onRekey("IKE rekey failed: " + ike.error);
+                    ike.abortIkeRekey();
+                    ikeRekeyAt = System.currentTimeMillis() + 30_000;
+                }
+                return;
+            }
+                return;
+            }
             if (x.id == dpdId && dpdReq != null) {
                 dpdReq = null;
                 dpdOk++;
@@ -537,9 +624,63 @@ final class Tunnel {
             if (x.id == migId && latch != null) latch.countDown();
             return;
         }
+                       if (x.exch == Ike.CHILD && ike.peekRekeyProto(x) == 1) {
+            // ===== Входящий IKE SA rekey =====
+            if (ike.ikeRekeyPending()) {
+                if (l != null) l.d("IKE rekey collision: keeping our IKE, rejecting incoming");
+                ev.onRekey("IKE rekey collision: keeping our IKE");
+                List<Ike.Pl> no = Collections.singletonList(Ike.notify(Ike.N_NO_ADDITIONAL_SAS, new byte[0]));
+                sendQuietIke(ike.seal(Ike.CHILD, true, x.id, no));
+                return;
+            }
+            Ike.IkeRekeyResp ir = ike.onIncomingIkeRekey(x);
+            if (ir == null) {
+                if (l != null) l.d("incoming IKE rekey failed: " + ike.error);
+                ev.onRekey("incoming IKE rekey failed: " + ike.error);
+                List<Ike.Pl> no = Collections.singletonList(Ike.notify(Ike.N_NO_ADDITIONAL_SAS, new byte[0]));
+                sendQuietIke(ike.seal(Ike.CHILD, true, x.id, no));
+                return;
+            }
+            sendQuietIke(ike.seal(Ike.CHILD, true, x.id, ir.pls));
+            ike.installRekeyedKeys(ir.material);
+            byte[] idb = new byte[]{1, 0, 0, 0};
+            byte[] idel = Crypto.cat(new byte[4], ike.seal(Ike.INFO, false, ike.nextId(),
+                    Collections.singletonList(new Ike.Pl(Ike.DELETE, idb))));
+            sendQuiet(idel, natPort);
+            if (l != null) l.d("incoming IKE rekey done: DELETE old SA sent, nextId=0");
+            ev.onRekey("IKE rekey done (responder)");
+            ikeRekeyAt = System.currentTimeMillis() + jitter(ikeLifetimeMs);
+            return;
+        }
         if (x.exch == Ike.CHILD) {
-            List<Ike.Pl> no = Collections.singletonList(Ike.notify(Ike.N_NO_ADDITIONAL_SAS, new byte[0]));
-            sendQuietIke(ike.seal(Ike.CHILD, true, x.id, no));
+            
+            if (ike.childRekeyPending()) {
+                // Коллизия: наш rekey уже в полёте. RFC 7296 §2.8.1 — упрощённо побеждает инициатор,
+                // отклоняем входящий; сервер повторит позже.
+                if (l != null) l.d("rekey collision: keeping our CHILD, rejecting incoming");
+		ev.onRekey("rekey collision: keeping our CHILD");
+                List<Ike.Pl> no = Collections.singletonList(Ike.notify(Ike.N_NO_ADDITIONAL_SAS, new byte[0]));
+                sendQuietIke(ike.seal(Ike.CHILD, true, x.id, no));
+                return;
+            }
+            Ike.ChildRekeyResp rr = ike.onIncomingChildRekey(x);
+            if (rr == null) {
+                if (l != null) l.d("incoming rekey failed: " + ike.error);
+                ev.onRekey("incoming rekey failed: " + ike.error);
+                List<Ike.Pl> no = Collections.singletonList(Ike.notify(Ike.N_NO_ADDITIONAL_SAS, new byte[0]));
+                sendQuietIke(ike.seal(Ike.CHILD, true, x.id, no));
+                return;
+            }
+            sendQuietIke(ike.seal(Ike.CHILD, true, x.id, rr.pls));
+            Esp oe = esp;
+            esp = rr.esp;
+            if (oe != null) {
+                espOld = oe;
+                espOldAt = System.currentTimeMillis();
+                if (l != null) l.d("incoming rekey done: newSpiIn=" + rr.esp.spiIn()
+                        + " oldSpiIn=" + oe.spiIn());
+		ev.onRekey("Child rekey done (responder): spi " + oe.spiIn() + " -> " + rr.esp.spiIn());
+            }
             return;
         }
         if (x.exch != Ike.INFO) return;
@@ -767,6 +908,50 @@ final class Tunnel {
                     dpdNow = false;
                     sendQuiet(d, natPort);
                     lastDpd = now;
+                }
+		
+                // ===== Child SA rekey (RFC 7296 §2.8.2) =====
+                if (childRekeyAt > 0 && now >= childRekeyAt && up && online && !ike.childRekeyPending()) {
+                    List<Ike.Pl> pls = ike.rekeyChildPl();
+                    if (pls != null) {
+                        int rid = ike.childRekeyId();
+                        byte[] req = Crypto.cat(new byte[4], ike.seal(Ike.CHILD, false, rid, pls));
+                        sendQuiet(req, natPort);
+                        childRekeySentAt = now;
+                        childRekeyAt = 0;
+                        Log l = log;
+                        if (l != null) l.d("rekey Child: sent id=" + rid);
+			ev.onRekey("Child rekey initiated: id=" + rid);
+                    }
+                }
+                if (ike.childRekeyPending() && now - childRekeySentAt > CHILD_REKEY_TIMEOUT_MS) {
+                    ike.abortChildRekey();
+                    childRekeyAt = now + 30_000;
+                    Log l = log;
+                    if (l != null) l.d("rekey Child: no response, retry in 30s");
+                }
+                if (espOld != null && now - espOldAt > ESP_OLD_KEEP_MS) {
+                    espOld = null;
+                }
+		Log l = log;
+                // ===== IKE SA rekey (RFC 7296 §2.8). Не пересекаемся с Child rekey =====
+                if (ikeRekeyAt > 0 && now >= ikeRekeyAt && up && online
+                        && !ike.ikeRekeyPending() && !ike.childRekeyPending()) {
+                    List<Ike.Pl> pls = ike.rekeyIkePl();
+                    if (pls != null) {
+                        int rid = ike.ikeRekeyId();
+                        byte[] req = Crypto.cat(new byte[4], ike.seal(Ike.CHILD, false, rid, pls));
+                        sendQuiet(req, natPort);
+                        ikeRekeySentAt = now;
+                        ikeRekeyAt = 0;
+                        if (l != null) l.d("IKE rekey: sent id=" + rid);
+                        ev.onRekey("IKE rekey initiated: id=" + rid);
+                    }
+                }
+                if (ike.ikeRekeyPending() && now - ikeRekeySentAt > IKE_REKEY_TIMEOUT_MS) {
+                    ike.abortIkeRekey();
+                    ikeRekeyAt = now + 30_000;
+                    if (l != null) l.d("IKE rekey: no response, retry in 30s");
                 }
             }
         } catch (InterruptedException e) {

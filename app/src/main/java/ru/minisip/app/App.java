@@ -35,6 +35,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     private LogBuffer sipLog;              // лог SIP: регистрация, вызов, ответы сервера
     private Update update;                 // проверка и установка обновлений с GitHub Releases
     private LogBuffer updateLog;           // лог обновлений: один на приложение
+    private boolean manualStrict;          // тумблер «Always strict»: persistent override
     private String sipHost, sipUser, sipPass;
     private int sipPort;
 
@@ -182,12 +183,13 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     }
 
     void vpnConnect(int page, String host, String login, String password, String psk, String ca, String apps, String healthcheckIp) {
-        vpn.setStrict(true);
         if (state != IDLE || vpnUp || vpnConnecting || !allowed(page)) return;
         lastPage = page;
         vpnConnecting = true;
         vpnStatus = "🟡 VPN: connecting...";
         changed();
+        manualStrict = PageStore.prefs(this, page).getBoolean("vpnStrict", false);
+        vpn.setStrict(manualStrict);
         vpn.connect(host, login, password, psk, ca, apps, healthcheckIp);
     }
 
@@ -208,6 +210,16 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
 
     boolean vpnMobike() {
         return vpn.mobike();
+    }
+
+    /** Режим watchdog: true — PBX (жёсткий), false — обычный VPN (мягкий). Применяется сразу. */
+    void setVpnStrict(boolean on) {
+        manualStrict = on;
+        vpn.setStrict(on || state != IDLE);
+    }
+
+    boolean isVpnStrict() {
+        return vpn.isStrict();
     }
 
     int getVpnLossCount() {
@@ -409,6 +421,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     private void begin(int newState, String text) {
         state = newState;
         status = text;
+        vpn.setStrict(true);
         startForegroundService(new Intent(this, CallService.class));
         screen.start();
         changed();
@@ -416,6 +429,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
 
     private void finish(String text) {
         state = IDLE;
+        vpn.setStrict(manualStrict);
         if (registered) {
             status = "🟢 Connected | 🔴 " + text;
         } else {
@@ -427,9 +441,18 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     }
 
     private void changed() {
-        vpn.setStrict(true);
         if (onChange != null) onChange.run();
     }
+
+	
+        @Override
+    public void onRekey(String info) {
+        main.post(() -> {
+            vpnLog.log(info);
+            changed();
+        });
+    }
+
     @Override
     public void onPingLoss(int lostCount) {
         main.post(() -> {
