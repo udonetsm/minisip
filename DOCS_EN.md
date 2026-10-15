@@ -50,11 +50,12 @@ This block manages connection to your PBX phone server.
 > 💡 **Input Guard**: As soon as PBX is connected (`🟢 Connected`), `Server`, `Login`, and `Password` fields are automatically locked against accidental modifications. To edit settings, tap `Disconnect` first.
 
 ### Transfer Contacts Dialog (`Refers`):
-Tapping the **`Refers`** button below `Disconnect` opens the transfer contact manager:
-* **Login and Name Fields**: Each contact row contains an editable Login and Name field. Edits are saved on the fly.
-* **Button `Transfer`**: During an active call, tapping `Transfer` next to a contact prompts confirmation (*"Transfer to login?"*) and executes an immediate blind transfer.
-* **Icon `✕`**: Removes the contact row from the list.
-* **Button `Add`**: Adds a new empty contact row at the bottom of the dialog.
+Tapping the **`Refers`** button opens the transfer contact manager:
+* **Dialog Header**: Features the **`Refers`** title on the left and an **`Add`** button on the right to append new entries.
+* **Contact Rows**: Includes inline editable `Login` and `Name` fields.
+* **Transfer Icon `↩️`**: A rounded blue action button next to each contact. Tapping it during an active call prompts confirmation (*"Transfer to login?"*) and executes an immediate blind transfer.
+* **Delete Icon `✕`**: Removes the contact row from the list.
+* **Button `OK`**: Saves changes and closes the dialog window.
 
 ---
 
@@ -77,7 +78,7 @@ This block is used for dialing phone numbers, making calls, and controlling audi
 
 ### Call Transfer (Blind Transfer):
 1. During an active call (`🟢 Call in progress`), tap the **`Refers`** button in the PBX settings block.
-2. Tap the **`Transfer`** button next to the target contact in the dialog.
+2. Tap the blue **`↩️`** icon next to the target contact in the dialog.
 3. Tap **`Yes`** in the confirmation dialog to initiate transfer.
 4. The app sends a `REFER` request with the target URI to the PBX. Upon receiving PBX confirmation (`202 Accepted` and `NOTIFY 200 OK`), the initial call automatically terminates.
 

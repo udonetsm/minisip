@@ -769,8 +769,21 @@ public final class SettingsFragment extends Fragment {
                 });
                 row.addView(name);
 
-                MaterialButton use = new MaterialButton(ctx);
-                use.setText("Transfer");
+                TextView use = new TextView(ctx);
+                use.setText("\u21AA\uFE0F");
+                use.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f);
+                use.setIncludeFontPadding(false);
+                use.setGravity(Gravity.CENTER);
+                use.setPadding(dp(8), dp(2), dp(8), dp(2));  // «выступ» вокруг эмодзи
+                android.graphics.drawable.GradientDrawable bg =
+                        new android.graphics.drawable.GradientDrawable();
+                bg.setColor(MaterialColors.getColor(use,
+                        com.google.android.material.R.attr.colorPrimary, 0xFF1976D2));
+                bg.setCornerRadius(dp(10));
+                use.setBackground(new android.graphics.drawable.RippleDrawable(
+                        android.content.res.ColorStateList.valueOf(0x40FFFFFF), bg, null));
+                use.setClickable(true);
+                use.setFocusable(true);
                 use.setOnClickListener(v -> {
                     if (app.state != App.TALK || app.lastPage != page) {
                         Toast.makeText(ctx, "No active call", Toast.LENGTH_SHORT).show();
@@ -805,11 +818,33 @@ public final class SettingsFragment extends Fragment {
             }
         };
 
+        LinearLayout titleRow = new LinearLayout(ctx);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        int tp = dp(16);
+        titleRow.setPadding(tp, tp, tp, 0);
+
+        TextView titleText = new TextView(ctx);
+        titleText.setText("Refers");
+        titleText.setTextAppearance(android.R.style.TextAppearance_Large);
+        titleRow.addView(titleText, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        MaterialButton addBtn = new MaterialButton(ctx);
+        addBtn.setText("Add");
+        addBtn.setOnClickListener(v -> {
+            PageStore.Refer last = working.isEmpty() ? null : working.get(working.size() - 1);
+            if (last != null && last.login.isEmpty() && last.name.isEmpty()) return;
+            working.add(new PageStore.Refer("", ""));
+            PageStore.setRefers(ctx, page, working);
+            rebuild[0].run();
+        });
+        titleRow.addView(addBtn);
+
         AlertDialog d = new MaterialAlertDialogBuilder(ctx)
-                .setTitle("Refers")
+                .setCustomTitle(titleRow)
                 .setView(scroll)
-                .setPositiveButton("Add", null)
-                .setNegativeButton("Cancel", null)
+                .setPositiveButton("OK", null)
                 .create();
         holder[0] = d;
         d.setOnShowListener(x -> {
@@ -818,13 +853,6 @@ public final class SettingsFragment extends Fragment {
                 w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
                 w.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
             }
-            d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-                PageStore.Refer last = working.isEmpty() ? null : working.get(working.size() - 1);
-                if (last != null && last.login.isEmpty() && last.name.isEmpty()) return;
-                working.add(new PageStore.Refer("", ""));
-                PageStore.setRefers(ctx, page, working);
-                rebuild[0].run();
-            });
         });
         rebuild[0].run();
         d.show();
