@@ -58,6 +58,12 @@ final class Tunnel {
      * Сколько ждём возврата ESP после первого heal, прежде чем пересоздавать туннель.
      */
     static final long HEAL_GIVE_UP_MS = 120_000;
+    /**
+     * Без MOBIKE heal не умеет переключить путь: новый сокет сервер для IKE не подхватит,
+     * его ответы уйдут на старый порт. Единственный рычаг — пересоздать туннель, поэтому
+     * окно короче, чтобы АТС не теряла регистрацию на минуты.
+     */
+    static final long HEAL_GIVE_UP_PLAIN_MS = 30_000;
     static final long HEAL_MIN_GAP_MS = 5_000;
     private static final int RX_BUF = 65535;
     private static final int PING_ID = 0x4D53;
@@ -156,6 +162,7 @@ final class Tunnel {
      */
     private volatile long childRekeyAt;
     private volatile long childRekeySentAt;
+    private volatile int childRekeyFails;
     /**
      * Когда триггерить наш IKE SA rekey; 0 — ждём ответа.
      */
@@ -629,11 +636,12 @@ final class Tunnel {
                         ev.onRekey("Child rekey done: spi " + oe.spiOut() + " -> " + ne.spiOut());
                     }
                     childRekeyAt = System.currentTimeMillis() + jitter(childLifetimeMs);
+                    childRekeyFails = 0;
                 } else {
                     if (l != null) l.d("rekey Child failed: " + ike.error);
                     ev.onRekey("Child rekey failed: " + ike.error);
                     ike.abortChildRekey();
-                    childRekeyAt = System.currentTimeMillis() + 30_000;
+                    childRekeyAt = System.currentTimeMillis() + (30_000L << Math.min(childRekeyFails++, 4));
                 }
                 return;
             }
@@ -1065,12 +1073,13 @@ final class Tunnel {
         if (n == 1) healSince = now;
         Log l = log;
         // Реконнект закрывает tun («отключено от постоянной VPN», АТС теряет регистрацию), а пропажи пути
-        // (смена вышки, провал радиоканала) обычно проходят сами. Поэтому лечим повторно в пределах окна
-        // HEAL_GIVE_UP_MS и рвём туннель, только если за всё окно не пришло ни одного ESP-пакета
-        // (healTries обнуляется приёмом ESP). Раньше второй вызов heal рвал туннель через секунду.
-        if (n > 1 && now - healSince >= HEAL_GIVE_UP_MS) {
+        // (смена вышки, провал радиоканала) обычно проходят сами. Ждём окно тишины ESP, но считаем его
+        // от реального начала тишины (lastEspRx), а не от первого heal: heal мог опоздать (hangMs
+        // требует новых отправок), а без MOBIKE heal всё равно ничего не лечит — там окно короче.
+        long giveUp = (ike != null && ike.mobike) ? HEAL_GIVE_UP_MS : HEAL_GIVE_UP_PLAIN_MS;
+        if (now - lastEspRx >= giveUp) {
             if (l != null)
-                l.d(why + ": no ESP for " + (now - healSince) / 1000 + "s since first heal: reconnect");
+                l.d(why + ": no ESP for " + (now - lastEspRx) / 1000 + "s: reconnect");
             lost(why);
             return true;
         }

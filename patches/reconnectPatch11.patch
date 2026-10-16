@@ -1,0 +1,40 @@
+--- a/app/src/main/java/ru/minisip/vpn/Ike.java
++++ b/app/src/main/java/ru/minisip/vpn/Ike.java
+@@ -182,6 +182,19 @@ saEspChosen
+         return proposal(false, c.num, 3, spi, t.toArray(new int[0][]));
+     }
++
++    /**
++     * Ответное SA респондера для IKE rekey: одно предложение с выбранными алгоритмами (RFC 7296 §3.3.6).
++     */
++    private static byte[] saIkeChosen(byte[] spi, Chosen c) {
++        List<int[]> t = new ArrayList<>();
++        t.add(new int[]{T_ENCR, c.encr, c.bits});
++        t.add(new int[]{T_PRF, c.prf, 0});
++        if (c.integ > 0) t.add(new int[]{T_INTEG, c.integ, 0});
++        t.add(new int[]{T_DH, Crypto.DH_GROUP, 0});
++        return proposal(false, c.num, 1, spi, t.toArray(new int[0][]));
++    }
+ 
+     // =====================================================================
+     // IKE_SA_INIT
+@@ -271,6 +284,7 @@ parseSa
+         c.bits = bits;
+         c.integ = integ;
++        c.prf = prf;
+         c.suite = new Crypto.Suite(encr, bits, integ, prf);
+         return c;
+     }
+@@ -651,7 +665,7 @@ onIncomingIkeRekey
+         List<Pl> pls = new ArrayList<>();
+-        pls.add(new Pl(SA, saIkeRekey(newSpiR)));
++        pls.add(new Pl(SA, saIkeChosen(newSpiR, sa)));
+         pls.add(new Pl(NONCE, nr));
+         byte[] keB = new byte[4 + Crypto.DH_BYTES];
+         put16(keB, 0, Crypto.DH_GROUP);
+@@ -738,7 +752,7 @@ Chosen
+         byte[] spi;
+         int dh = -1, esn = -1;
+-        int num, encr, bits, integ;
++        int num, encr, bits, integ, prf;
+     }

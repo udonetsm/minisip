@@ -203,6 +203,39 @@ final class Ike {
         return cat(proposal(true, 1, 3, spi, cbc), proposal(false, 2, 3, spi, gcm));
     }
 
+    /**
+     * SA для ESP с DH (PFS) для rekey Child SA: то же, что saEsp(), плюс группа DH.
+     */
+    private static byte[] saEspPfs(byte[] spi) {
+        int[][] cbc = {{T_ENCR, 12, 256}, {T_ENCR, 12, 128}, {T_INTEG, 12, 0}, {T_INTEG, 2, 0}, {T_DH, Crypto.DH_GROUP, 0}, {T_ESN, 0, 0}};
+        int[][] gcm = {{T_ENCR, 20, 256}, {T_ENCR, 20, 128}, {T_DH, Crypto.DH_GROUP, 0}, {T_ESN, 0, 0}};
+        return cat(proposal(true, 1, 3, spi, cbc), proposal(false, 2, 3, spi, gcm));
+    }
+
+    /**
+     * Ответное SA респондера: одно предложение с алгоритмами, которые выбрал инициатор (RFC 7296 §3.3.6).
+     */
+    private static byte[] saEspChosen(byte[] spi, Chosen c) {
+        List<int[]> t = new ArrayList<>();
+        t.add(new int[]{T_ENCR, c.encr, c.bits});
+        if (c.integ > 0) t.add(new int[]{T_INTEG, c.integ, 0});
+        t.add(new int[]{T_DH, Crypto.DH_GROUP, 0});
+        t.add(new int[]{T_ESN, 0, 0});
+        return proposal(false, c.num, 3, spi, t.toArray(new int[0][]));
+    }
+
+    /**
+     * Ответное SA респондера для IKE rekey: одно предложение с выбранными алгоритмами (RFC 7296 §3.3.6).
+     */
+    private static byte[] saIkeChosen(byte[] spi, Chosen c) {
+        List<int[]> t = new ArrayList<>();
+        t.add(new int[]{T_ENCR, c.encr, c.bits});
+        t.add(new int[]{T_PRF, c.prf, 0});
+        if (c.integ > 0) t.add(new int[]{T_INTEG, c.integ, 0});
+        t.add(new int[]{T_DH, Crypto.DH_GROUP, 0});
+        return proposal(false, c.num, 1, spi, t.toArray(new int[0][]));
+    }
+
     // =====================================================================
     // IKE_SA_INIT
     // =====================================================================
@@ -244,6 +277,11 @@ final class Ike {
             }
             off += len;
         }
+        c.num = b[4] & 0xff;
+        c.encr = encr;
+        c.bits = bits;
+        c.integ = integ;
+        c.prf = prf;
         c.suite = new Crypto.Suite(encr, bits, integ, prf);
         return c;
     }
@@ -819,7 +857,7 @@ final class Ike {
         put16(rk, 2, N_REKEY_SA);
         put32(rk, 4, oldSpiIn);
         l.add(new Pl(NOTIFY, rk));
-        l.add(new Pl(SA, saEsp(childRekeySpiI)));
+        l.add(new Pl(SA, saEspPfs(childRekeySpiI)));
         l.add(new Pl(NONCE, childRekeyNi));
         l.add(new Pl(KE, ke));
         l.add(new Pl(TSI, ts()));
@@ -1016,7 +1054,7 @@ final class Ike {
         byte[] newSpiR = Crypto.random(8);          // наш SPI (мы респондер)
         byte[] nr = Crypto.random(32);
         List<Pl> pls = new ArrayList<>();
-        pls.add(new Pl(SA, saIkeRekey(newSpiR)));
+        pls.add(new Pl(SA, saIkeChosen(newSpiR, sa)));
         pls.add(new Pl(NONCE, nr));
         byte[] keB = new byte[4 + Crypto.DH_BYTES];
         put16(keB, 0, Crypto.DH_GROUP);
@@ -1108,7 +1146,7 @@ final class Ike {
         } while (u32(spiNew, 0) == 0);
         byte[] nr = Crypto.random(32);
         List<Pl> pls = new ArrayList<>();
-        pls.add(new Pl(SA, saEsp(spiNew)));
+        pls.add(new Pl(SA, saEspChosen(spiNew, sa)));
         pls.add(new Pl(NONCE, nr));
         byte[] keB = new byte[4 + Crypto.DH_BYTES];
         put16(keB, 0, Crypto.DH_GROUP);
@@ -1159,6 +1197,7 @@ final class Ike {
         Crypto.Suite suite;
         byte[] spi;
         int dh = -1, esn = -1;
+        int num, encr, bits, integ, prf;
     }
 
     /**

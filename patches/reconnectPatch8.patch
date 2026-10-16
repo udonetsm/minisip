@@ -1,0 +1,25 @@
+--- a/app/src/main/java/ru/minisip/vpn/Ike.java
++++ b/app/src/main/java/ru/minisip/vpn/Ike.java
+@@ -158,6 +158,16 @@ saEsp
+         int[][] gcm = {{T_ENCR, 20, 256}, {T_ENCR, 20, 128}, {T_ESN, 0, 0}};
+         return cat(proposal(true, 1, 3, spi, cbc), proposal(false, 2, 3, spi, gcm));
+     }
++
++    /**
++     * SA для ESP с DH (PFS) для rekey Child SA: то же, что saEsp(), плюс группа DH.
++     */
++    private static byte[] saEspPfs(byte[] spi) {
++        int[][] cbc = {{T_ENCR, 12, 256}, {T_ENCR, 12, 128}, {T_INTEG, 12, 0}, {T_INTEG, 2, 0}, {T_DH, Crypto.DH_GROUP, 0}, {T_ESN, 0, 0}};
++        int[][] gcm = {{T_ENCR, 20, 256}, {T_ENCR, 20, 128}, {T_DH, Crypto.DH_GROUP, 0}, {T_ESN, 0, 0}};
++        return cat(proposal(true, 1, 3, spi, cbc), proposal(false, 2, 3, spi, gcm));
++    }
+ 
+     // =====================================================================
+     // IKE_SA_INIT
+@@ -545,7 +555,7 @@ rekeyChildPl
+         l.add(new Pl(NOTIFY, rk));
+-        l.add(new Pl(SA, saEsp(childRekeySpiI)));
++        l.add(new Pl(SA, saEspPfs(childRekeySpiI)));
+         l.add(new Pl(NONCE, childRekeyNi));
+         l.add(new Pl(KE, ke));
+         l.add(new Pl(TSI, ts()));

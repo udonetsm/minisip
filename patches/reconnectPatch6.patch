@@ -1,0 +1,11 @@
+--- a/app/src/main/java/ru/minisip/vpn/Tunnel.java
++++ b/app/src/main/java/ru/minisip/vpn/Tunnel.java
+@@ -83,6 +83,12 @@
+     static final long HEAL_GIVE_UP_MS = 120_000;
++    /**
++     * Без MOBIKE heal не умеет переключить путь: новый сокет сервер для IKE не подхватит,
++     * его ответы уйдут на старый порт. Единственный рычаг — пересоздать туннель, поэтому
++     * окно короче, чтобы АТС не теряла регистрацию на минуты.
++     */
++    static final long HEAL_GIVE_UP_PLAIN_MS = 30_000;
+     static final long HEAL_MIN_GAP_MS = 5_000;
