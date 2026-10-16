@@ -1,9 +1,0 @@
-diff --git a/app/src/main/java/ru/minisip/app/SettingsFragment.java b/app/src/main/java/ru/minisip/app/SettingsFragment.java
---- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
-+++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
-@@ -240,1 +240,1 @@
--        muteBtn = button(callBlock.container, "Mute microphone 🎤", true, v -> toggleMute());
-+        muteBtn = button(callBlock.container, "🤫 Mute microphone", true, v -> toggleMute());
-@@ -864,1 +864,1 @@
--        muteBtn.setText(prefs.getBoolean("muted", false) ? "Unmute microphone 🎙️" : "Mute microphone 🎤");
-+        muteBtn.setText(prefs.getBoolean("muted", false) ? "👄 Unmute microphone" : "🤫 Mute microphone");

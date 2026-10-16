@@ -1,0 +1,12 @@
+--- a/app/src/main/java/ru/minisip/vpn/Tunnel.java
++++ b/app/src/main/java/ru/minisip/vpn/Tunnel.java
+@@ -771,7 +771,9 @@
+                 DatagramPacket rp = new DatagramPacket(buf, buf.length);
+                 ps.receive(rp);
+-                if (rp.getLength() >= 28 && srv.equals(rp.getAddress()) && healTries > 0 && !closed.get()) {
++                long t = System.currentTimeMillis();
++                if (rp.getLength() >= 28 && srv.equals(rp.getAddress()) && healTries > 0 && !closed.get()
++                        && t - lastIkeRx > deadMs) {
+                     Log l = log;
+                     if (l != null)
+                         l.d(why + ": server answers a fresh IKE_SA_INIT, old path/SA is dead: reconnect");

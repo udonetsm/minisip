@@ -1,0 +1,11 @@
+--- a/app/src/main/java/ru/minisip/vpn/Tunnel.java
++++ b/app/src/main/java/ru/minisip/vpn/Tunnel.java
+@@ -509,7 +509,7 @@
+-                if (dpdReq == null && idle >= dpdMs) {
++                if (dpdReq == null && idle >= dpdMs && now - dpdSentAt >= dpdMs) {
+                     dpdNow = false;
+                     dpdId = ike.nextId();
+                     dpdSentAt = now;
+                     dpdReq = Crypto.cat(new byte[4], ike.seal(Ike.INFO, false, dpdId, new ArrayList<>()));
+                     lastDpd = 0;
+                 }

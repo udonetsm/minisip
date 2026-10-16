@@ -118,6 +118,11 @@ final class Tunnel {
      */
     private volatile long lastEspRx;
     /**
+     * Время последнего IKE-сообщения от сервера. probePath сверяет его, чтобы не рвать туннель,
+     * когда старая SA ещё отвечает по IKE: ESP-тишина при этом может быть просто отсутствием трафика.
+     */
+    private volatile long lastIkeRx;
+    /**
      * Сколько раз подряд путь признан мёртвым без единого ESP в ответ. Сбрасывается от ESP.
      */
     private volatile int healTries;
@@ -590,6 +595,7 @@ final class Tunnel {
     private void onIke(byte[] m) {
         Ike.Rx x = ike.open(m);
         if (x == null) return;
+        lastIkeRx = System.currentTimeMillis();
         // lastRx отражает только ESP: если сервер шлёт DPD, но ESP не идёт, путь мёртв.
         // Раньше lastRx обновлялся здесь, из-за чего deadMs никогда не наступал: сервер
         // отвечал на свои же DPD, lastRx не старел, наш DPD не отправлялся, а ESP-тишина
@@ -932,7 +938,7 @@ final class Tunnel {
                 // ================= DPD: Dead Peer Detection =================
                 long idle = now - lastRx;
 
-                if (idle >= deadMs && now >= graceUntil) {
+                if (idle >= deadMs && now >= graceUntil && now - lastIkeRx > deadMs) {
                     // Сначала один раз лечим путь (после сна NAT-маппинг мёртв), потом уже реконнект.
                     pathSilence("deadMs");
                     long before = lastHealAct;
@@ -946,7 +952,7 @@ final class Tunnel {
                     }
                 }
 
-                if (dpdReq == null && idle >= dpdMs) {
+                if (dpdReq == null && idle >= dpdMs && now - dpdSentAt >= dpdMs) {
                     dpdNow = false;
                     dpdId = ike.nextId();
                     dpdSentAt = now;
@@ -1036,7 +1042,9 @@ final class Tunnel {
                 byte[] buf = new byte[2048];
                 DatagramPacket rp = new DatagramPacket(buf, buf.length);
                 ps.receive(rp);
-                if (rp.getLength() >= 28 && srv.equals(rp.getAddress()) && healTries > 0 && !closed.get()) {
+                long t = System.currentTimeMillis();
+                if (rp.getLength() >= 28 && srv.equals(rp.getAddress()) && healTries > 0 && !closed.get()
+                        && t - lastIkeRx > deadMs) {
                     Log l = log;
                     if (l != null)
                         l.d(why + ": server answers a fresh IKE_SA_INIT, old path/SA is dead: reconnect");
