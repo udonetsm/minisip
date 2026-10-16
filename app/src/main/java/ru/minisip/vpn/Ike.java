@@ -273,7 +273,7 @@ final class Ike {
                     c.esn = id;
                     break;
                 default:
-                    return null;
+                    break;
             }
             off += len;
         }
@@ -884,7 +884,7 @@ final class Ike {
             }
         }
         if (sa == null || nrNew == null || ke == null || sa.spi.length != 4
-                || !sa.suite.supported(false) || sa.dh != Crypto.DH_GROUP || sa.esn > 0) {
+                || !sa.suite.supported(false) || (sa.dh > 0 && sa.dh != Crypto.DH_GROUP)) {
             error = "bad CREATE_CHILD_SA reply (Child rekey)";
             return null;
         }

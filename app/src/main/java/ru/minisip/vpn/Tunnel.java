@@ -669,6 +669,7 @@ final class Tunnel {
             if (x.id == dpdId && dpdReq != null) {
                 dpdReq = null;
                 dpdOk++;
+                lastRx = System.currentTimeMillis();
             }
             CountDownLatch latch = migLatch;
             if (x.id == migId && latch != null) latch.countDown();
