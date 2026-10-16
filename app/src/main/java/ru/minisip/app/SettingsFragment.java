@@ -8,15 +8,20 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.res.ColorStateList;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
 import android.text.InputType;
+import android.text.Layout;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.TextWatcher;
+import android.text.method.ScrollingMovementMethod;
 import android.text.style.RelativeSizeSpan;
 import android.util.TypedValue;
 import android.view.DragEvent;
@@ -26,6 +31,8 @@ import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -113,7 +120,8 @@ public final class SettingsFragment extends Fragment {
      * Строка версии внизу страницы: long-press 2 с открывает диалог канала обновлений.
      */
     private TextView versionLabel;
-    private LogArea updateLog;    /**
+    private LogArea updateLog;
+    /**
      * Отложенный показ диалога канала: срабатывает через 2 с удержания на строке версии.
      */
     private final Runnable channelDialogRunnable = () -> {
@@ -148,8 +156,8 @@ public final class SettingsFragment extends Fragment {
     /**
      * Двухцветный ColorStateList: цвет для enabled, цвет для disabled.
      */
-    private static android.content.res.ColorStateList stateful(int enabled, int disabled) {
-        return new android.content.res.ColorStateList(
+    private static ColorStateList stateful(int enabled, int disabled) {
+        return new ColorStateList(
                 new int[][]{{android.R.attr.state_enabled}, {}},
                 new int[]{enabled, disabled});
     }
@@ -622,7 +630,9 @@ public final class SettingsFragment extends Fragment {
         prefs.edit().putBoolean("muted", muted).apply();
         if (!(app.busy() && app.lastPage != page)) app.setMute(muted);
         render();
-    }    /**
+    }
+
+    /**
      * Локальный слушатель check(). Полоса в MainActivity подключена постоянным слушателем
      * и уже показывает скачивание; здесь — только случаи, когда полосы не будет.
      */
@@ -831,13 +841,13 @@ public final class SettingsFragment extends Fragment {
                 use.setIncludeFontPadding(false);
                 use.setGravity(Gravity.CENTER);
                 use.setPadding(dp(8), dp(2), dp(8), dp(2));  // «выступ» вокруг эмодзи
-                android.graphics.drawable.GradientDrawable bg =
-                        new android.graphics.drawable.GradientDrawable();
+                GradientDrawable bg =
+                        new GradientDrawable();
                 bg.setColor(MaterialColors.getColor(use,
                         com.google.android.material.R.attr.colorPrimary, 0xFF1976D2));
                 bg.setCornerRadius(dp(10));
-                use.setBackground(new android.graphics.drawable.RippleDrawable(
-                        android.content.res.ColorStateList.valueOf(0x40FFFFFF), bg, null));
+                use.setBackground(new RippleDrawable(
+                        ColorStateList.valueOf(0x40FFFFFF), bg, null));
                 use.setClickable(true);
                 use.setFocusable(true);
                 use.setOnClickListener(v -> {
@@ -904,10 +914,10 @@ public final class SettingsFragment extends Fragment {
                 .create();
         holder[0] = d;
         d.setOnShowListener(x -> {
-            android.view.Window w = d.getWindow();
+            Window w = d.getWindow();
             if (w != null) {
-                w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
-                w.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+                w.clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
+                w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
             }
         });
         rebuild[0].run();
@@ -948,17 +958,17 @@ public final class SettingsFragment extends Fragment {
         muteBtn.setText(prefs.getBoolean("muted", false) ? "👄 Unmute mic" : "🤫 Mute mic");
         boolean spk = prefs.getBoolean("speaker", false);
         int audioGreen = 0xFF2E7D32;
-        android.content.res.ColorStateList greenTint =
-                android.content.res.ColorStateList.valueOf(audioGreen);
+        ColorStateList greenTint =
+                ColorStateList.valueOf(audioGreen);
         if (spk) {
             spkBtn.setStrokeColor(greenTint);
             spkBtn.setStrokeWidth(dp(3));
-            earBtn.setStrokeColor(android.content.res.ColorStateList.valueOf(0x33808080));
+            earBtn.setStrokeColor(ColorStateList.valueOf(0x33808080));
             earBtn.setStrokeWidth(dp(1));
         } else {
             earBtn.setStrokeColor(greenTint);
             earBtn.setStrokeWidth(dp(3));
-            spkBtn.setStrokeColor(android.content.res.ColorStateList.valueOf(0x33808080));
+            spkBtn.setStrokeColor(ColorStateList.valueOf(0x33808080));
             spkBtn.setStrokeWidth(dp(1));
         }
         connect.setEnabled(!other && idle && !reg && !conn);
@@ -1350,7 +1360,7 @@ public final class SettingsFragment extends Fragment {
             text.setTextAppearance(android.R.style.TextAppearance_Small);
             text.setHint("Log is empty");
             text.setPadding(dp(8), dp(8), dp(8), dp(8));
-            text.setMovementMethod(new android.text.method.ScrollingMovementMethod());
+            text.setMovementMethod(new ScrollingMovementMethod());
             text.setVerticalScrollBarEnabled(true);
             text.setFocusable(true);
             text.setFocusableInTouchMode(true);
@@ -1367,7 +1377,7 @@ public final class SettingsFragment extends Fragment {
                 return false;
             });
 
-            android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+            GradientDrawable bg = new GradientDrawable();
             bg.setColor(0x14808080);
             bg.setStroke(dp(1), 0x33808080);
             bg.setCornerRadius(dp(8));
@@ -1421,7 +1431,7 @@ public final class SettingsFragment extends Fragment {
         }
 
         private boolean isNearBottom() {
-            android.text.Layout l = text.getLayout();
+            Layout l = text.getLayout();
             int lc = text.getLineCount();
             if (l == null || lc == 0) return true;
             int view = text.getHeight() - text.getPaddingTop() - text.getPaddingBottom();
@@ -1431,7 +1441,7 @@ public final class SettingsFragment extends Fragment {
         }
 
         private int maxScroll() {
-            android.text.Layout l = text.getLayout();
+            Layout l = text.getLayout();
             if (l == null) return 0;
             int content = l.getLineTop(text.getLineCount());
             int view = text.getHeight() - text.getPaddingTop() - text.getPaddingBottom();
@@ -1443,10 +1453,4 @@ public final class SettingsFragment extends Fragment {
             if (max > 0) text.scrollTo(0, max);
         }
     }
-
-
-
-
-
-
 }

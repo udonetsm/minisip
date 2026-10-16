@@ -34,6 +34,9 @@ public interface Vpn {
         return false;
     }
 
+    /**
+     * true — подключена АТС: wake lock и жёсткий watchdog. false — обычный VPN.
+     */
     default void setStrict(boolean on) {
     }
 
@@ -44,8 +47,6 @@ public interface Vpn {
     }
 
     void setListener(Listener l);
-    /** true — подключена АТС: wake lock и жёсткий watchdog. false — обычный VPN. */
-
 
     /**
      * Проверяет согласие пользователя на VPN. true — согласие уже есть.
@@ -114,6 +115,5 @@ public interface Vpn {
          */
         default void onRekey(String info) {
         }
-
     }
 }

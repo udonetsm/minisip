@@ -69,8 +69,9 @@ final class Certs {
         f.init((KeyStore) null);
         for (TrustManager t : f.getTrustManagers()) {
             if (t instanceof X509TrustManager) {
-                for (X509Certificate c : ((X509TrustManager) t).getAcceptedIssuers())
+                for (X509Certificate c : ((X509TrustManager) t).getAcceptedIssuers()) {
                     a.add(new TrustAnchor(c, null));
+                }
             }
         }
         return a;

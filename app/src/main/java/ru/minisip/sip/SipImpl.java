@@ -56,7 +56,7 @@ final class SipImpl implements Sip {
     }
 
     /**
-     * \u0422\u0435\u043b\u043e message/sipfrag: "SIP/2.0 200 OK" \u2192 \u043a\u043e\u0434.
+     * Тело message/sipfrag: "SIP/2.0 200 OK" -> код.
      */
     private static int sipfragCode(String body) {
         if (body == null) return 0;
@@ -218,7 +218,7 @@ final class SipImpl implements Sip {
             String uri = t.startsWith("sip:") ? t
                     : "sip:" + (t.contains("@") ? t : t + "@" + host);
             k.referCseq = ++k.cseq;
-            log("REFER \u2192 " + uri);
+            log("REFER → " + uri);
             Tx tx = new Tx(refer(k, uri), k.dh, k.dp, () -> {
                 log("transfer: no response");
                 k.referCseq = 0;
@@ -518,7 +518,7 @@ final class SipImpl implements Sip {
     }
 
     /**
-     * 202 Accepted \u2014 \u043f\u0440\u0438\u043d\u044f\u043b\u0438 \u043a \u0438\u0441\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044e; \u0436\u0434\u0451\u043c NOTIFY refer.
+     * 202 Accepted — приняли к исполнению; ждём NOTIFY refer.
      */
     private void onReferResp(Msg m) {
         Call k = call;
@@ -541,7 +541,7 @@ final class SipImpl implements Sip {
     }
 
     /**
-     * \u0424\u0438\u043d\u0430\u043b\u044c\u043d\u044b\u0439 NOTIFY refer (\u0438\u043b\u0438 \u0442\u0430\u0439\u043c\u0430\u0443\u0442): BYE \u0438 onEnded.
+     * Финальный NOTIFY refer (или таймаут): BYE и onEnded.
      */
     private void onReferFinal(Call k, int code, String reason) {
         if (k.referCseq == 0) return;
@@ -553,7 +553,7 @@ final class SipImpl implements Sip {
         if (call != k) return;
         String msg = code == 0 ? "transfer " + reason
                 : code < 300 ? "transferred"
-                  : "transfer failed: " + code + " " + reason;
+                : "transfer failed: " + code + " " + reason;
         log(msg);
         bye(k);
         end(k, msg);
