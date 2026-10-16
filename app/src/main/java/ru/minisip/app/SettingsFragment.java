@@ -96,13 +96,13 @@ public final class SettingsFragment extends Fragment {
     private float touchDownY;
     private MaterialButton deleteBtn;
     private MaterialCardView currentlyDraggedCard;
-    private TextInputEditText server, login, pass, number, vpnServer, vpnLogin, vpnPass, vpnKey, vpnCa, vpnHealthcheck;
+    private TextInputEditText server, login, pass, number, vpnServer, vpnLogin, vpnPass, vpnKey, vpnCa, vpnHealthcheck, vpnPingInterval;
     private TextView status, vpnStatus;
     private final ActivityResultLauncher<String> micPermission = registerForActivityResult(
             new ActivityResultContracts.RequestPermission(), granted -> {
                 if (!granted && status != null) status.setText("Microphone permission required");
             });
-    private MaterialButton connect, disconnect, refersBtn, call, hang, spkBtn, earBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
+    private MaterialButton connect, disconnect, refersBtn, call, hang, spkBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
     /**
      * Одна и та же ссылка нужна, чтобы в onPause снимать только свой колбэк.
      */
@@ -272,16 +272,15 @@ public final class SettingsFragment extends Fragment {
         arLp.topMargin = dp(8);
         callBlock.container.addView(audioRow, arLp);
 
-        spkBtn = button(audioRow, "📢 Speaker", true, v -> pickSpeaker(true));
-        LinearLayout.LayoutParams spkLp = new LinearLayout.LayoutParams(0,
+        muteBtn = button(audioRow, "🤫", true, v -> toggleMute());
+        LinearLayout.LayoutParams muteLp = new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        spkLp.rightMargin = dp(8);
-        spkBtn.setLayoutParams(spkLp);
+        muteLp.rightMargin = dp(8);
+        muteBtn.setLayoutParams(muteLp);
 
-        earBtn = button(audioRow, "👂 Earpiece", true, v -> pickSpeaker(false));
-        earBtn.setLayoutParams(new LinearLayout.LayoutParams(0,
+        spkBtn = button(audioRow, "📢", true, v -> pickSpeaker(!prefs.getBoolean("speaker", false)));
+        spkBtn.setLayoutParams(new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        muteBtn = button(callBlock.container, "🤫Mute mic", true, v -> toggleMute());
 
         callBlock.container.addView(callLog.panel, row(dp(8)));
 
@@ -311,8 +310,10 @@ public final class SettingsFragment extends Fragment {
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE, false);
         vpnCa.setSingleLine(false);
         vpnCa.setMaxLines(4);
-        vpnHealthcheck = field(vpnAdvancedSpoilerContainer, "Healthcheck address", "IP or domain for connectivity check(0 or empty to disable)", prefs.getString("vpnHealthcheck", "0"),
+        vpnHealthcheck = field(vpnAdvancedSpoilerContainer, "Healthcheck address", "empty or 0 — VPN server itself", prefs.getString("vpnHealthcheck", ""),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI, false);
+        vpnPingInterval = field(vpnAdvancedSpoilerContainer, "Ping interval (sec)", "empty or 0 — default 5 sec (5..9)", prefs.getString("vpnPingInterval", ""),
+                InputType.TYPE_CLASS_NUMBER, false);
 
         vpnAppsBtn = button(vpnMainSpoilerContainer, "Apps using VPN", true, v -> pickApps());
 
@@ -435,6 +436,7 @@ public final class SettingsFragment extends Fragment {
         save(vpnKey, "vpnKey");
         save(vpnCa, "vpnCa");
         save(vpnHealthcheck, "vpnHealthcheck");
+        save(vpnPingInterval, "vpnPingInterval");
 
         NestedScrollView scroll = new NestedScrollView(ctx) {
             @Override
@@ -495,9 +497,9 @@ public final class SettingsFragment extends Fragment {
     public void onDestroyView() {
         cancelHoldTimer();
         super.onDestroyView();
-        server = login = pass = number = vpnServer = vpnLogin = vpnPass = vpnKey = vpnCa = vpnHealthcheck = null;
+        server = login = pass = number = vpnServer = vpnLogin = vpnPass = vpnKey = vpnCa = vpnHealthcheck = vpnPingInterval = null;
         status = vpnStatus = null;
-        connect = disconnect = refersBtn = call = hang = spkBtn = earBtn = vpnConnect = vpnDisconnect = vpnAppsBtn = vpnMainBtn = vpnAdvancedBtn = sipAdvancedBtn = deleteBtn = null;
+        connect = disconnect = refersBtn = call = hang = spkBtn = muteBtn = vpnConnect = vpnDisconnect = vpnAppsBtn = vpnMainBtn = vpnAdvancedBtn = sipAdvancedBtn = deleteBtn = null;
         vpnMainSpoilerContainer = vpnAdvancedSpoilerContainer = sipSpoilerContainer = null;
         versionLabel = null;
         updateLog = null;
@@ -516,6 +518,7 @@ public final class SettingsFragment extends Fragment {
         load(vpnKey, "vpnKey");
         load(vpnCa, "vpnCa");
         load(vpnHealthcheck, "vpnHealthcheck");
+        load(vpnPingInterval, "vpnPingInterval");
         if (vpnLog != null) {
             vpnLog.onEnable = vpnLogUpdate;
             vpnLog.onClear = () -> app.vpnLog().clear();
@@ -680,16 +683,37 @@ public final class SettingsFragment extends Fragment {
 
     private void vpnStart() {
         save(vpnHealthcheck, "vpnHealthcheck");
+        save(vpnPingInterval, "vpnPingInterval");
         String hc = text(vpnHealthcheck).trim();
-        if (hc.isEmpty()) hc = "0";
+        String pingIntStr = text(vpnPingInterval).trim();
+        int pingSec = 5;
+        if (!pingIntStr.isEmpty()) {
+            try {
+                int parsed = Integer.parseInt(pingIntStr);
+                if (parsed >= 5 && parsed <= 9) {
+                    pingSec = parsed;
+                } else if (parsed != 0) {
+                    vpnStatus.setText("VPN: ping interval must be between 5 and 9 sec (or 0 for default 5 sec)");
+                    return;
+                }
+            } catch (NumberFormatException e) {
+                vpnStatus.setText("VPN: invalid ping interval number");
+                return;
+            }
+        }
 
-        if (hc.equals("0") || isIpv4(hc)) {
+        if (hc.isEmpty() || hc.equals("0")) {
+            hc = text(vpnServer).trim();
+        }
+
+        if (isIpv4(hc)) {
             app.vpnConnect(page, text(vpnServer).trim(), text(vpnLogin).trim(), text(vpnPass), text(vpnKey),
-                    text(vpnCa), prefs.getString("vpnApps", ""), hc);
+                    text(vpnCa), prefs.getString("vpnApps", ""), hc, pingSec);
             return;
         }
 
         final String domain = hc;
+        final int finalPingSec = pingSec;
         vpnStatus.setText("VPN: resolving healthcheck IP...");
         new Thread(() -> {
             String resolvedIp = null;
@@ -711,7 +735,7 @@ public final class SettingsFragment extends Fragment {
                         return;
                     }
                     app.vpnConnect(page, text(vpnServer).trim(), text(vpnLogin).trim(), text(vpnPass), text(vpnKey),
-                            text(vpnCa), prefs.getString("vpnApps", ""), finalIp);
+                            text(vpnCa), prefs.getString("vpnApps", ""), finalIp, finalPingSec);
                 });
             }
         }).start();
@@ -948,6 +972,7 @@ public final class SettingsFragment extends Fragment {
         setFieldEnabled(vpnKey, vpnFieldsEnabled);
         setFieldEnabled(vpnCa, vpnFieldsEnabled);
         setFieldEnabled(vpnHealthcheck, vpnFieldsEnabled);
+        setFieldEnabled(vpnPingInterval, vpnFieldsEnabled);
 
         String busy = "Busy: session in use by page " + (app.lastPage + 1);
         status.setText(mine ? app.status : other ? busy : "Disconnected");
@@ -955,22 +980,14 @@ public final class SettingsFragment extends Fragment {
         call.setEnabled(!other && !inCall && reg);
         hang.setEnabled(!other && inCall);
         muteBtn.setEnabled(!other);
-        muteBtn.setText(prefs.getBoolean("muted", false) ? "👄 Unmute mic" : "🤫 Mute mic");
+        boolean muted = prefs.getBoolean("muted", false);
+        muteBtn.setText(muted ? "👄" : "🤫");
+        muteBtn.setStrokeColor(muted ? stateful(0xFFD32F2F, 0x33808080) : ColorStateList.valueOf(0x33808080));
+        muteBtn.setStrokeWidth(muted ? dp(3) : dp(1));
+
+        spkBtn.setEnabled(!other);
         boolean spk = prefs.getBoolean("speaker", false);
-        int audioGreen = 0xFF2E7D32;
-        ColorStateList greenTint =
-                ColorStateList.valueOf(audioGreen);
-        if (spk) {
-            spkBtn.setStrokeColor(greenTint);
-            spkBtn.setStrokeWidth(dp(3));
-            earBtn.setStrokeColor(ColorStateList.valueOf(0x33808080));
-            earBtn.setStrokeWidth(dp(1));
-        } else {
-            earBtn.setStrokeColor(greenTint);
-            earBtn.setStrokeWidth(dp(3));
-            spkBtn.setStrokeColor(ColorStateList.valueOf(0x33808080));
-            spkBtn.setStrokeWidth(dp(1));
-        }
+        spkBtn.setText(spk ? "👂" : "📢");
         connect.setEnabled(!other && idle && !reg && !conn);
         disconnect.setEnabled(reg || conn);
         // VPN: подключить можно только когда он не поднят и нет вызова; отключить — когда поднят или поднимается

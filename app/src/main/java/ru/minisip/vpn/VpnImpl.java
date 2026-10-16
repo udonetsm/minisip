@@ -61,6 +61,7 @@ final class VpnImpl implements Vpn {
     private volatile Tunnel tunnel;                 // действующий (или поднимающийся) сеанс; null — сеанса нет
     private TunService svc;                // живой экземпляр сервиса сеанса
     private String host, identity, psk, password, ca, apps, healthcheckIp;
+    private int pingIntervalSec = 5;
     private boolean running;               // connect() был, disconnect()/сброса ещё не было
     private boolean want;                  // connect() был, сервис ещё не ответил
     private boolean strict;                // АТС подключена: wake lock и жёсткий watchdog
@@ -154,7 +155,7 @@ final class VpnImpl implements Vpn {
 
     @Override
     public synchronized void connect(String host, String identity, String password, String psk, String ca,
-                                     String apps, String healthcheckIp) {
+                                     String apps, String healthcheckIp, int pingIntervalSec) {
         gen++;
         Thread r = recovery;
         recovery = null;
@@ -177,6 +178,7 @@ final class VpnImpl implements Vpn {
         this.ca = ca;
         this.apps = apps;
         this.healthcheckIp = healthcheckIp;
+        this.pingIntervalSec = pingIntervalSec;
         running = true;
         want = true;
         reconnects = 0;
@@ -368,8 +370,9 @@ final class VpnImpl implements Vpn {
         t.supervised = true;
         t.strict = strict;
         String hc = healthcheckIp == null ? "" : healthcheckIp.trim();
-        t.pingHost = (hc.isEmpty() || hc.equals("0")) ? null : hc;           // если 0 или пусто — ping выключен, работают механизмы IKEv2
-        t.pingMs = PING_MS;
+        t.pingHost = (hc.isEmpty() || hc.equals("0")) ? host : hc;           // если 0 или пусто — пингуем сам сервер
+        int intervalSec = (pingIntervalSec <= 0) ? 5 : Math.max(5, Math.min(9, pingIntervalSec));
+        t.pingMs = intervalSec * 1000;
         t.log = this::log;
         t.pathEvents = g;
         g.owner = t;

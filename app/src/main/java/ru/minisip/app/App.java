@@ -216,7 +216,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         return vpn.consent(a, requestCode);
     }
 
-    void vpnConnect(int page, String host, String login, String password, String psk, String ca, String apps, String healthcheckIp) {
+    void vpnConnect(int page, String host, String login, String password, String psk, String ca, String apps, String healthcheckIp, int pingIntervalSec) {
         if (state != IDLE || vpnUp || vpnConnecting || !allowed(page)) return;
         lastPage = page;
         vpnConnecting = true;
@@ -224,11 +224,15 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         changed();
         manualStrict = PageStore.prefs(this, page).getBoolean("vpnStrict", false);
         vpn.setStrict(manualStrict);
-        vpn.connect(host, login, password, psk, ca, apps, healthcheckIp);
+        vpn.connect(host, login, password, psk, ca, apps, healthcheckIp, pingIntervalSec);
+    }
+
+    void vpnConnect(int page, String host, String login, String password, String psk, String ca, String apps, String healthcheckIp) {
+        vpnConnect(page, host, login, password, psk, ca, apps, healthcheckIp, 5);
     }
 
     void vpnConnect(int page, String host, String login, String password, String psk, String ca, String apps) {
-        vpnConnect(page, host, login, password, psk, ca, apps, null);
+        vpnConnect(page, host, login, password, psk, ca, apps, null, 5);
     }
 
     void vpnDisconnect(int page) {

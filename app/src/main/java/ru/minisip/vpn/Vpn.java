@@ -68,10 +68,14 @@ public interface Vpn {
      * apps — имена пакетов через пробел или перевод строки: их трафик тоже пойдёт через туннель.
      * Само приложение всегда включено; остальная система идёт напрямую.
      */
-    void connect(String host, String login, String password, String psk, String ca, String apps, String healthcheckIp);
+    void connect(String host, String login, String password, String psk, String ca, String apps, String healthcheckIp, int pingIntervalSec);
+
+    default void connect(String host, String login, String password, String psk, String ca, String apps, String healthcheckIp) {
+        connect(host, login, password, psk, ca, apps, healthcheckIp, 5);
+    }
 
     default void connect(String host, String login, String password, String psk, String ca, String apps) {
-        connect(host, login, password, psk, ca, apps, null);
+        connect(host, login, password, psk, ca, apps, null, 5);
     }
 
     /**

@@ -396,6 +396,9 @@ final class Tunnel {
             }
             note("IKE_AUTH done, ip=" + ike.ip);
             if (pingHost != null) {
+                if (pingHost.isEmpty() || pingHost.equals("0")) {
+                    pingHost = host;
+                }
                 pingSrc = InetAddress.getByName(ike.ip).getAddress();
                 pingDst = InetAddress.getByName(pingHost).getAddress();
                 if (pingSrc.length != 4 || pingDst.length != 4) pingHost = null;
