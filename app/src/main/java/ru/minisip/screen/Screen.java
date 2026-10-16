@@ -9,13 +9,17 @@ import android.content.Context;
  */
 public interface Screen {
 
-    /** Начало дозвона: включить датчик приближения и удерживать CPU. */
-    void start();
-
-    /** Конец вызова: отпустить датчик и все блокировки. */
-    void stop();
-
     static Screen create(Context ctx) {
         return new ScreenImpl(ctx);
     }
+
+    /**
+     * Начало дозвона: включить датчик приближения и удерживать CPU.
+     */
+    void start();
+
+    /**
+     * Конец вызова: отпустить датчик и все блокировки.
+     */
+    void stop();
 }

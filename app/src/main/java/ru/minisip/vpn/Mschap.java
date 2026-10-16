@@ -51,11 +51,20 @@ final class Mschap {
                 int a = -i & 3, b = (1 - i) & 3, c = (2 - i) & 3, d = (3 - i) & 3;
                 int f, k, add, s;
                 if (i < 16) {
-                    f = (v[b] & v[c]) | (~v[b] & v[d]); k = i; add = 0; s = s1[i & 3];
+                    f = (v[b] & v[c]) | (~v[b] & v[d]);
+                    k = i;
+                    add = 0;
+                    s = s1[i & 3];
                 } else if (i < 32) {
-                    f = (v[b] & v[c]) | (v[b] & v[d]) | (v[c] & v[d]); k = o2[i - 16]; add = 0x5a827999; s = s2[i & 3];
+                    f = (v[b] & v[c]) | (v[b] & v[d]) | (v[c] & v[d]);
+                    k = o2[i - 16];
+                    add = 0x5a827999;
+                    s = s2[i & 3];
                 } else {
-                    f = v[b] ^ v[c] ^ v[d]; k = o3[i - 32]; add = 0x6ed9eba1; s = s3[i & 3];
+                    f = v[b] ^ v[c] ^ v[d];
+                    k = o3[i - 32];
+                    add = 0x6ed9eba1;
+                    s = s3[i & 3];
                 }
                 v[a] = Integer.rotateLeft(v[a] + f + x[k] + add, s);
             }
@@ -76,7 +85,9 @@ final class Mschap {
         return Arrays.copyOf(Crypto.sha1(peer, auth, user), 8);
     }
 
-    /** DES по ключу из 7 байт: добавляем биты чётности и шифруем один блок. */
+    /**
+     * DES по ключу из 7 байт: добавляем биты чётности и шифруем один блок.
+     */
     private static byte[] des(byte[] k7, int off, byte[] block) {
         byte[] k = new byte[8];
         long bits = 0;
@@ -94,14 +105,18 @@ final class Mschap {
         }
     }
 
-    /** NT-Response: хеш пароля, дополненный нулями до 21 байта, режется на три DES-ключа. */
+    /**
+     * NT-Response: хеш пароля, дополненный нулями до 21 байта, режется на три DES-ключа.
+     */
     static byte[] ntResponse(byte[] auth, byte[] peer, byte[] user, String password) {
         byte[] ch = challengeHash(peer, auth, user);
         byte[] h = Arrays.copyOf(ntHash(password), 21);
         return cat(des(h, 0, ch), des(h, 7, ch), des(h, 14, ch));
     }
 
-    /** Ответ сервера «S=40 шестнадцатеричных цифр»: доказывает клиенту, что сервер знает пароль. */
+    /**
+     * Ответ сервера «S=40 шестнадцатеричных цифр»: доказывает клиенту, что сервер знает пароль.
+     */
     static String authenticatorResponse(String password, byte[] ntResp, byte[] peer, byte[] auth, byte[] user) {
         byte[] phh = md4(ntHash(password));
         byte[] d = Crypto.sha1(phh, ntResp, MAGIC1);
@@ -117,7 +132,9 @@ final class Mschap {
         return Arrays.copyOf(Crypto.sha1(md4(ntHash(password)), ntResp, MPPE_MASTER), 16);
     }
 
-    /** GetAsymmetricStartKey для 128 бит: SHA1(master | 40 x 0x00 | magic | 40 x 0xF2). */
+    /**
+     * GetAsymmetricStartKey для 128 бит: SHA1(master | 40 x 0x00 | magic | 40 x 0xF2).
+     */
     static byte[] startKey(byte[] master, byte[] magic) {
         byte[] z = new byte[40], f = new byte[40];
         Arrays.fill(f, (byte) 0xF2);

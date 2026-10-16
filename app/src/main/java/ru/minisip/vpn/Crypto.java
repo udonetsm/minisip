@@ -21,6 +21,18 @@ final class Crypto {
     static final SecureRandom RND = new SecureRandom();
 
     // ---------- байты ----------
+    static final int DH_GROUP = 14;
+    static final int DH_BYTES = 256;
+    private static final BigInteger P = new BigInteger(
+            "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74"
+                    + "020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F1437"
+                    + "4FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED"
+                    + "EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF05"
+                    + "98DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB"
+                    + "9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3B"
+                    + "E39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF695581718"
+                    + "3995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF", 16);
+    private static final BigInteger G = BigInteger.valueOf(2);
 
     static int u16(byte[] b, int o) {
         return (b[o] & 0xff) << 8 | (b[o + 1] & 0xff);
@@ -34,6 +46,8 @@ final class Crypto {
         b[o] = (byte) (v >> 8);
         b[o + 1] = (byte) v;
     }
+
+    // ---------- Диффи-Хеллман: группа 14 (RFC 3526, MODP 2048) ----------
 
     static void put32(byte[] b, int o, long v) {
         put16(b, o, (int) (v >> 16));
@@ -68,22 +82,9 @@ final class Crypto {
         }
     }
 
-    // ---------- Диффи-Хеллман: группа 14 (RFC 3526, MODP 2048) ----------
-
-    static final int DH_GROUP = 14;
-    static final int DH_BYTES = 256;
-    private static final BigInteger P = new BigInteger(
-            "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74"
-            + "020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F1437"
-            + "4FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED"
-            + "EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF05"
-            + "98DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB"
-            + "9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3B"
-            + "E39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF695581718"
-            + "3995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF", 16);
-    private static final BigInteger G = BigInteger.valueOf(2);
-
-    /** Закрытая часть: 320 случайных бит со старшим битом (достаточно для ~128 бит стойкости). */
+    /**
+     * Закрытая часть: 320 случайных бит со старшим битом (достаточно для ~128 бит стойкости).
+     */
     static BigInteger dhPrivate() {
         return new BigInteger(320, RND).setBit(319);
     }
@@ -92,10 +93,13 @@ final class Crypto {
         return fixed(G.modPow(x, P), DH_BYTES);
     }
 
-    /** g^xy ровно в 256 байт; null, если чужое значение не годится (0, 1, p-1 и больше). */
+    /**
+     * g^xy ровно в 256 байт; null, если чужое значение не годится (0, 1, p-1 и больше).
+     */
     static byte[] dhShared(BigInteger x, byte[] peer) {
         BigInteger y = new BigInteger(1, peer);
-        if (y.compareTo(BigInteger.ONE) <= 0 || y.compareTo(P.subtract(BigInteger.ONE)) >= 0) return null;
+        if (y.compareTo(BigInteger.ONE) <= 0 || y.compareTo(P.subtract(BigInteger.ONE)) >= 0)
+            return null;
         return fixed(y.modPow(x, P), DH_BYTES);
     }
 
@@ -108,6 +112,17 @@ final class Crypto {
     }
 
     // ---------- набор алгоритмов ----------
+
+    static byte[] hmac(String alg, byte[] key, byte[]... data) {
+        try {
+            Mac m = Mac.getInstance(alg);
+            m.init(new SecretKeySpec(key, alg));
+            for (byte[] d : data) m.update(d);
+            return m.doFinal();
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException(e);
+        }
+    }
 
     /**
      * Выбранный набор: шифр (AES-CBC или AES-GCM-16), длина ключа, целостность и PRF.
@@ -127,7 +142,9 @@ final class Crypto {
             this.prf = prf;
         }
 
-        /** Годится ли то, что выбрал сервер. Для ESP PRF нет (needPrf = false, prf должен быть 0). */
+        /**
+         * Годится ли то, что выбрал сервер. Для ESP PRF нет (needPrf = false, prf должен быть 0).
+         */
         boolean supported(boolean needPrf) {
             if (encr != CBC && encr != GCM) return false;
             if (bits != 128 && bits != 256) return false;
@@ -136,29 +153,51 @@ final class Crypto {
             return needPrf ? (prf == PRF_SHA1 || prf == PRF_SHA256) : prf == 0;
         }
 
-        boolean aead() { return encr == GCM; }
+        boolean aead() {
+            return encr == GCM;
+        }
 
-        int keyLen() { return bits / 8; }
+        int keyLen() {
+            return bits / 8;
+        }
 
-        /** Материал ключа шифра; у GCM в конце ещё 4 байта соли. */
-        int encKeyLen() { return keyLen() + (aead() ? 4 : 0); }
+        /**
+         * Материал ключа шифра; у GCM в конце ещё 4 байта соли.
+         */
+        int encKeyLen() {
+            return keyLen() + (aead() ? 4 : 0);
+        }
 
-        int integKeyLen() { return aead() ? 0 : integ == SHA256_128 ? 32 : 20; }
+        int integKeyLen() {
+            return aead() ? 0 : integ == SHA256_128 ? 32 : 20;
+        }
 
-        int icvLen() { return aead() ? 16 : integ == SHA256_128 ? 16 : 12; }
+        int icvLen() {
+            return aead() ? 16 : integ == SHA256_128 ? 16 : 12;
+        }
 
-        int ivLen() { return aead() ? 8 : 16; }
+        int ivLen() {
+            return aead() ? 8 : 16;
+        }
 
-        /** Открытый текст перед шифрованием добивается до кратного этому числу. */
-        int block() { return aead() ? 4 : 16; }
+        /**
+         * Открытый текст перед шифрованием добивается до кратного этому числу.
+         */
+        int block() {
+            return aead() ? 4 : 16;
+        }
 
-        int prfLen() { return prf == PRF_SHA256 ? 32 : 20; }
+        int prfLen() {
+            return prf == PRF_SHA256 ? 32 : 20;
+        }
 
         byte[] prf(byte[] key, byte[]... data) {
             return hmac(prf == PRF_SHA256 ? "HmacSHA256" : "HmacSHA1", key, data);
         }
 
-        /** prf+ из RFC 7296, п. 2.13: T1 = prf(K, S|1), T2 = prf(K, T1|S|2), ... */
+        /**
+         * prf+ из RFC 7296, п. 2.13: T1 = prf(K, S|1), T2 = prf(K, T1|S|2), ...
+         */
         byte[] prfPlus(byte[] key, byte[] seed, int n) {
             byte[] out = new byte[n];
             byte[] t = new byte[0];
@@ -173,17 +212,6 @@ final class Crypto {
 
         byte[] mac(byte[] key, byte[] data) {
             return hmac(integ == SHA256_128 ? "HmacSHA256" : "HmacSHA1", key, data);
-        }
-    }
-
-    static byte[] hmac(String alg, byte[] key, byte[]... data) {
-        try {
-            Mac m = Mac.getInstance(alg);
-            m.init(new SecretKeySpec(key, alg));
-            for (byte[] d : data) m.update(d);
-            return m.doFinal();
-        } catch (GeneralSecurityException e) {
-            throw new IllegalStateException(e);
         }
     }
 
@@ -208,7 +236,9 @@ final class Crypto {
             this.integKey = integKey;
         }
 
-        /** Длина добавки к открытому тексту: IV + ICV. */
+        /**
+         * Длина добавки к открытому тексту: IV + ICV.
+         */
         int overhead() {
             return s.ivLen() + s.icvLen();
         }
@@ -238,7 +268,9 @@ final class Crypto {
             }
         }
 
-        /** Проверяет ICV и расшифровывает; null, если сообщение подделано или повреждено. */
+        /**
+         * Проверяет ICV и расшифровывает; null, если сообщение подделано или повреждено.
+         */
         byte[] open(byte[] msg, int headLen) {
             int ivLen = s.ivLen(), icv = s.icvLen();
             int ctLen = msg.length - headLen - ivLen - icv;

@@ -33,88 +33,87 @@ final class SipImpl implements Sip {
         t.setDaemon(true);
         return t;
     });
-    private volatile Listener lis = new Listener() {};
-    private volatile LogSink sink = s -> {};
-
+    private final Map<String, Tx> bg = new HashMap<>();
+    private volatile Listener lis = new Listener() {
+    };
+    private volatile LogSink sink = s -> {
+    };
     // настройки и сокет
     private String host, user, pass, ip;
     private int port, lport;
-
     // регистрация
     private String regId, regTag;
     private int regCseq;
     private boolean regAuth;
     private Tx regTx;
     private ScheduledFuture<?> regTimer;
-
     // вызов (не больше одного) и фоновые транзакции (BYE, CANCEL)
     private Call call;
-    private final Map<String, Tx> bg = new HashMap<>();
 
     SipImpl(Udp udp, Media media) {
         this.udp = udp;
         this.media = media;
     }
 
-    private static final class Call {
-        int state;
-        String id, ltag, branch, uri, from, to, target, auth;
-        int cseq, rtp;
-        List<String> route = new ArrayList<>();
-        String dh;          // куда слать запросы внутри диалога
-        int dp;
-        boolean ringing;
-        Tx tx;
-        int referCseq;
-        ScheduledFuture<?> referTimer;
+    /**
+     * \u0422\u0435\u043b\u043e message/sipfrag: "SIP/2.0 200 OK" \u2192 \u043a\u043e\u0434.
+     */
+    private static int sipfragCode(String body) {
+        if (body == null) return 0;
+        String line = body.split("\\r?\\n", 2)[0].trim();
+        String[] p = line.split(" ", 3);
+        if (p.length < 2 || !p[0].startsWith("SIP/")) return 0;
+        try {
+            return Integer.parseInt(p[1]);
+        } catch (RuntimeException e) {
+            return 0;
+        }
     }
 
-    /** Повторная отправка по таймерам SIP: 0.5, 1, 2, 4, 4... секунд, всего 32 с. */
-    private final class Tx {
-        final byte[] data;
-        final String h;
-        final int p;
-        final Runnable onTimeout;
-        int delay = 500;
-        int spent;
-        ScheduledFuture<?> f;
-        boolean done;
-
-        Tx(String msg, String h, int p, Runnable onTimeout) {
-            this.data = msg.getBytes(StandardCharsets.UTF_8);
-            this.h = h;
-            this.p = p;
-            this.onTimeout = onTimeout;
-        }
-
-        void start() {
-            udp.send(data, h, p);
-            next();
-        }
-
-        private void next() {
-            f = ex.schedule(() -> guard(() -> {
-                if (done) return;
-                spent += delay;
-                if (spent >= 32000) {
-                    done = true;
-                    bg.values().remove(this);
-                    if (onTimeout != null) onTimeout.run();
-                    return;
-                }
-                udp.send(data, h, p);
-                delay = Math.min(delay * 2, 4000);
-                next();
-            }), delay, TimeUnit.MILLISECONDS);
-        }
-
-        void stop() {
-            done = true;
-            if (f != null) f.cancel(false);
-        }
+    private static String sipfragReason(String body) {
+        if (body == null) return "";
+        String line = body.split("\\r?\\n", 2)[0].trim();
+        String[] p = line.split(" ", 3);
+        return p.length > 2 ? p[2] : "";
     }
 
     // ================= публичный API =================
+
+    private static String msg(String first, String body, List<String> hs) {
+        StringBuilder b = new StringBuilder(first).append("\r\n");
+        for (String h : hs) b.append(h).append("\r\n");
+        b.append("Content-Length: ").append(body.getBytes(StandardCharsets.UTF_8).length)
+                .append("\r\n\r\n").append(body);
+        return b.toString();
+    }
+
+    /**
+     * Список заголовков без null-элементов.
+     */
+    private static List<String> hdrs(String... a) {
+        List<String> l = new ArrayList<>();
+        for (String s : a) if (s != null) l.add(s);
+        return l;
+    }
+
+    /**
+     * Исключение в обработчике (кривой пакет, ошибка в UI-колбэке) не должно ронять приложение.
+     */
+    private static void guard(Runnable r) {
+        try {
+            r.run();
+        } catch (RuntimeException e) {
+            // пакет отбрасывается
+        }
+    }
+
+    private static String id() {
+        return String.format("%016x", RND.nextLong());
+    }
+
+    private static String branch() {
+        return "z9hG4bK" + id();
+    }
 
     @Override
     public void setListener(Listener l) {
@@ -123,13 +122,18 @@ final class SipImpl implements Sip {
 
     @Override
     public void setLogSink(LogSink s) {
-        sink = s == null ? x -> {} : s;
+        sink = s == null ? x -> {
+        } : s;
     }
 
-    /** Единая точка отладочного лога: logcat не пишем, только sink. Пароль и Authorization не логируем. */
+    /**
+     * Единая точка отладочного лога: logcat не пишем, только sink. Пароль и Authorization не логируем.
+     */
     private void log(String m) {
         sink.log(m);
     }
+
+    // ================= регистрация =================
 
     @Override
     public void register(String h, int p, String u, String pw) {
@@ -235,8 +239,6 @@ final class SipImpl implements Sip {
         });
     }
 
-    // ================= регистрация =================
-
     private void startReg() {
         cancelReg();
         lport = udp.open(0, this::onPacket);
@@ -251,6 +253,8 @@ final class SipImpl implements Sip {
         regCseq = 0;
         doRegister();
     }
+
+    // ================= ответы на наши запросы =================
 
     private void cancelReg() {
         if (regTx != null) regTx.stop();
@@ -307,13 +311,15 @@ final class SipImpl implements Sip {
         }
     }
 
+    // ================= запросы от сервера =================
+
     private void regFail(String why, boolean retry) {
         log("register failed: " + why);
         lis.onRegistered(false, why);
         if (retry) regTimer = ex.schedule(() -> guard(this::startReg), 20, TimeUnit.SECONDS);
     }
 
-    // ================= ответы на наши запросы =================
+    // ================= построение сообщений =================
 
     private void onPacket(byte[] d, String h, int p) {
         post(() -> {
@@ -404,7 +410,9 @@ final class SipImpl implements Sip {
         }
     }
 
-    /** Ответ на вызов, которого у нас уже нет (отменили, гонка CANCEL/200): добиваем без состояния. */
+    /**
+     * Ответ на вызов, которого у нас уже нет (отменили, гонка CANCEL/200): добиваем без состояния.
+     */
     private void stray(Msg m) {
         int c = m.status();
         if (c < 200) return;
@@ -425,8 +433,6 @@ final class SipImpl implements Sip {
             send(msg(method + " " + target + " SIP/2.0", "", l), host, port);
         }
     }
-
-    // ================= запросы от сервера =================
 
     private void onReq(Msg m, String h, int p) {
         Call k = call;
@@ -461,8 +467,6 @@ final class SipImpl implements Sip {
                         hdrs("Allow: INVITE, ACK, CANCEL, BYE, OPTIONS"), ""), h, p);
         }
     }
-
-    // ================= построение сообщений =================
 
     private String invite(Call k) {
         String sdp = Sdp.make(ip, k.rtp, 8, 0);
@@ -501,7 +505,9 @@ final class SipImpl implements Sip {
         return msg("ACK " + k.target + " SIP/2.0", "", l);
     }
 
-    /** REFER в рамках диалога: Refer-To как sip-URI, CSeq из k.referCseq. */
+    /**
+     * REFER в рамках диалога: Refer-To как sip-URI, CSeq из k.referCseq.
+     */
     private String refer(Call k, String target) {
         List<String> l = hdrs("Via: " + via(branch()), "Max-Forwards: 70");
         for (String r : k.route) l.add("Route: " + r);
@@ -511,7 +517,9 @@ final class SipImpl implements Sip {
         return msg("REFER " + k.target + " SIP/2.0", "", l);
     }
 
-    /** 202 Accepted \u2014 \u043f\u0440\u0438\u043d\u044f\u043b\u0438 \u043a \u0438\u0441\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044e; \u0436\u0434\u0451\u043c NOTIFY refer. */
+    /**
+     * 202 Accepted \u2014 \u043f\u0440\u0438\u043d\u044f\u043b\u0438 \u043a \u0438\u0441\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u044e; \u0436\u0434\u0451\u043c NOTIFY refer.
+     */
     private void onReferResp(Msg m) {
         Call k = call;
         if (k == null || !k.id.equals(m.get("call-id")) || k.referCseq != m.cseq()) return;
@@ -532,7 +540,9 @@ final class SipImpl implements Sip {
         }), 32, TimeUnit.SECONDS);
     }
 
-    /** \u0424\u0438\u043d\u0430\u043b\u044c\u043d\u044b\u0439 NOTIFY refer (\u0438\u043b\u0438 \u0442\u0430\u0439\u043c\u0430\u0443\u0442): BYE \u0438 onEnded. */
+    /**
+     * \u0424\u0438\u043d\u0430\u043b\u044c\u043d\u044b\u0439 NOTIFY refer (\u0438\u043b\u0438 \u0442\u0430\u0439\u043c\u0430\u0443\u0442): BYE \u0438 onEnded.
+     */
     private void onReferFinal(Call k, int code, String reason) {
         if (k.referCseq == 0) return;
         k.referCseq = 0;
@@ -543,33 +553,15 @@ final class SipImpl implements Sip {
         if (call != k) return;
         String msg = code == 0 ? "transfer " + reason
                 : code < 300 ? "transferred"
-                : "transfer failed: " + code + " " + reason;
+                  : "transfer failed: " + code + " " + reason;
         log(msg);
         bye(k);
         end(k, msg);
     }
 
-    /** \u0422\u0435\u043b\u043e message/sipfrag: "SIP/2.0 200 OK" \u2192 \u043a\u043e\u0434. */
-    private static int sipfragCode(String body) {
-        if (body == null) return 0;
-        String line = body.split("\\r?\\n", 2)[0].trim();
-        String[] p = line.split(" ", 3);
-        if (p.length < 2 || !p[0].startsWith("SIP/")) return 0;
-        try {
-            return Integer.parseInt(p[1]);
-        } catch (RuntimeException e) {
-            return 0;
-        }
-    }
-
-    private static String sipfragReason(String body) {
-        if (body == null) return "";
-        String line = body.split("\\r?\\n", 2)[0].trim();
-        String[] p = line.split(" ", 3);
-        return p.length > 2 ? p[2] : "";
-    }
-
-    /** ACK на финальный не-2xx ответ собирается из самого ответа. */
+    /**
+     * ACK на финальный не-2xx ответ собирается из самого ответа.
+     */
     private String ackFail(Msg r) {
         return msg("ACK " + Msg.uri(r.get("to")) + " SIP/2.0", "", hdrs(
                 "Via: " + r.get("via"), "Max-Forwards: 70",
@@ -592,21 +584,6 @@ final class SipImpl implements Sip {
         return msg("SIP/2.0 " + code + " " + reason, body, l);
     }
 
-    private static String msg(String first, String body, List<String> hs) {
-        StringBuilder b = new StringBuilder(first).append("\r\n");
-        for (String h : hs) b.append(h).append("\r\n");
-        b.append("Content-Length: ").append(body.getBytes(StandardCharsets.UTF_8).length)
-                .append("\r\n\r\n").append(body);
-        return b.toString();
-    }
-
-    /** Список заголовков без null-элементов. */
-    private static List<String> hdrs(String... a) {
-        List<String> l = new ArrayList<>();
-        for (String s : a) if (s != null) l.add(s);
-        return l;
-    }
-
     private String via(String branch) {
         return "SIP/2.0/UDP " + ip + ":" + lport + ";branch=" + branch + ";rport";
     }
@@ -614,6 +591,8 @@ final class SipImpl implements Sip {
     private String contact() {
         return "<sip:" + user + "@" + ip + ":" + lport + ";transport=udp>";
     }
+
+    // ================= служебное =================
 
     private String authHeader(Msg m, String method, String uri) {
         boolean proxy = m.status() == 407;
@@ -623,8 +602,6 @@ final class SipImpl implements Sip {
         }
         return null;
     }
-
-    // ================= служебное =================
 
     private void end(Call k, String reason) {
         if (call != k) return;
@@ -652,20 +629,63 @@ final class SipImpl implements Sip {
         ex.execute(() -> guard(r));
     }
 
-    /** Исключение в обработчике (кривой пакет, ошибка в UI-колбэке) не должно ронять приложение. */
-    private static void guard(Runnable r) {
-        try {
-            r.run();
-        } catch (RuntimeException e) {
-            // пакет отбрасывается
+    private static final class Call {
+        int state;
+        String id, ltag, branch, uri, from, to, target, auth;
+        int cseq, rtp;
+        List<String> route = new ArrayList<>();
+        String dh;          // куда слать запросы внутри диалога
+        int dp;
+        boolean ringing;
+        Tx tx;
+        int referCseq;
+        ScheduledFuture<?> referTimer;
+    }
+
+    /**
+     * Повторная отправка по таймерам SIP: 0.5, 1, 2, 4, 4... секунд, всего 32 с.
+     */
+    private final class Tx {
+        final byte[] data;
+        final String h;
+        final int p;
+        final Runnable onTimeout;
+        int delay = 500;
+        int spent;
+        ScheduledFuture<?> f;
+        boolean done;
+
+        Tx(String msg, String h, int p, Runnable onTimeout) {
+            this.data = msg.getBytes(StandardCharsets.UTF_8);
+            this.h = h;
+            this.p = p;
+            this.onTimeout = onTimeout;
         }
-    }
 
-    private static String id() {
-        return String.format("%016x", RND.nextLong());
-    }
+        void start() {
+            udp.send(data, h, p);
+            next();
+        }
 
-    private static String branch() {
-        return "z9hG4bK" + id();
+        private void next() {
+            f = ex.schedule(() -> guard(() -> {
+                if (done) return;
+                spent += delay;
+                if (spent >= 32000) {
+                    done = true;
+                    bg.values().remove(this);
+                    if (onTimeout != null) onTimeout.run();
+                    return;
+                }
+                udp.send(data, h, p);
+                delay = Math.min(delay * 2, 4000);
+                next();
+            }), delay, TimeUnit.MILLISECONDS);
+        }
+
+        void stop() {
+            done = true;
+            if (f != null) f.cancel(false);
+        }
     }
 }

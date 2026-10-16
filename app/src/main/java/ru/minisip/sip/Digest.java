@@ -11,15 +11,20 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** HTTP Digest (RFC 2617 / 3261) только с MD5. */
+/**
+ * HTTP Digest (RFC 2617 / 3261) только с MD5.
+ */
 final class Digest {
 
     private static final Pattern P = Pattern.compile("(\\w+)=(?:\"([^\"]*)\"|([^,\\s]+))");
     private static final SecureRandom RND = new SecureRandom();
 
-    private Digest() {}
+    private Digest() {
+    }
 
-    /** Значение заголовка Authorization по вызову сервера. null — схема не поддерживается. */
+    /**
+     * Значение заголовка Authorization по вызову сервера. null — схема не поддерживается.
+     */
     static String answer(String challenge, String user, String pass, String method, String uri) {
         byte[] b = new byte[8];
         RND.nextBytes(b);

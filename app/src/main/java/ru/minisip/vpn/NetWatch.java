@@ -16,10 +16,10 @@ import java.util.Objects;
 /**
  * Следит за сетью под VPN (не VPN, с интернетом). «Отпечаток» сети: какая сеть лучшая и её IPv4-адреса.
  * Сети чужих VPN (в том числе из другого профиля) игнорируются: берутся только сети без TRANSPORT_VPN.
- *
+ * <p>
  * onChange зовётся через DEBOUNCE_MS, если:
- *  - отпечаток отличается от запомненного mark() (другая сеть, новый адрес, сеть пропала), или
- *  - сеть вернулась после пропадания (даже если отпечаток тот же: NAT-привязка могла умереть).
+ * - отпечаток отличается от запомненного mark() (другая сеть, новый адрес, сеть пропала), или
+ * - сеть вернулась после пропадания (даже если отпечаток тот же: NAT-привязка могла умереть).
  * После вызова слушатель смотрит online() и sameAsMarked() и решает, что делать.
  */
 final class NetWatch {
@@ -28,13 +28,11 @@ final class NetWatch {
 
     private final ConnectivityManager cm;
     private final Handler h = new Handler(Looper.getMainLooper());
+    private final Object snap = new Object();
     private volatile String marked;
     private volatile boolean offline;
     private volatile boolean validated;
     private Runnable onChange;
-    private ConnectivityManager.NetworkCallback cb;
-    private final Object snap = new Object();
-
     private final Runnable check = new Runnable() {
         @Override
         public void run() {
@@ -53,12 +51,15 @@ final class NetWatch {
             if (fire) r.run();
         }
     };
+    private ConnectivityManager.NetworkCallback cb;
 
     NetWatch(Context ctx) {
         cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
     }
 
-    /** Начинает слежение; текущая сеть считается исходной. Повторный вызов начинает заново. */
+    /**
+     * Начинает слежение; текущая сеть считается исходной. Повторный вызов начинает заново.
+     */
     synchronized void start(Runnable onChange) {
         stop();
         this.onChange = onChange;
@@ -107,7 +108,9 @@ final class NetWatch {
         offline = false;
     }
 
-    /** Текущая сеть становится исходной (зовут перед каждой попыткой подключения и миграцией). */
+    /**
+     * Текущая сеть становится исходной (зовут перед каждой попыткой подключения и миграцией).
+     */
     void mark() {
         String k = key();
         synchronized (snap) {
@@ -115,17 +118,23 @@ final class NetWatch {
         }
     }
 
-    /** Есть ли сейчас хоть какая-то сеть с интернетом (кроме VPN). */
+    /**
+     * Есть ли сейчас хоть какая-то сеть с интернетом (кроме VPN).
+     */
     boolean online() {
         return key() != null;
     }
 
-    /** Есть ли реально ВАЛИДИРОВАННАЯ сеть (проверенный выход в интернет). */
+    /**
+     * Есть ли реально ВАЛИДИРОВАННАЯ сеть (проверенный выход в интернет).
+     */
     boolean validated() {
         return hasValidated();
     }
 
-    /** Сеть та же, на которой мы запомнили состояние. */
+    /**
+     * Сеть та же, на которой мы запомнили состояние.
+     */
     boolean sameAsMarked() {
         synchronized (snap) {
             return Objects.equals(key(), marked);
@@ -153,8 +162,8 @@ final class NetWatch {
 
     @SuppressWarnings("deprecation")
     private String key() {
-        
-                // Берём ту сеть, которую система реально использует как default (getActiveNetwork),
+
+        // Берём ту сеть, которую система реально использует как default (getActiveNetwork),
         // а не «самую лучшую по рейтингу». Иначе валидированный LTE «перекрывает» Wi-Fi без
         // интернета: сеть формально та же, сетевые колбэки молчат, а трафик идёт по мёртвому
         // default-маршруту. Если активная сеть — наша VPN или её нет, падаем на перебор.
@@ -188,11 +197,12 @@ final class NetWatch {
         LinkProperties lp = cm.getLinkProperties(best);
         if (lp != null) {
             for (LinkAddress la : lp.getLinkAddresses()) {
-                if (la.getAddress() instanceof Inet4Address) sb.append('|').append(la.getAddress().getHostAddress());
+                if (la.getAddress() instanceof Inet4Address)
+                    sb.append('|').append(la.getAddress().getHostAddress());
             }
         }
         sb.append("|validated=")
-  .append(nc != null && nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED));
+                .append(nc != null && nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED));
         return sb.toString();
     }
 }

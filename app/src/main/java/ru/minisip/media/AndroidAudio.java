@@ -13,7 +13,9 @@ import android.os.Build;
 
 import java.util.Arrays;
 
-/** Микрофон и динамик разговорного тракта (в ухо, с эхоподавлением системы). */
+/**
+ * Микрофон и динамик разговорного тракта (в ухо, с эхоподавлением системы).
+ */
 final class AndroidAudio implements Audio {
 
     private static final int RATE = 8000;
@@ -227,12 +229,14 @@ final class AndroidAudio implements Audio {
                                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                                 .build())
                         .setAcceptsDelayedFocusGain(false)
-                        .setOnAudioFocusChangeListener(focus -> {})
+                        .setOnAudioFocusChangeListener(focus -> {
+                        })
                         .build();
                 am.requestAudioFocus(focusReq);
             }
         } else {
-            am.requestAudioFocus(focus -> {}, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
+            am.requestAudioFocus(focus -> {
+            }, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
         }
     }
 
@@ -244,7 +248,8 @@ final class AndroidAudio implements Audio {
                 focusReq = null;
             }
         } else {
-            am.abandonAudioFocus(focus -> {});
+            am.abandonAudioFocus(focus -> {
+            });
         }
     }
 }

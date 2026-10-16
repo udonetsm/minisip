@@ -8,17 +8,33 @@ import android.content.Context;
  */
 public interface Udp {
 
-    interface Listener {
-        void onPacket(byte[] data, String host, int port);
+    /**
+     * Без Android: привязка к интерфейсу недоступна (bind(x != null) делает open() неудачным).
+     */
+    static Udp create() {
+        return new UdpImpl((s, iface) -> false);
     }
 
-    /** Открывает сокет (0 = любой порт) и запускает приём. Возвращает порт или -1. */
+    /**
+     * С привязкой к сети через ConnectivityManager.
+     */
+    static Udp create(Context ctx) {
+        return new UdpImpl(new AndroidBinder(ctx));
+    }
+
+    /**
+     * Открывает сокет (0 = любой порт) и запускает приём. Возвращает порт или -1.
+     */
     int open(int port, Listener l);
 
-    /** Отправка датаграммы. false — не удалось (нет сети, не резолвится имя). */
+    /**
+     * Отправка датаграммы. false — не удалось (нет сети, не резолвится имя).
+     */
     boolean send(byte[] data, String host, int port);
 
-    /** Локальный IP, с которого мы достучимся до host:port. null — нет маршрута. */
+    /**
+     * Локальный IP, с которого мы достучимся до host:port. null — нет маршрута.
+     */
     String localIp(String host, int port);
 
     /**
@@ -31,15 +47,11 @@ public interface Udp {
 
     void close();
 
-    default String error() { return ""; }
-
-    /** Без Android: привязка к интерфейсу недоступна (bind(x != null) делает open() неудачным). */
-    static Udp create() {
-        return new UdpImpl((s, iface) -> false);
+    default String error() {
+        return "";
     }
 
-    /** С привязкой к сети через ConnectivityManager. */
-    static Udp create(Context ctx) {
-        return new UdpImpl(new AndroidBinder(ctx));
+    interface Listener {
+        void onPacket(byte[] data, String host, int port);
     }
 }

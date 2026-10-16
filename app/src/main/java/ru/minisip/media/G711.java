@@ -1,6 +1,8 @@
 package ru.minisip.media;
 
-/** G.711 A-law (PT 8) и µ-law (PT 0). Классические алгоритмы, без таблиц на 64 КБ. */
+/**
+ * G.711 A-law (PT 8) и µ-law (PT 0). Классические алгоритмы, без таблиц на 64 КБ.
+ */
 final class G711 {
 
     private static final short[] SEG_A = {0x1F, 0x3F, 0x7F, 0xFF, 0x1FF, 0x3FF, 0x7FF, 0xFFF};
@@ -15,7 +17,8 @@ final class G711 {
         }
     }
 
-    private G711() {}
+    private G711() {
+    }
 
     static byte encode(int pt, short pcm) {
         return pt == 8 ? linToAlaw(pcm) : linToUlaw(pcm);

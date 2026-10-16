@@ -29,7 +29,11 @@ import javax.net.ssl.X509TrustManager;
  */
 final class Certs {
 
-    /** Разбирает один или несколько PEM-сертификатов; null — не получилось или пусто. */
+    static final int RSA_SIG = 1, DIGITAL_SIG = 14;
+
+    /**
+     * Разбирает один или несколько PEM-сертификатов; null — не получилось или пусто.
+     */
     static List<X509Certificate> parsePem(String pem) {
         try {
             CertificateFactory cf = CertificateFactory.getInstance("X.509");
@@ -52,7 +56,9 @@ final class Certs {
         }
     }
 
-    /** Доверенные корни: свои (если заданы) или системное хранилище. */
+    /**
+     * Доверенные корни: свои (если заданы) или системное хранилище.
+     */
     private static Set<TrustAnchor> anchors(List<X509Certificate> own) throws Exception {
         Set<TrustAnchor> a = new HashSet<>();
         if (own != null) {
@@ -63,13 +69,16 @@ final class Certs {
         f.init((KeyStore) null);
         for (TrustManager t : f.getTrustManagers()) {
             if (t instanceof X509TrustManager) {
-                for (X509Certificate c : ((X509TrustManager) t).getAcceptedIssuers()) a.add(new TrustAnchor(c, null));
+                for (X509Certificate c : ((X509TrustManager) t).getAcceptedIssuers())
+                    a.add(new TrustAnchor(c, null));
             }
         }
         return a;
     }
 
-    /** Ставит сертификаты по цепочке: первый — сам сервер, дальше тот, кто выдал предыдущий. */
+    /**
+     * Ставит сертификаты по цепочке: первый — сам сервер, дальше тот, кто выдал предыдущий.
+     */
     private static List<X509Certificate> order(List<X509Certificate> in) {
         List<X509Certificate> left = new ArrayList<>(in), out = new ArrayList<>();
         out.add(left.remove(0));
@@ -121,7 +130,11 @@ final class Certs {
         return matches(leaf, host) ? null : "server certificate does not match " + host;
     }
 
-    /** Имя хоста должно быть в SAN (DNS или IP); поддерживается «*.» в первой метке. */
+    // ---------- подпись AUTH ----------
+
+    /**
+     * Имя хоста должно быть в SAN (DNS или IP); поддерживается «*.» в первой метке.
+     */
     static boolean matches(X509Certificate c, String host) {
         try {
             Collection<List<?>> san = c.getSubjectAlternativeNames();
@@ -142,9 +155,9 @@ final class Certs {
         return false;
     }
 
-    // ---------- подпись AUTH ----------
-
-    /** Из DER «SEQUENCE { OID ... }» достаёт точечную запись OID; null — не разобрать. */
+    /**
+     * Из DER «SEQUENCE { OID ... }» достаёт точечную запись OID; null — не разобрать.
+     */
     static String oid(byte[] d) {
         if (d.length < 4 || d[0] != 0x30 || d[2] != 0x06) return null;
         int len = d[3] & 0xff;
@@ -164,18 +177,24 @@ final class Certs {
 
     private static String algorithm(String oid) {
         switch (oid == null ? "" : oid) {
-            case "1.2.840.113549.1.1.5": return "SHA1withRSA";
-            case "1.2.840.113549.1.1.11": return "SHA256withRSA";
-            case "1.2.840.113549.1.1.12": return "SHA384withRSA";
-            case "1.2.840.113549.1.1.13": return "SHA512withRSA";
-            case "1.2.840.10045.4.3.2": return "SHA256withECDSA";
-            case "1.2.840.10045.4.3.3": return "SHA384withECDSA";
-            case "1.2.840.10045.4.3.4": return "SHA512withECDSA";
-            default: return null;
+            case "1.2.840.113549.1.1.5":
+                return "SHA1withRSA";
+            case "1.2.840.113549.1.1.11":
+                return "SHA256withRSA";
+            case "1.2.840.113549.1.1.12":
+                return "SHA384withRSA";
+            case "1.2.840.113549.1.1.13":
+                return "SHA512withRSA";
+            case "1.2.840.10045.4.3.2":
+                return "SHA256withECDSA";
+            case "1.2.840.10045.4.3.3":
+                return "SHA384withECDSA";
+            case "1.2.840.10045.4.3.4":
+                return "SHA512withECDSA";
+            default:
+                return null;
         }
     }
-
-    static final int RSA_SIG = 1, DIGITAL_SIG = 14;
 
     /**
      * Проверяет подпись сервера. authBody — тело payload AUTH (метод, 3 байта резерва, данные),

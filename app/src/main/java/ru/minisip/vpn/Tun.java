@@ -9,7 +9,9 @@ import java.net.DatagramSocket;
  */
 interface Tun {
 
-    /** Выводит сокет из-под VPN, чтобы IKE/ESP не попадали сами в себя. */
+    /**
+     * Выводит сокет из-под VPN, чтобы IKE/ESP не попадали сами в себя.
+     */
     boolean protect(DatagramSocket s);
 
     /**
@@ -19,7 +21,9 @@ interface Tun {
      */
     String open(String ip, String dns, String routes, int mtu, String apps);
 
-    /** Читает один IP-пакет (блокируется). -1 — интерфейс закрыт. */
+    /**
+     * Читает один IP-пакет (блокируется). -1 — интерфейс закрыт.
+     */
     int read(byte[] b) throws IOException;
 
     void write(byte[] b, int off, int len) throws IOException;
@@ -32,6 +36,8 @@ interface Tun {
         return false;
     }
 
-    /** Закрывает интерфейс; блокированный read должен вернуться. */
+    /**
+     * Закрывает интерфейс; блокированный read должен вернуться.
+     */
     void close();
 }

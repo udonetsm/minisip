@@ -11,26 +11,26 @@ import ru.minisip.net.Udp;
  */
 public interface Sip {
 
-    interface Listener {
-        default void onRegistered(boolean ok, String info) {}
-
-        default void onRinging() {}
-
-        default void onConnected() {}
-
-        /** Вызов закончился по любой причине (в том числе неудачный дозвон). */
-        default void onEnded(String reason) {}
+    static Sip create(Udp signalling, Media media) {
+        return new SipImpl(signalling, media);
     }
 
     void setListener(Listener l);
 
-    /** Куда писать отладочный лог; по умолчанию — никуда. */
-    default void setLogSink(LogSink sink) {}
+    /**
+     * Куда писать отладочный лог; по умолчанию — никуда.
+     */
+    default void setLogSink(LogSink sink) {
+    }
 
-    /** Открывает сокет и регистрируется на сервере; обновляет регистрацию сама. */
+    /**
+     * Открывает сокет и регистрируется на сервере; обновляет регистрацию сама.
+     */
     void register(String host, int port, String user, String password);
 
-    /** Отменяет регистрацию и закрывает сокет. */
+    /**
+     * Отменяет регистрацию и закрывает сокет.
+     */
     void unregister();
 
     void call(String number);
@@ -42,10 +42,25 @@ public interface Sip {
      */
     void transfer(String target);
 
-    /** Отмена / отбой — по состоянию вызова. */
+    /**
+     * Отмена / отбой — по состоянию вызова.
+     */
     void hangup();
 
-    static Sip create(Udp signalling, Media media) {
-        return new SipImpl(signalling, media);
+    interface Listener {
+        default void onRegistered(boolean ok, String info) {
+        }
+
+        default void onRinging() {
+        }
+
+        default void onConnected() {
+        }
+
+        /**
+         * Вызов закончился по любой причине (в том числе неудачный дозвон).
+         */
+        default void onEnded(String reason) {
+        }
     }
 }

@@ -14,17 +14,11 @@ final class Esp {
     private final Crypto.Box out, in;
     private final long spiOut, spiIn;
     private final int block;
-
+    // диагностика: сколько входящих отброшено и почему
+    volatile int dropSpi, dropReplay, dropIcv, dropFmt;
     private long seq;                         // последний отправленный номер
     private long top;                         // наибольший принятый номер
     private long window;                      // бит i = принят номер (top - i)
-
-    // диагностика: сколько входящих отброшено и почему
-    volatile int dropSpi, dropReplay, dropIcv, dropFmt;
-
-    String drops() {
-        return "dropSpi=" + dropSpi + " dropReplay=" + dropReplay + " dropIcv=" + dropIcv + " dropFmt=" + dropFmt;
-    }
 
     Esp(Crypto.Suite s, Crypto.Box out, Crypto.Box in, long spiOut, long spiIn) {
         this.out = out;
@@ -34,11 +28,24 @@ final class Esp {
         this.block = s.block();
     }
 
-     /** Наш исходящий SPI (он же SPI_R старого SA — нужен для INFORMATIONAL DELETE). */
-    long spiOut() { return spiOut; }
-    
-    /** Наш входящий SPI (для логов и DELETE). */
-    long spiIn() { return spiIn; }
+    String drops() {
+        return "dropSpi=" + dropSpi + " dropReplay=" + dropReplay + " dropIcv=" + dropIcv + " dropFmt=" + dropFmt;
+    }
+
+    /**
+     * Наш исходящий SPI (он же SPI_R старого SA — нужен для INFORMATIONAL DELETE).
+     */
+    long spiOut() {
+        return spiOut;
+    }
+
+    /**
+     * Наш входящий SPI (для логов и DELETE).
+     */
+    long spiIn() {
+        return spiIn;
+    }
+
     /**
      * IP-пакет b[0..n) -> готовый пакет ESP (его кладут в UDP как есть).
      * synchronized: исходящее теперь зовут два потока (tun -> сокет и ping из таймеров), а номер общий.
@@ -56,17 +63,34 @@ final class Esp {
         return out.seal(head, plain);
     }
 
-    /** Пакет ESP -> IP-пакет. null: чужой SPI, повтор, подделка, не IPv4 или мусор. */
+    /**
+     * Пакет ESP -> IP-пакет. null: чужой SPI, повтор, подделка, не IPv4 или мусор.
+     */
     byte[] unwrap(byte[] p, int n) {
-        if (n < HEAD + out.overhead()) { dropFmt++; return null; }
-        if (Crypto.u32(p, 0) != spiIn) { dropSpi++; return null; }
+        if (n < HEAD + out.overhead()) {
+            dropFmt++;
+            return null;
+        }
+        if (Crypto.u32(p, 0) != spiIn) {
+            dropSpi++;
+            return null;
+        }
         long s = Crypto.u32(p, 4);
-        if (replayed(s)) { dropReplay++; return null; }   // дёшево отбрасываем до расшифровки
+        if (replayed(s)) {
+            dropReplay++;
+            return null;
+        }   // дёшево отбрасываем до расшифровки
         byte[] plain = in.open(Arrays.copyOf(p, n), HEAD);
-        if (plain == null || plain.length < 2) { dropIcv++; return null; }
+        if (plain == null || plain.length < 2) {
+            dropIcv++;
+            return null;
+        }
         accept(s);                                    // номер засчитываем только после проверки ICV
         int pad = plain[plain.length - 2] & 0xff;
-        if (plain[plain.length - 1] != IPV4 || pad + 2 > plain.length) { dropFmt++; return null; }
+        if (plain[plain.length - 1] != IPV4 || pad + 2 > plain.length) {
+            dropFmt++;
+            return null;
+        }
         return Arrays.copyOf(plain, plain.length - 2 - pad);
     }
 

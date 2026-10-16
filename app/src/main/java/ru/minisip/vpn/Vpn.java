@@ -11,34 +11,37 @@ import ru.minisip.log.LogSink;
  */
 public interface Vpn {
 
-    interface Listener {
-        /** Туннель поднят; iface — имя tun-интерфейса, например "tun0". */
-        default void onUp(String iface) {}
-
-        /** Туннель не поднялся или упал; reason — причина для пользователя. */
-        default void onDown(String reason) {}
-
-        /**
-         * Поднятый туннель оборвался (нет ответа на ping, смена сети), другого VPN в системе нет:
-         * идёт переподключение. attempt — номер текущей попытки (1, 2, ...).
-         */
-        default void onReconnecting(String reason, int attempt) {}
-        default void onReconnecting(String reason) { onReconnecting(reason, 1); }
-        default void onPingLoss(int lostCount) {}
-
-        /** Перегенерация ключей (Child/IKE rekey) или связанное событие; info — краткое описание. */
-        default void onRekey(String info) {}
-    
+    static Vpn create(Context ctx) {
+        return new VpnImpl(ctx);
     }
-    default String dpdState() { return ""; }
-    default String extraStats() { return ""; }
-    default int pingEvaluated() { return 0; }
-    default void setStrict(boolean on) {}
-    /** Текущий режим watchdog: true — PBX (жёсткий), false — обычный VPN (мягкий). */
-    default boolean isStrict() { return false; }
 
-    /** Куда писать журнал событий (null — никуда). Строки без секретов. */
-    default void setLogSink(LogSink s) {}
+    default String dpdState() {
+        return "";
+    }
+
+    default String extraStats() {
+        return "";
+    }
+
+    default int pingEvaluated() {
+        return 0;
+    }
+
+    /**
+     * Текущий режим watchdog: true — PBX (жёсткий), false — обычный VPN (мягкий).
+     */
+    default boolean isStrict() {
+        return false;
+    }
+
+    default void setStrict(boolean on) {
+    }
+
+    /**
+     * Куда писать журнал событий (null — никуда). Строки без секретов.
+     */
+    default void setLogSink(LogSink s) {
+    }
 
     void setListener(Listener l);
     /** true — подключена АТС: wake lock и жёсткий watchdog. false — обычный VPN. */
@@ -70,12 +73,47 @@ public interface Vpn {
         connect(host, login, password, psk, ca, apps, null);
     }
 
-    /** Закрывает туннель и интерфейс. Можно звать в любом состоянии. */
+    /**
+     * Закрывает туннель и интерфейс. Можно звать в любом состоянии.
+     */
     void disconnect();
 
-    default boolean mobike() { return false; }
+    default boolean mobike() {
+        return false;
+    }
 
-    static Vpn create(Context ctx) {
-        return new VpnImpl(ctx);
+    interface Listener {
+        /**
+         * Туннель поднят; iface — имя tun-интерфейса, например "tun0".
+         */
+        default void onUp(String iface) {
+        }
+
+        /**
+         * Туннель не поднялся или упал; reason — причина для пользователя.
+         */
+        default void onDown(String reason) {
+        }
+
+        /**
+         * Поднятый туннель оборвался (нет ответа на ping, смена сети), другого VPN в системе нет:
+         * идёт переподключение. attempt — номер текущей попытки (1, 2, ...).
+         */
+        default void onReconnecting(String reason, int attempt) {
+        }
+
+        default void onReconnecting(String reason) {
+            onReconnecting(reason, 1);
+        }
+
+        default void onPingLoss(int lostCount) {
+        }
+
+        /**
+         * Перегенерация ключей (Child/IKE rekey) или связанное событие; info — краткое описание.
+         */
+        default void onRekey(String info) {
+        }
+
     }
 }

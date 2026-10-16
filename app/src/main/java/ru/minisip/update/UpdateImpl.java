@@ -12,13 +12,13 @@ import android.util.Log;
 
 import androidx.core.content.FileProvider;
 
-import ru.minisip.log.LogSink;
-
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.IOException;
 import java.io.File;
+import java.io.IOException;
+
+import ru.minisip.log.LogSink;
 
 /**
  * Реализация проверки и установки обновлений. Проверка и скачивание — в фоновом потоке,
@@ -43,6 +43,43 @@ final class UpdateImpl implements Update {
         cleanUpdates();
     }
 
+    /**
+     * stable-канал отдаёт объект, prerelease — массив; берём первый non-draft. Пусто → Code 404.
+     */
+    private static JSONObject parse(String body, boolean stable) throws Http.Code {
+        try {
+            if (stable) return new JSONObject(body);
+            JSONArray arr = new JSONArray(body);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject x = arr.optJSONObject(i);
+                if (x == null || x.optBoolean("draft", false)) continue;
+                return x;
+            }
+            throw new Http.Code(404, "no releases");
+        } catch (Http.Code c) {
+            throw c;
+        } catch (Exception e) {
+            throw new Http.Code(0, "bad json: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Первый asset с расширением .apk. null — релиз без APK.
+     */
+    private static String pickAsset(JSONObject rel) {
+        JSONArray a = rel.optJSONArray("assets");
+        if (a == null) return null;
+        for (int i = 0; i < a.length(); i++) {
+            JSONObject x = a.optJSONObject(i);
+            if (x == null) continue;
+            String name = x.optString("name", "");
+            if (name.toLowerCase().endsWith(".apk")) {
+                return x.optString("browser_download_url", null);
+            }
+        }
+        return null;
+    }
+
     @Override
     public void setLogSink(LogSink s) {
         sink = s;
@@ -53,7 +90,9 @@ final class UpdateImpl implements Update {
         persistent = l;
     }
 
-    /** Событие уходит и постоянному слушателю (полоса), и локальному из check/download. */
+    /**
+     * Событие уходит и постоянному слушателю (полоса), и локальному из check/download.
+     */
     private void emit(Runnable toPersistent, Runnable toLocal) {
         Listener p = persistent;
         main.post(() -> {
@@ -62,7 +101,9 @@ final class UpdateImpl implements Update {
         });
     }
 
-    /** Одна точка журнала: logcat и панель лога. Секреты сюда не передавать. */
+    /**
+     * Одна точка журнала: logcat и панель лога. Секреты сюда не передавать.
+     */
     private void log(String m) {
         Log.i(TAG, m);
         LogSink s = sink;
@@ -91,7 +132,9 @@ final class UpdateImpl implements Update {
         t.start();
     }
 
-    /** GET выбранного канала, парсинг, сравнение с lastUpdateTime. Под hasUpdate=true — download(). */
+    /**
+     * GET выбранного канала, парсинг, сравнение с lastUpdateTime. Под hasUpdate=true — download().
+     */
     private void checkIn(String ch, Listener l) {
         boolean stable = UpdateConfig.CH_STABLE.equals(ch);
         String url = stable ? UpdateConfig.STABLE : UpdateConfig.PRERELEASE;
@@ -110,8 +153,11 @@ final class UpdateImpl implements Update {
             log("check ok: tag=" + r.tag + " ms=" + r.releaseMs + " last=" + last
                     + " hasUpdate=" + r.hasUpdate);
             final Result fr = r;
-            emit(() -> { Listener p = persistent; if (p != null) p.onChecked(fr); },
-                 () -> l.onChecked(fr));
+            emit(() -> {
+                        Listener p = persistent;
+                        if (p != null) p.onChecked(fr);
+                    },
+                    () -> l.onChecked(fr));
             if (r.hasUpdate) download(l);
         } catch (Http.Code c) {
             log("check http " + c.code + ": " + c.getMessage());
@@ -119,45 +165,42 @@ final class UpdateImpl implements Update {
                 if (stable) {
                     r.noStable = true;
                     final Result fr = r;
-                    emit(() -> { Listener p = persistent; if (p != null) p.onChecked(fr); },
-                         () -> l.onChecked(fr));
+                    emit(() -> {
+                                Listener p = persistent;
+                                if (p != null) p.onChecked(fr);
+                            },
+                            () -> l.onChecked(fr));
                 } else {
-                    emit(() -> { Listener p = persistent; if (p != null) p.onError("No releases yet"); },
-                         () -> l.onError("No releases yet"));
+                    emit(() -> {
+                                Listener p = persistent;
+                                if (p != null) p.onError("No releases yet");
+                            },
+                            () -> l.onError("No releases yet"));
                 }
             } else {
                 final String msg = "HTTP " + c.code;
-                emit(() -> { Listener p = persistent; if (p != null) p.onError(msg); },
-                     () -> l.onError(msg));
+                emit(() -> {
+                            Listener p = persistent;
+                            if (p != null) p.onError(msg);
+                        },
+                        () -> l.onError(msg));
             }
         } catch (IOException e) {
             log("check io: " + e.getMessage());
             final String msg = "network: " + e.getMessage();
-            emit(() -> { Listener p = persistent; if (p != null) p.onError(msg); },
-                 () -> l.onError(msg));
+            emit(() -> {
+                        Listener p = persistent;
+                        if (p != null) p.onError(msg);
+                    },
+                    () -> l.onError(msg));
         } catch (Exception e) {
             log("check ex: " + e);
             final String msg = String.valueOf(e.getMessage());
-            emit(() -> { Listener p = persistent; if (p != null) p.onError(msg); },
-                 () -> l.onError(msg));
-        }
-    }
-
-    /** stable-канал отдаёт объект, prerelease — массив; берём первый non-draft. Пусто → Code 404. */
-    private static JSONObject parse(String body, boolean stable) throws Http.Code {
-        try {
-            if (stable) return new JSONObject(body);
-            JSONArray arr = new JSONArray(body);
-            for (int i = 0; i < arr.length(); i++) {
-                JSONObject x = arr.optJSONObject(i);
-                if (x == null || x.optBoolean("draft", false)) continue;
-                return x;
-            }
-            throw new Http.Code(404, "no releases");
-        } catch (Http.Code c) {
-            throw c;
-        } catch (Exception e) {
-            throw new Http.Code(0, "bad json: " + e.getMessage());
+            emit(() -> {
+                        Listener p = persistent;
+                        if (p != null) p.onError(msg);
+                    },
+                    () -> l.onError(msg));
         }
     }
 
@@ -170,28 +213,16 @@ final class UpdateImpl implements Update {
         }
     }
 
-    /** Первый asset с расширением .apk. null — релиз без APK. */
-    private static String pickAsset(JSONObject rel) {
-        JSONArray a = rel.optJSONArray("assets");
-        if (a == null) return null;
-        for (int i = 0; i < a.length(); i++) {
-            JSONObject x = a.optJSONObject(i);
-            if (x == null) continue;
-            String name = x.optString("name", "");
-            if (name.toLowerCase().endsWith(".apk")) {
-                return x.optString("browser_download_url", null);
-            }
-        }
-        return null;
-    }
-
     @Override
     public void download(Listener l) {
         final String url = assetUrl;
         final String tag = assetName;
         if (url == null) {
-            emit(() -> { Listener p = persistent; if (p != null) p.onError("No APK asset in release"); },
-                 () -> l.onError("No APK asset in release"));
+            emit(() -> {
+                        Listener p = persistent;
+                        if (p != null) p.onError("No APK asset in release");
+                    },
+                    () -> l.onError("No APK asset in release"));
             return;
         }
         Thread t = new Thread(() -> downloadIn(url, tag, l), "update-dl");
@@ -199,23 +230,34 @@ final class UpdateImpl implements Update {
         t.start();
     }
 
-    /** Скачивание APK в apkFile(). Прогресс — в onProgress, финал — в onDownloaded. */
+    /**
+     * Скачивание APK в apkFile(). Прогресс — в onProgress, финал — в onDownloaded.
+     */
     private void downloadIn(String url, String tag, Listener l) {
         log("download: " + tag + " " + url);
         File dst = apkFile();
         try {
             Http.download(url, dst, pc ->
-                    emit(() -> { Listener p = persistent; if (p != null) p.onProgress(pc); },
-                         () -> l.onProgress(pc)));
+                    emit(() -> {
+                                Listener p = persistent;
+                                if (p != null) p.onProgress(pc);
+                            },
+                            () -> l.onProgress(pc)));
             log("download ok: " + dst.length() + " bytes -> " + dst.getAbsolutePath());
             final File f = dst;
-            emit(() -> { Listener p = persistent; if (p != null) p.onDownloaded(f); },
-                 () -> l.onDownloaded(f));
+            emit(() -> {
+                        Listener p = persistent;
+                        if (p != null) p.onDownloaded(f);
+                    },
+                    () -> l.onDownloaded(f));
         } catch (IOException e) {
             log("download io: " + e.getMessage());
             final String msg = "download: " + e.getMessage();
-            emit(() -> { Listener p = persistent; if (p != null) p.onError(msg); },
-                 () -> l.onError(msg));
+            emit(() -> {
+                        Listener p = persistent;
+                        if (p != null) p.onError(msg);
+                    },
+                    () -> l.onError(msg));
         }
     }
 
@@ -244,7 +286,9 @@ final class UpdateImpl implements Update {
         ctx.startActivity(i);
     }
 
-    /** При старте приложения: удаляем APK, оставшийся от прошлой установки/скачивания. */
+    /**
+     * При старте приложения: удаляем APK, оставшийся от прошлой установки/скачивания.
+     */
     private void cleanUpdates() {
         File dir = new File(ctx.getExternalCacheDir(), "updates");
         if (!dir.isDirectory()) return;
@@ -255,7 +299,9 @@ final class UpdateImpl implements Update {
         log("clean: removed " + n + " old apk(s)");
     }
 
-    /** Файл APK в кэше. Создаётся по требованию на шаге 4. */
+    /**
+     * Файл APK в кэше. Создаётся по требованию на шаге 4.
+     */
     @SuppressWarnings("unused")
     File apkFile() {
         File dir = new File(ctx.getExternalCacheDir(), "updates");

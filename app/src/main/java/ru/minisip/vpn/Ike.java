@@ -25,36 +25,19 @@ final class Ike {
             NOTIFY = 41, DELETE = 42, TSI = 44, TSR = 45, SK = 46, CP = 47, EAP = 48;
     // типы обменов
     static final int INIT = 34, AUTHEX = 35, CHILD = 36, INFO = 37;
-    private static final int F_INITIATOR = 0x08, F_RESPONSE = 0x20;
     // notify
     static final int N_NO_PROPOSAL = 14, N_INVALID_KE = 17, N_AUTH_FAILED = 24, N_NO_ADDITIONAL_SAS = 35,
             N_INTERNAL_ADDRESS = 36, N_TS_UNACCEPTABLE = 38, N_NAT_SRC = 16388, N_NAT_DST = 16389,
-            N_COOKIE = 16390, N_SIG_HASHES = 16431;
-
-    /** Один payload: тип и тело без общего заголовка. */
-    static final class Pl {
-        final int type;
-        final byte[] body;
-
-        Pl(int type, byte[] body) {
-            this.type = type;
-            this.body = body;
-        }
-    }
-
-    /** Разобранное защищённое сообщение. */
-    static final class Rx {
-        int exch, id;
-        boolean response;
-        List<Pl> pl;
-    }
-
-    private static final class Chosen {
-        Crypto.Suite suite;
-        byte[] spi;
-        int dh = -1, esn = -1;
-    }
-
+            N_COOKIE = 16390, N_SIG_HASHES = 16431, N_REKEY_SA = 16393;
+    private static final int F_INITIATOR = 0x08, F_RESPONSE = 0x20;
+    // transform-типы
+    private static final int T_ENCR = 1, T_PRF = 2, T_INTEG = 3, T_DH = 4, T_ESN = 5;
+    private final byte[] identity, psk;
+    private final String password, host;
+    private final List<java.security.cert.X509Certificate> ownRoots;   // свои корни из настроек или null
+    private final boolean eap;                  // нет общего ключа — вход по логину и паролю (EAP-MSCHAPv2)
+    private final String caError;
+    private final int idType;
     // ---------- что узнали в ходе обмена (читает Tunnel) ----------
     String error;          // причина последней неудачи, по-человечески
     String ip;             // адрес клиента внутри туннеля
@@ -62,14 +45,20 @@ final class Ike {
     String routes = "";    // сети через туннель, «a.b.c.d/n» через пробел
     Esp esp;
     long spiOut;           // SPI, с которым шлём мы; сервер его же присылает в Delete
+    boolean mobike;
+    // состояние входа
+    byte[] next;                                // следующий запрос IKE_AUTH; null — вход завершён
+    int curId;                                  // номер последнего нашего запроса IKE_AUTH
+    /**
+     * SPI старого (заменяемого) IKE SA — нужны для DELETE.
+     */
+    byte[] oldSpiI, oldSpiR;
+    /**
+     * Мы — исходящий инициатор текущего IKE SA (флаг I, RFC 7296 §3.1). После IKE rekey им становится
+     * тот, кто начал обмен.
+     */
+    private boolean origInit = true;
     private int nextId = 1;                     // 0 занят под IKE_SA_INIT, AUTH = 1, дальше DPD и Delete
-    boolean mobike; 
-    private final byte[] identity, psk;
-    private final String password, host;
-    private final List<java.security.cert.X509Certificate> ownRoots;   // свои корни из настроек или null
-    private final boolean eap;                  // нет общего ключа — вход по логину и паролю (EAP-MSCHAPv2)
-    private final String caError;
-    private final int idType;
     private byte[] spiI, spiR = new byte[8], ni, nr, cookie, msg1, msg2, skD, skPi, skPr;
     private BigInteger dhX;
     private byte[] kePub;
@@ -77,13 +66,39 @@ final class Ike {
     private Crypto.Box boxOut, boxIn;
     private long spiIn;
     private int peerNext;                       // следующий ожидаемый номер запроса от сервера
-
-    // состояние входа
-    byte[] next;                                // следующий запрос IKE_AUTH; null — вход завершён
-    int curId;                                  // номер последнего нашего запроса IKE_AUTH
     private int stage;                          // 0: ждём ответ с сертификатом; 1: идёт EAP; 2: ждём итог
     private byte[] myId, idr, msk, authCh, peerCh, ntResp;
     private int mschapId;
+    private int ackFloor = 1;                   // меньше этого номера все наши запросы сервер подтвердил
+    /**
+     * Номер нашего CREATE_CHILD_SA; -1 — rekey не идёт.
+     */
+    private int childRekeyId = -1;
+    /**
+     * Наш новый входящий SPI (SPI_I), уходит в SA-предложение.
+     */
+    private byte[] childRekeySpiI;
+    /**
+     * Новый исходящий SPI от сервера (SPI_R), из ответа.
+     */
+    private byte[] childRekeySpiR;
+    private byte[] childRekeyNi;                // наш nonce
+    private byte[] childRekeyNr;                // nonce сервера
+    private BigInteger childRekeyX;             // наша DH-пара (PFS)
+
+    // =====================================================================
+    // Сборка и разбор payload'ов
+    // =====================================================================
+    private byte[] childRekeyKe;                // наш KEi
+    /**
+     * Номер нашего CREATE_CHILD_SA для IKE rekey; -1 — не идёт.
+     */
+    private int ikeRekeyId = -1;
+    private byte[] ikeRekeySpiI;       // наш новый 8-байтный SPI (в SA-предложении)
+    private byte[] ikeRekeySpiR;       // SPI сервера (из ответа)
+    private byte[] ikeRekeyNi, ikeRekeyNr;
+    private BigInteger ikeRekeyX;
+    private byte[] ikeRekeyKe;
 
     /**
      * psk непустой — вход по общему ключу. Иначе EAP-MSCHAPv2: identity — логин, password — пароль,
@@ -100,32 +115,6 @@ final class Ike {
         this.caError = !ca.trim().isEmpty() && roots == null ? "cannot read the CA certificate (PEM expected)" : null;
         this.idType = identity.contains("@") ? 3 : identity.matches("\\d+\\.\\d+\\.\\d+\\.\\d+") ? 1 : 2;
     }
-
-    /** Ошибка настроек до выхода в сеть, или null. */
-    String check() {
-        return caError;
-    }
-
-    /** Номер следующего нашего запроса (AUTH, DPD, Delete); зовут из разных потоков. */
-    synchronized int nextId() {
-        return nextId++;
-    }
-
-    private int ackFloor = 1;                   // меньше этого номера все наши запросы сервер подтвердил
-
-    /** Пришёл проверенный ответ на наш запрос с номером id. */
-    synchronized void acked(int id) {
-        if (id >= ackFloor) ackFloor = id + 1;
-    }
-
-    /** Первый номер, которого сервер мог ещё не получить. */
-    synchronized int ackFloor() {
-        return ackFloor;
-    }
-
-    // =====================================================================
-    // Сборка и разбор payload'ов
-    // =====================================================================
 
     static byte[] chain(List<Pl> l) {
         byte[][] parts = new byte[l.size()][];
@@ -154,19 +143,6 @@ final class Ike {
         return r;
     }
 
-    private byte[] header(int next, int exch, int flags, int id, int len) {
-        byte[] h = new byte[28];
-        System.arraycopy(spiI, 0, h, 0, 8);
-        System.arraycopy(spiR, 0, h, 8, 8);
-        h[16] = (byte) next;
-        h[17] = 0x20;                                  // версия 2.0
-        h[18] = (byte) exch;
-        h[19] = (byte) flags;
-        put32(h, 20, id);
-        put32(h, 24, len);
-        return h;
-    }
-
     static Pl notify(int type, byte[] data) {
         byte[] b = new byte[4 + data.length];
         put16(b, 2, type);                             // protocol id = 0, SPI нет
@@ -188,7 +164,9 @@ final class Ike {
         return t;
     }
 
-    /** Одно предложение: transforms = {type, id, keyBits}... Последний transform помечается last. */
+    /**
+     * Одно предложение: transforms = {type, id, keyBits}... Последний transform помечается last.
+     */
     private static byte[] proposal(boolean more, int num, int proto, byte[] spi, int[][] tr) {
         byte[][] parts = new byte[tr.length][];
         for (int i = 0; i < tr.length; i++) {
@@ -205,10 +183,9 @@ final class Ike {
         return cat(h, spi, body);
     }
 
-    // transform-типы
-    private static final int T_ENCR = 1, T_PRF = 2, T_INTEG = 3, T_DH = 4, T_ESN = 5;
-
-    /** SA для IKE: AES-CBC + HMAC-SHA2-256/SHA1 или AES-GCM, DH 14. */
+    /**
+     * SA для IKE: AES-CBC + HMAC-SHA2-256/SHA1 или AES-GCM, DH 14.
+     */
     private static byte[] saIke() {
         int[][] cbc = {{T_ENCR, 12, 256}, {T_ENCR, 12, 128}, {T_PRF, 5, 0}, {T_PRF, 2, 0},
                 {T_INTEG, 12, 0}, {T_INTEG, 2, 0}, {T_DH, Crypto.DH_GROUP, 0}};
@@ -217,14 +194,22 @@ final class Ike {
         return cat(proposal(true, 1, 1, new byte[0], cbc), proposal(false, 2, 1, new byte[0], gcm));
     }
 
-    /** SA для ESP с нашим входящим SPI. ESN выключен. */
+    /**
+     * SA для ESP с нашим входящим SPI. ESN выключен.
+     */
     private static byte[] saEsp(byte[] spi) {
         int[][] cbc = {{T_ENCR, 12, 256}, {T_ENCR, 12, 128}, {T_INTEG, 12, 0}, {T_INTEG, 2, 0}, {T_ESN, 0, 0}};
         int[][] gcm = {{T_ENCR, 20, 256}, {T_ENCR, 20, 128}, {T_ESN, 0, 0}};
         return cat(proposal(true, 1, 3, spi, cbc), proposal(false, 2, 3, spi, gcm));
     }
 
-    /** Разбирает SA с единственным выбранным предложением нужного протокола; null — не наше. */
+    // =====================================================================
+    // IKE_SA_INIT
+    // =====================================================================
+
+    /**
+     * Разбирает SA с единственным выбранным предложением нужного протокола; null — не наше.
+     */
     private static Chosen parseSa(byte[] b, int proto) {
         if (b.length < 8 || (b[5] & 0xff) != proto) return null;
         int spiLen = b[6] & 0xff, n = b[7] & 0xff, off = 8 + spiLen;
@@ -238,12 +223,24 @@ final class Ike {
             if (len < 8 || off + len > b.length) return null;
             int keyBits = len >= 12 && u16(b, off + 8) == 0x800E ? u16(b, off + 10) : 0;
             switch (type) {
-                case T_ENCR: encr = id; bits = keyBits; break;
-                case T_PRF: prf = id; break;
-                case T_INTEG: integ = id; break;
-                case T_DH: c.dh = id; break;
-                case T_ESN: c.esn = id; break;
-                default: return null;
+                case T_ENCR:
+                    encr = id;
+                    bits = keyBits;
+                    break;
+                case T_PRF:
+                    prf = id;
+                    break;
+                case T_INTEG:
+                    integ = id;
+                    break;
+                case T_DH:
+                    c.dh = id;
+                    break;
+                case T_ESN:
+                    c.esn = id;
+                    break;
+                default:
+                    return null;
             }
             off += len;
         }
@@ -269,7 +266,13 @@ final class Ike {
         return (a >> 24 & 255) + "." + (a >> 16 & 255) + "." + (a >> 8 & 255) + "." + (a & 255);
     }
 
-    /** Диапазон адресов [a, b] -> минимальный набор подсетей «addr/len». */
+    // =====================================================================
+    // Защищённые сообщения (SK)
+    // =====================================================================
+
+    /**
+     * Диапазон адресов [a, b] -> минимальный набор подсетей «addr/len».
+     */
     static void cidr(long a, long b, StringBuilder out) {
         while (a <= b) {
             long size = a == 0 ? 1L << 32 : Long.lowestOneBit(a);
@@ -280,15 +283,102 @@ final class Ike {
         }
     }
 
+    private static String notifyText(int t) {
+        switch (t) {
+            case N_NO_PROPOSAL:
+                return "server rejected our algorithms (NO_PROPOSAL_CHOSEN)";
+            case N_INVALID_KE:
+                return "server wants another DH group (only group 14 is supported)";
+            case N_AUTH_FAILED:
+                return "authentication failed";
+            case N_TS_UNACCEPTABLE:
+                return "server rejected the traffic selectors";
+            case N_INTERNAL_ADDRESS:
+                return "server could not assign an address";
+            default:
+                return "server error " + t;
+        }
+    }
+
+    // =====================================================================
+    // IKE_AUTH: по общему ключу (один обмен) или EAP-MSCHAPv2 (пять обменов)
+    // =====================================================================
+
+    private static Pl find(Rx r, int type) {
+        for (Pl p : r.pl) if (p.type == type) return p;
+        return null;
+    }
+
+    private static byte[] eapPacket(int code, int id, int type, byte[] data) {
+        int len = 4 + (type >= 0 ? 1 : 0) + data.length;
+        byte[] b = new byte[len];
+        b[0] = (byte) code;
+        b[1] = (byte) id;
+        put16(b, 2, len);
+        if (type >= 0) b[4] = (byte) type;
+        System.arraycopy(data, 0, b, len - data.length, data.length);
+        return b;
+    }
+
+    /**
+     * SA для IKE SA rekey: то же, что saIke(), но с 8-байтным SPI инициатора в предложении.
+     */
+    private static byte[] saIkeRekey(byte[] spi) {
+        int[][] cbc = {{T_ENCR, 12, 256}, {T_ENCR, 12, 128}, {T_PRF, 5, 0}, {T_PRF, 2, 0},
+                {T_INTEG, 12, 0}, {T_INTEG, 2, 0}, {T_DH, Crypto.DH_GROUP, 0}};
+        int[][] gcm = {{T_ENCR, 20, 256}, {T_ENCR, 20, 128}, {T_PRF, 5, 0}, {T_PRF, 2, 0},
+                {T_DH, Crypto.DH_GROUP, 0}};
+        return cat(proposal(true, 1, 1, spi, cbc), proposal(false, 2, 1, spi, gcm));
+    }
+
+    /**
+     * Ошибка настроек до выхода в сеть, или null.
+     */
+    String check() {
+        return caError;
+    }
+
+    /**
+     * Номер следующего нашего запроса (AUTH, DPD, Delete); зовут из разных потоков.
+     */
+    synchronized int nextId() {
+        return nextId++;
+    }
+
+    /**
+     * Пришёл проверенный ответ на наш запрос с номером id.
+     */
+    synchronized void acked(int id) {
+        if (id >= ackFloor) ackFloor = id + 1;
+    }
+
+    /**
+     * Первый номер, которого сервер мог ещё не получить.
+     */
+    synchronized int ackFloor() {
+        return ackFloor;
+    }
+
+    private byte[] header(int next, int exch, int flags, int id, int len) {
+        byte[] h = new byte[28];
+        System.arraycopy(spiI, 0, h, 0, 8);
+        System.arraycopy(spiR, 0, h, 8, 8);
+        h[16] = (byte) next;
+        h[17] = 0x20;                                  // версия 2.0
+        h[18] = (byte) exch;
+        h[19] = (byte) flags;
+        put32(h, 20, id);
+        put32(h, 24, len);
+        return h;
+    }
+
     private byte[] idBody() {
         return cat(new byte[]{(byte) idType, 0, 0, 0}, identity);
     }
 
-    // =====================================================================
-    // IKE_SA_INIT
-    // =====================================================================
-
-    /** Первый запрос (или повтор с cookie). srv — IPv4 сервера, port — его порт IKE. */
+    /**
+     * Первый запрос (или повтор с cookie). srv — IPv4 сервера, port — его порт IKE.
+     */
     byte[] initRequest(byte[] srv, int port) {
         if (spiI == null) {
             spiI = Crypto.random(8);
@@ -320,7 +410,9 @@ final class Ike {
         return msg1;
     }
 
-    /** Ответ на INIT: 0 — принят, 1 — сервер просит cookie (повторить initRequest), -1 — ошибка. */
+    /**
+     * Ответ на INIT: 0 — принят, 1 — сервер просит cookie (повторить initRequest), -1 — ошибка.
+     */
     int onInit(byte[] m) {
         if (m.length < 28 || !Arrays.equals(Arrays.copyOf(m, 8), spiI) || (m[19] & F_RESPONSE) == 0
                 || (m[18] & 0xff) != INIT || u32(m, 20) != 0 || u32(m, 24) != m.length) {
@@ -377,22 +469,13 @@ final class Ike {
         return -1;
     }
 
-    private static String notifyText(int t) {
-        switch (t) {
-            case N_NO_PROPOSAL: return "server rejected our algorithms (NO_PROPOSAL_CHOSEN)";
-            case N_INVALID_KE: return "server wants another DH group (only group 14 is supported)";
-            case N_AUTH_FAILED: return "authentication failed";
-            case N_TS_UNACCEPTABLE: return "server rejected the traffic selectors";
-            case N_INTERNAL_ADDRESS: return "server could not assign an address";
-            default: return "server error " + t;
-        }
-    }
-
     // =====================================================================
-    // Защищённые сообщения (SK)
+    // Child SA rekey (RFC 7296 §2.8.2). Инициатор: наш CREATE_CHILD_SA с PFS.
     // =====================================================================
 
-    /** Упаковывает payload'ы в зашифрованное сообщение IKE. */
+    /**
+     * Упаковывает payload'ы в зашифрованное сообщение IKE.
+     */
     byte[] seal(int exch, boolean response, int id, List<Pl> l) {
         byte[] in = chain(l);
         int block = suite.block();
@@ -401,18 +484,20 @@ final class Ike {
         System.arraycopy(in, 0, plain, 0, in.length);
         plain[plain.length - 1] = (byte) pad;
         int total = 28 + 4 + boxOut.overhead() + plain.length;
-        byte[] head = cat(header(SK, exch, response ? F_RESPONSE : F_INITIATOR, id, total),
+        byte[] head = cat(header(SK, exch, (origInit ? F_INITIATOR : 0) | (response ? F_RESPONSE : 0), id, total),
                 new byte[4]);
         head[28] = (byte) (l.isEmpty() ? 0 : l.get(0).type);
         put16(head, 30, total - 28);
         return boxOut.seal(head, plain);
     }
 
-    /** Проверяет и разбирает сообщение от сервера; null, если оно не наше или не проходит проверку. */
+    /**
+     * Проверяет и разбирает сообщение от сервера; null, если оно не наше или не проходит проверку.
+     */
     Rx open(byte[] m) {
         if (m.length < 32 + boxIn.overhead() || !Arrays.equals(Arrays.copyOf(m, 8), spiI)
                 || !Arrays.equals(Arrays.copyOfRange(m, 8, 16), spiR) || u32(m, 24) != m.length
-                || (m[16] & 0xff) != SK || (m[19] & F_INITIATOR) != 0) {
+                || (m[16] & 0xff) != SK || ((m[19] & F_INITIATOR) != 0) == origInit) {
             return null;
         }
         byte[] plain = boxIn.open(m, 32);
@@ -433,10 +518,6 @@ final class Ike {
         return r;
     }
 
-    // =====================================================================
-    // IKE_AUTH: по общему ключу (один обмен) или EAP-MSCHAPv2 (пять обменов)
-    // =====================================================================
-
     private byte[] authValue(byte[] secret, byte[] signedPrefix, byte[] nonce, byte[] sk, byte[] idBody) {
         byte[] key = suite.prf(secret, "Key Pad for IKEv2".getBytes(StandardCharsets.US_ASCII));
         return suite.prf(key, signedPrefix, nonce, suite.prf(sk, idBody));
@@ -451,7 +532,9 @@ final class Ike {
         return new Pl(AUTH, cat(new byte[]{2, 0, 0, 0}, authValue(secret, msg1, nr, skPi, myId)));  // метод 2 = общий ключ
     }
 
-    /** Первый запрос IKE_AUTH. С общим ключом сразу с AUTH; в режиме EAP AUTH нет — это и есть признак EAP. */
+    /**
+     * Первый запрос IKE_AUTH. С общим ключом сразу с AUTH; в режиме EAP AUTH нет — это и есть признак EAP.
+     */
     byte[] authRequest() {
         byte[] spi = new byte[4];
         do {
@@ -481,7 +564,8 @@ final class Ike {
             return "IKE_AUTH reply is damaged or cut off (" + m.length + " of " + u32(m, 24) + " bytes)";
         }
         Rx r = open(m);
-        if (r == null) return "bad or forged IKE_AUTH reply (cannot decrypt: wrong keys or algorithms?)";
+        if (r == null)
+            return "bad or forged IKE_AUTH reply (cannot decrypt: wrong keys or algorithms?)";
         if (!r.response || r.exch != AUTHEX || r.id != curId) return "bad or forged IKE_AUTH reply";
         for (Pl p : r.pl) {
             if (p.type == NOTIFY && p.body.length >= 4 && u16(p.body, 2) < 16384) {
@@ -497,29 +581,31 @@ final class Ike {
         }
         if (!eap) return complete(r, psk);
         switch (stage) {
-            case 0: return serverProof(r);
-            case 1: return eapStep(r);
-            default: return complete(r, msk);
+            case 0:
+                return serverProof(r);
+            case 1:
+                return eapStep(r);
+            default:
+                return complete(r, msk);
         }
     }
 
-    private static Pl find(Rx r, int type) {
-        for (Pl p : r.pl) if (p.type == type) return p;
-        return null;
-    }
-
-    /** Ответ №1 в режиме EAP: IDr, сертификат и подпись сервера, затем первый EAP-запрос. */
+    /**
+     * Ответ №1 в режиме EAP: IDr, сертификат и подпись сервера, затем первый EAP-запрос.
+     */
     private String serverProof(Rx r) {
         Pl pi = find(r, IDR), pa = find(r, AUTH);
         if (pi == null || pa == null || pa.body.length < 5) return "incomplete IKE_AUTH reply";
         idr = pi.body;
         List<java.security.cert.X509Certificate> chain = new ArrayList<>();
         for (Pl p : r.pl) {
-            if (p.type != CERT || p.body.length < 2 || p.body[0] != 4) continue;   // 4 = X.509, подпись
+            if (p.type != CERT || p.body.length < 2 || p.body[0] != 4)
+                continue;   // 4 = X.509, подпись
             java.security.cert.X509Certificate c = Certs.parseDer(Arrays.copyOfRange(p.body, 1, p.body.length));
             if (c != null) chain.add(c);
         }
-        if (chain.isEmpty()) return "server sent no certificate (login and password need a server certificate)";
+        if (chain.isEmpty())
+            return "server sent no certificate (login and password need a server certificate)";
         String err = Certs.verify(chain, ownRoots, host);
         if (err != null) return err;
         err = Certs.verifySig(chain.get(0), pa.body, cat(msg2, ni, suite.prf(skPr, idr)));
@@ -530,21 +616,13 @@ final class Ike {
         return eapStep(r);
     }
 
-    private static byte[] eapPacket(int code, int id, int type, byte[] data) {
-        int len = 4 + (type >= 0 ? 1 : 0) + data.length;
-        byte[] b = new byte[len];
-        b[0] = (byte) code;
-        b[1] = (byte) id;
-        put16(b, 2, len);
-        if (type >= 0) b[4] = (byte) type;
-        System.arraycopy(data, 0, b, len - data.length, data.length);
-        return b;
-    }
-
-    /** Один шаг EAP: читает запрос сервера и готовит next (или завершает EAP). */
+    /**
+     * Один шаг EAP: читает запрос сервера и готовит next (или завершает EAP).
+     */
     private String eapStep(Rx r) {
         Pl e = find(r, EAP);
-        if (e == null || e.body.length < 4 || u16(e.body, 2) > e.body.length) return "EAP message expected";
+        if (e == null || e.body.length < 4 || u16(e.body, 2) > e.body.length)
+            return "EAP message expected";
         int code = e.body[0] & 0xff, id = e.body[1] & 0xff, len = u16(e.body, 2);
         if (code == 4) return "wrong login or password";
         if (code == 3) {                                           // EAP Success: ключ есть, шлём итоговый AUTH
@@ -568,7 +646,9 @@ final class Ike {
         return null;
     }
 
-    /** MS-CHAPv2 (RFC 2759 + draft-kamath): Challenge -> Response, Success -> подтверждение. */
+    /**
+     * MS-CHAPv2 (RFC 2759 + draft-kamath): Challenge -> Response, Success -> подтверждение.
+     */
     private byte[] mschap(int eapId, byte[] d) {
         error = null;
         if (d.length < 4) return null;
@@ -606,26 +686,41 @@ final class Ike {
         return null;
     }
 
-    /** Последний ответ: AUTH (по общему ключу или MSK), CP, SA, TS. Заполняет ip, dns, routes, esp. */
+    /**
+     * Последний ответ: AUTH (по общему ключу или MSK), CP, SA, TS. Заполняет ip, dns, routes, esp.
+     */
     private String complete(Rx r, byte[] secret) {
         byte[] id = null, auth = null, cp = null, tsr = null;
         Chosen sa = null;
         for (Pl p : r.pl) {
             switch (p.type) {
-                case EAP: return "server asks for EAP, enter a login and password instead of a key";
-                case IDR: id = p.body; break;
-                case AUTH: auth = p.body; break;
-                case CP: cp = p.body; break;
-                case SA: sa = parseSa(p.body, 3); break;
-                case TSR: tsr = p.body; break;
+                case EAP:
+                    return "server asks for EAP, enter a login and password instead of a key";
+                case IDR:
+                    id = p.body;
+                    break;
+                case AUTH:
+                    auth = p.body;
+                    break;
+                case CP:
+                    cp = p.body;
+                    break;
+                case SA:
+                    sa = parseSa(p.body, 3);
+                    break;
+                case TSR:
+                    tsr = p.body;
+                    break;
                 case NOTIFY:
                     if (p.body.length >= 4 && u16(p.body, 2) == N_MOBIKE_SUPPORTED) mobike = true;
                     break;
-                default: break;
+                default:
+                    break;
             }
         }
         if (id == null) id = idr;
-        if (id == null || auth == null || sa == null || cp == null || tsr == null) return "incomplete IKE_AUTH reply";
+        if (id == null || auth == null || sa == null || cp == null || tsr == null)
+            return "incomplete IKE_AUTH reply";
         if ((auth[0] & 0xff) != 2) return "server uses a certificate, enter a login and password";
         byte[] want = authValue(secret, msg2, ni, skPr, id);
         if (!java.security.MessageDigest.isEqual(want, Arrays.copyOfRange(auth, 4, auth.length))) {
@@ -651,7 +746,7 @@ final class Ike {
         Crypto.Suite c = sa.suite;
         int e = c.encKeyLen(), i = c.integKeyLen();
         byte[] k = suite.prfPlus(skD, cat(ni, nr), 2 * (e + i));
-                // RFC 7296, п. 2.17: KEYMAT = prf+(SK_d, Ni | Nr), затем
+        // RFC 7296, п. 2.17: KEYMAT = prf+(SK_d, Ni | Nr), затем
         //   init_enc [0..e) | resp_enc [e..2e) | init_integ [2e..2e+i) | resp_integ [2e+i..2e+2i)
         // (для AEAD e включает 4 байта соли, i = 0).
         Crypto.Box out = new Crypto.Box(c,
@@ -665,8 +760,10 @@ final class Ike {
         return null;
     }
 
-    /** Тело запроса INFORMATIONAL для смены пути (MOBIKE). Адрес источника в хеше «неверный», как и в INIT:
-     *  сервер продолжает считать нас за NAT и шлёт ESP внутри UDP 4500 на адрес, с которого пришёл запрос. */
+    /**
+     * Тело запроса INFORMATIONAL для смены пути (MOBIKE). Адрес источника в хеше «неверный», как и в INIT:
+     * сервер продолжает считать нас за NAT и шлёт ESP внутри UDP 4500 на адрес, с которого пришёл запрос.
+     */
     List<Pl> mobikeUpdate(byte[] srv, int port) {
         byte[] p = new byte[2];
         put16(p, 0, port);
@@ -678,36 +775,36 @@ final class Ike {
     }
 
     // =====================================================================
-    // Child SA rekey (RFC 7296 §2.8.2). Инициатор: наш CREATE_CHILD_SA с PFS.
+    // IKE SA rekey (RFC 7296 §2.8). Инициатор: наш CREATE_CHILD_SA с новым SPIi.
+    // DH обязателен — на новом IKE SA обеспечивается PFS (RFC 7296 §2.18).
     // =====================================================================
 
-    /** Номер нашего CREATE_CHILD_SA; -1 — rekey не идёт. */
-    private int childRekeyId = -1;
-    /** Наш новый входящий SPI (SPI_I), уходит в SA-предложение. */
-    private byte[] childRekeySpiI;
-    /** Новый исходящий SPI от сервера (SPI_R), из ответа. */
-    private byte[] childRekeySpiR;
-    private byte[] childRekeyNi;                // наш nonce
-    private byte[] childRekeyNr;                // nonce сервера
-    private BigInteger childRekeyX;             // наша DH-пара (PFS)
-    private byte[] childRekeyKe;                // наш KEi
+    /**
+     * Идёт ли сейчас наш rekey Child SA.
+     */
+    boolean childRekeyPending() {
+        return childRekeyId >= 0;
+    }
 
-    /** Идёт ли сейчас наш rekey Child SA. */
-    boolean childRekeyPending() { return childRekeyId >= 0; }
-
-    /** Номер текущего rekey-запроса (для сверки в Tunnel.onIke). -1 — нет. */
-    int childRekeyId() { return childRekeyId; }
+    /**
+     * Номер текущего rekey-запроса (для сверки в Tunnel.onIke). -1 — нет.
+     */
+    int childRekeyId() {
+        return childRekeyId;
+    }
 
     /**
      * Payload'ы CREATE_CHILD_SA для Child rekey (RFC 7296 §2.8.2): SA, Ni, KEi, TSi, TSR.
      * PFS включён — KE обязателен. Вызывающий сам шлёт через seal(CHILD, false, childRekeyId(), pls).
      * null — rekey уже идёт.
      */
-    List<Pl> rekeyChildPl() {
+    List<Pl> rekeyChildPl(long oldSpiIn) {
         if (childRekeyId >= 0) return null;
         childRekeyId = nextId();
         childRekeySpiI = new byte[4];
-        do { Crypto.RND.nextBytes(childRekeySpiI); } while (u32(childRekeySpiI, 0) == 0);
+        do {
+            Crypto.RND.nextBytes(childRekeySpiI);
+        } while (u32(childRekeySpiI, 0) == 0);
         childRekeyNi = Crypto.random(32);
         childRekeyX = Crypto.dhPrivate();
         childRekeyKe = Crypto.dhPublic(childRekeyX);
@@ -715,6 +812,13 @@ final class Ike {
         put16(ke, 0, Crypto.DH_GROUP);
         System.arraycopy(childRekeyKe, 0, ke, 4, childRekeyKe.length);
         List<Pl> l = new ArrayList<>();
+        // RFC 7296 §1.3.3: N(REKEY_SA) с SPI заменяемого SA — тем, что мы ждём во входящих ESP; идёт первым
+        byte[] rk = new byte[8];
+        rk[0] = 3;                                     // протокол ESP
+        rk[1] = 4;                                     // длина SPI
+        put16(rk, 2, N_REKEY_SA);
+        put32(rk, 4, oldSpiIn);
+        l.add(new Pl(NOTIFY, rk));
         l.add(new Pl(SA, saEsp(childRekeySpiI)));
         l.add(new Pl(NONCE, childRekeyNi));
         l.add(new Pl(KE, ke));
@@ -747,7 +851,10 @@ final class Ike {
             return null;
         }
         byte[] g = Crypto.dhShared(childRekeyX, ke);
-        if (g == null) { error = "bad DH in Child rekey reply"; return null; }
+        if (g == null) {
+            error = "bad DH in Child rekey reply";
+            return null;
+        }
         childRekeySpiR = sa.spi;
         childRekeyNr = nrNew;
         Crypto.Suite c = sa.suite;
@@ -766,48 +873,21 @@ final class Ike {
         return new Esp(c, out, in, newSpiOut, newSpiIn);
     }
 
-    
-    /** Сброс незавершённого rekey: таймаут ответа или проигранная коллизия. */
+    /**
+     * Сброс незавершённого rekey: таймаут ответа или проигранная коллизия.
+     */
     void abortChildRekey() {
         childRekeyId = -1;
         childRekeySpiI = childRekeySpiR = childRekeyNi = childRekeyNr = childRekeyKe = null;
         childRekeyX = null;
     }
-    
-    // =====================================================================
-    // IKE SA rekey (RFC 7296 §2.8). Инициатор: наш CREATE_CHILD_SA с новым SPIi.
-    // DH обязателен — на новом IKE SA обеспечивается PFS (RFC 7296 §2.18).
-    // =====================================================================
 
-    /** Номер нашего CREATE_CHILD_SA для IKE rekey; -1 — не идёт. */
-    private int ikeRekeyId = -1;
-    private byte[] ikeRekeySpiI;       // наш новый 8-байтный SPI (в SA-предложении)
-    private byte[] ikeRekeySpiR;       // SPI сервера (из ответа)
-    private byte[] ikeRekeyNi, ikeRekeyNr;
-    private BigInteger ikeRekeyX;
-    private byte[] ikeRekeyKe;
-
-    boolean ikeRekeyPending() { return ikeRekeyId >= 0; }
-    int ikeRekeyId() { return ikeRekeyId; }
-
-    /**
-     * Результат разбора ответа на IKE SA rekey: новые SPI и ключи, но БЕЗ установки.
-     * Установка (замена spiI/spiR/boxOut/boxIn/skD/skPi/skPr) — задача Tunnel, шаг 4b.
-     */
-    static final class IkeRekeyMaterial {
-        byte[] newSpiI, newSpiR;
-        Crypto.Suite newSuite;
-        Crypto.Box newBoxOut, newBoxIn;
-        byte[] newSkD, newSkPi, newSkPr;
+    boolean ikeRekeyPending() {
+        return ikeRekeyId >= 0;
     }
 
-    /** SA для IKE SA rekey: то же, что saIke(), но с 8-байтным SPI инициатора в предложении. */
-    private static byte[] saIkeRekey(byte[] spi) {
-        int[][] cbc = {{T_ENCR, 12, 256}, {T_ENCR, 12, 128}, {T_PRF, 5, 0}, {T_PRF, 2, 0},
-                {T_INTEG, 12, 0}, {T_INTEG, 2, 0}, {T_DH, Crypto.DH_GROUP, 0}};
-        int[][] gcm = {{T_ENCR, 20, 256}, {T_ENCR, 20, 128}, {T_PRF, 5, 0}, {T_PRF, 2, 0},
-                {T_DH, Crypto.DH_GROUP, 0}};
-        return cat(proposal(true, 1, 1, spi, cbc), proposal(false, 2, 1, spi, gcm));
+    int ikeRekeyId() {
+        return ikeRekeyId;
     }
 
     /**
@@ -856,13 +936,16 @@ final class Ike {
             return null;
         }
         byte[] g = Crypto.dhShared(ikeRekeyX, ke);
-        if (g == null) { error = "bad DH in IKE rekey reply"; return null; }
+        if (g == null) {
+            error = "bad DH in IKE rekey reply";
+            return null;
+        }
         ikeRekeySpiR = sa.spi;
         ikeRekeyNr = nrNew;
-        // RFC 7296 §2.18: SKEYSEED = prf(Ni | Nr, g^ir_new),
-        // keymat = prf+(SKEYSEED, Ni | Nr | SPIi | SPIr).
+        // RFC 7296 §2.18: SKEYSEED = prf(SK_d(old), g^ir_new | Ni | Nr) — PRF старого SA,
+        // keymat = prf+(SKEYSEED, Ni | Nr | SPIi | SPIr) — PRF нового SA.
         Crypto.Suite c = sa.suite;
-        byte[] seed = c.prf(cat(ikeRekeyNi, ikeRekeyNr), g);
+        byte[] seed = suite.prf(skD, cat(g, ikeRekeyNi, ikeRekeyNr));
         int pr = c.prfLen(), il = c.integKeyLen(), el = c.encKeyLen();
         byte[] k = c.prfPlus(seed, cat(ikeRekeyNi, ikeRekeyNr, ikeRekeySpiI, ikeRekeySpiR),
                 3 * pr + 2 * il + 2 * el);
@@ -884,25 +967,23 @@ final class Ike {
         return m;
     }
 
-    /** Сброс незавершённого IKE rekey: таймаут ответа или проигранная коллизия. */
+    /**
+     * Сброс незавершённого IKE rekey: таймаут ответа или проигранная коллизия.
+     */
     void abortIkeRekey() {
         ikeRekeyId = -1;
         ikeRekeySpiI = ikeRekeySpiR = ikeRekeyNi = ikeRekeyNr = ikeRekeyKe = null;
         ikeRekeyX = null;
     }
 
-    /** Тип входящего CREATE_CHILD_SA: 1 = IKE SA rekey (SA proto=1, 8-байтный SPI), 3 = ESP, 0 = непонятно. */
+    /**
+     * Тип входящего CREATE_CHILD_SA: 1 = IKE SA rekey (SA proto=1, 8-байтный SPI), 3 = ESP, 0 = непонятно.
+     */
     int peekRekeyProto(Rx r) {
         for (Pl p : r.pl) {
             if (p.type == SA) return p.body.length >= 6 ? (p.body[5] & 0xff) : 0;
         }
         return 0;
-    }
-
-    /** Ответ респондера на входящий IKE SA rekey: payload'ы ответа + новый материал ключей. */
-    static final class IkeRekeyResp {
-        List<Pl> pls;
-        IkeRekeyMaterial material;
     }
 
     /**
@@ -928,7 +1009,10 @@ final class Ike {
         BigInteger x = Crypto.dhPrivate();
         byte[] kePub = Crypto.dhPublic(x);
         byte[] g = Crypto.dhShared(x, ke);
-        if (g == null) { error = "bad DH in incoming IKE rekey"; return null; }
+        if (g == null) {
+            error = "bad DH in incoming IKE rekey";
+            return null;
+        }
         byte[] newSpiR = Crypto.random(8);          // наш SPI (мы респондер)
         byte[] nr = Crypto.random(32);
         List<Pl> pls = new ArrayList<>();
@@ -938,10 +1022,10 @@ final class Ike {
         put16(keB, 0, Crypto.DH_GROUP);
         System.arraycopy(kePub, 0, keB, 4, kePub.length);
         pls.add(new Pl(KE, keB));
-        // RFC 7296 §2.18: keymat = prf+(prf(Ni|Nr, g^ir'), Ni|Nr|SPIi|SPIr).
+        // RFC 7296 §2.18: SKEYSEED = prf(SK_d(old), g^ir' | Ni | Nr), keymat = prf+(SKEYSEED, Ni|Nr|SPIi|SPIr).
         // Мы респондер: SPIi = SPI сервера, SPIr = наш новый. Box'ы — респондерские (er/ar — out, ei/ai — in).
         Crypto.Suite c = sa.suite;
-        byte[] seed = c.prf(cat(ni, nr), g);
+        byte[] seed = suite.prf(skD, cat(g, ni, nr));
         int pr = c.prfLen(), il = c.integKeyLen(), el = c.encKeyLen();
         byte[] k = c.prfPlus(seed, cat(ni, nr, sa.spi, newSpiR), 3 * pr + 2 * il + 2 * el);
         int o = 0;
@@ -963,16 +1047,14 @@ final class Ike {
         resp.material = m;
         return resp;
     }
-    
-    /** SPI старого (заменяемого) IKE SA — нужны для DELETE. */
-    byte[] oldSpiI, oldSpiR;
 
     /**
      * Устанавливает новые ключи после успешного IKE SA rekey. Атомарно: SPI, suite, boxOut/In,
      * skD/skPi/skPr. Сбрасывает nextId=0 и peerNext=0: у нового SA своё пространство номеров
      * (RFC 7296 §2.8). Старые SPI сохраняются в oldSpiI/oldSpiR.
      */
-    void installRekeyedKeys(IkeRekeyMaterial m) {
+    void installRekeyedKeys(IkeRekeyMaterial m, boolean weInitiated) {
+        origInit = weInitiated;
         oldSpiI = spiI;
         oldSpiR = spiR;
         spiI = m.newSpiI;
@@ -986,17 +1068,6 @@ final class Ike {
         nextId = 0;
         peerNext = 0;
         ackFloor = 0;
-    }
-    
-
-    // =====================================================================
-    // Child SA rekey: мы респондер (сервер инициировал).
-    // =====================================================================
-
-    /** Результат разбора входящего CREATE_CHILD_SA: payload'ы ответа и новый Esp. */
-    static final class ChildRekeyResp {
-        List<Pl> pls;
-        Esp esp;
     }
 
     /**
@@ -1027,9 +1098,14 @@ final class Ike {
         BigInteger x = Crypto.dhPrivate();
         byte[] kePub = Crypto.dhPublic(x);
         byte[] g = Crypto.dhShared(x, ke);
-        if (g == null) { error = "bad DH in incoming rekey"; return null; }
+        if (g == null) {
+            error = "bad DH in incoming rekey";
+            return null;
+        }
         byte[] spiNew = new byte[4];
-        do { Crypto.RND.nextBytes(spiNew); } while (u32(spiNew, 0) == 0);
+        do {
+            Crypto.RND.nextBytes(spiNew);
+        } while (u32(spiNew, 0) == 0);
         byte[] nr = Crypto.random(32);
         List<Pl> pls = new ArrayList<>();
         pls.add(new Pl(SA, saEsp(spiNew)));
@@ -1055,5 +1131,65 @@ final class Ike {
         resp.pls = pls;
         resp.esp = new Esp(c, out, in, u32(sa.spi, 0), u32(spiNew, 0));
         return resp;
-    }    
+    }
+
+    /**
+     * Один payload: тип и тело без общего заголовка.
+     */
+    static final class Pl {
+        final int type;
+        final byte[] body;
+
+        Pl(int type, byte[] body) {
+            this.type = type;
+            this.body = body;
+        }
+    }
+
+    /**
+     * Разобранное защищённое сообщение.
+     */
+    static final class Rx {
+        int exch, id;
+        boolean response;
+        List<Pl> pl;
+    }
+
+    private static final class Chosen {
+        Crypto.Suite suite;
+        byte[] spi;
+        int dh = -1, esn = -1;
+    }
+
+    /**
+     * Результат разбора ответа на IKE SA rekey: новые SPI и ключи, но БЕЗ установки.
+     * Установка (замена spiI/spiR/boxOut/boxIn/skD/skPi/skPr) — задача Tunnel, шаг 4b.
+     */
+    static final class IkeRekeyMaterial {
+        byte[] newSpiI, newSpiR;
+        Crypto.Suite newSuite;
+        Crypto.Box newBoxOut, newBoxIn;
+        byte[] newSkD, newSkPi, newSkPr;
+    }
+
+
+    // =====================================================================
+    // Child SA rekey: мы респондер (сервер инициировал).
+    // =====================================================================
+
+    /**
+     * Ответ респондера на входящий IKE SA rekey: payload'ы ответа + новый материал ключей.
+     */
+    static final class IkeRekeyResp {
+        List<Pl> pls;
+        IkeRekeyMaterial material;
+    }
+
+    /**
+     * Результат разбора входящего CREATE_CHILD_SA: payload'ы ответа и новый Esp.
+     */
+    static final class ChildRekeyResp {
+        List<Pl> pls;
+        Esp esp;
+    }
 }

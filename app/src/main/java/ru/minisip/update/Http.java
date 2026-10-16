@@ -15,15 +15,12 @@ import java.nio.charset.StandardCharsets;
  */
 final class Http {
 
-    /** Ответ не 200: код сохраняем, чтобы вызывающий отличил 404 (пустой канал) от прочих. */
-    static final class Code extends IOException {
-        final int code;
-        Code(int code, String msg) { super(msg); this.code = code; }
+    private Http() {
     }
 
-    private Http() {}
-
-    /** GET строки. На любой ответ != 200 бросает Code. */
+    /**
+     * GET строки. На любой ответ != 200 бросает Code.
+     */
     static String get(String url) throws IOException {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         try {
@@ -49,12 +46,9 @@ final class Http {
         return new String(out.toByteArray(), StandardCharsets.UTF_8);
     }
 
-    /** Прогресс скачивания, 0..100. percent=-1 — длина неизвестна. */
-    interface Progress {
-        void onProgress(int percent);
-    }
-
-    /** GET в файл. Следует редиректам. На ответ != 200 бросает Code. */
+    /**
+     * GET в файл. Следует редиректам. На ответ != 200 бросает Code.
+     */
     static void download(String url, File dst, Progress p) throws IOException {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         try {
@@ -76,15 +70,38 @@ final class Http {
                     done += n;
                     if (total > 0) {
                         int pc = (int) (done * 100L / total);
-                        if (pc != last) { last = pc; p.onProgress(pc); }
+                        if (pc != last) {
+                            last = pc;
+                            p.onProgress(pc);
+                        }
                     } else if (last < 0) {
-                        last = 0; p.onProgress(-1);
+                        last = 0;
+                        p.onProgress(-1);
                     }
                 }
                 out.flush();
             }
         } finally {
             c.disconnect();
+        }
+    }
+
+    /**
+     * Прогресс скачивания, 0..100. percent=-1 — длина неизвестна.
+     */
+    interface Progress {
+        void onProgress(int percent);
+    }
+
+    /**
+     * Ответ не 200: код сохраняем, чтобы вызывающий отличил 404 (пустой канал) от прочих.
+     */
+    static final class Code extends IOException {
+        final int code;
+
+        Code(int code, String msg) {
+            super(msg);
+            this.code = code;
         }
     }
 }

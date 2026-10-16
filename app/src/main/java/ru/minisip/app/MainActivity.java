@@ -4,19 +4,18 @@ import android.Manifest;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.Toast;
-
-import android.content.SharedPreferences;
-import android.net.Uri;
-import android.os.PowerManager;
-import android.provider.Settings;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
@@ -47,8 +46,44 @@ public final class MainActivity extends AppCompatActivity {
     private ViewPager2 pager;
     private Pages pages;
     private UpdateBar updateBar;
-    /** tag последнего релиза — только для отображения в строке прогресса. */
+    /**
+     * tag последнего релиза — только для отображения в строке прогресса.
+     */
     private String lastUpdateTag = "";
+
+    /**
+     * Диалог с кнопками Yes и No (No — синяя, Yes — тусклая и на 20% прозрачная).
+     */
+    static void showCustomConfirmDialog(Context ctx, String title, String message,
+                                        Runnable onYes, Runnable onNo) {
+        AlertDialog dialog = new MaterialAlertDialogBuilder(ctx)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton("Yes", (d, w) -> {
+                    if (onYes != null) onYes.run();
+                })
+                .setNegativeButton("No", (d, w) -> {
+                    if (onNo != null) onNo.run();
+                })
+                .setOnCancelListener(d -> {
+                    if (onNo != null) onNo.run();
+                })
+                .create();
+
+        dialog.show();
+
+        Button noBtn = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+        if (noBtn != null) {
+            noBtn.setTextColor(0xFF2196F3); // Синяя кнопка No
+            noBtn.setTypeface(null, Typeface.BOLD);
+        }
+
+        Button yesBtn = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        if (yesBtn != null) {
+            yesBtn.setTextColor(0xFF888888); // Тусклая кнопка Yes
+            yesBtn.setAlpha(0.80f);          // На 20% прозрачная
+        }
+    }
 
     @Override
     protected void onCreate(Bundle b) {
@@ -104,20 +139,27 @@ public final class MainActivity extends AppCompatActivity {
 
         final App app = (App) getApplication();
         app.update().setListener(new Update.Listener() {
-            @Override public void onChecked(Update.Result r) {
+            @Override
+            public void onChecked(Update.Result r) {
                 if (r.hasUpdate) {
                     lastUpdateTag = r.tag == null ? "" : r.tag;
                     updateBar.showProgress(0, lastUpdateTag);
                 }
                 // noStable и «последняя версия» обрабатывает SettingsFragment (шаг 7)
             }
-            @Override public void onProgress(int percent) {
+
+            @Override
+            public void onProgress(int percent) {
                 updateBar.showProgress(percent, lastUpdateTag);
             }
-            @Override public void onDownloaded(java.io.File apk) {
+
+            @Override
+            public void onDownloaded(java.io.File apk) {
                 updateBar.showInstall(v -> app.update().install());
             }
-            @Override public void onError(String reason) {
+
+            @Override
+            public void onError(String reason) {
                 Toast.makeText(MainActivity.this, reason, Toast.LENGTH_LONG).show();
                 updateBar.postDelayed(updateBar::hide, 3000);
             }
@@ -133,7 +175,9 @@ public final class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** Настройки или число страниц изменились: пересчитать, сколько страниц можно листать. */
+    /**
+     * Настройки или число страниц изменились: пересчитать, сколько страниц можно листать.
+     */
     void pagesChanged() {
         // не сразу: изменение могло прийти посреди расчёта экрана, а RecyclerView этого не любит
         pager.post(() -> {
@@ -142,39 +186,9 @@ public final class MainActivity extends AppCompatActivity {
         });
     }
 
-    /** Диалог с кнопками Yes и No (No — синяя, Yes — тусклая и на 20% прозрачная). */
-    static void showCustomConfirmDialog(Context ctx, String title, String message,
-                                        Runnable onYes, Runnable onNo) {
-        AlertDialog dialog = new MaterialAlertDialogBuilder(ctx)
-                .setTitle(title)
-                .setMessage(message)
-                .setPositiveButton("Yes", (d, w) -> {
-                    if (onYes != null) onYes.run();
-                })
-                .setNegativeButton("No", (d, w) -> {
-                    if (onNo != null) onNo.run();
-                })
-                .setOnCancelListener(d -> {
-                    if (onNo != null) onNo.run();
-                })
-                .create();
-
-        dialog.show();
-
-        Button noBtn = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
-        if (noBtn != null) {
-            noBtn.setTextColor(0xFF2196F3); // Синяя кнопка No
-            noBtn.setTypeface(null, Typeface.BOLD);
-        }
-
-        Button yesBtn = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
-        if (yesBtn != null) {
-            yesBtn.setTextColor(0xFF888888); // Тусклая кнопка Yes
-            yesBtn.setAlpha(0.80f);          // На 20% прозрачная
-        }
-    }
-
-    /** Вызывается из SettingsFragment при подтверждённом удалении страницы. */
+    /**
+     * Вызывается из SettingsFragment при подтверждённом удалении страницы.
+     */
     void pageDeleted(int pageToDelete) {
         PageStore.deletePage(this, pageToDelete);
         pager.post(() -> {
@@ -213,7 +227,9 @@ public final class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** Ответ на системный запрос согласия на VPN: отдаём его странице, с которой запрос ушёл. */
+    /**
+     * Ответ на системный запрос согласия на VPN: отдаём его странице, с которой запрос ушёл.
+     */
     @Override
     @SuppressWarnings("deprecation")
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -229,7 +245,9 @@ public final class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** Лента страниц: созданные плюс, если в последней настроена АТС, одна пустая справа. */
+    /**
+     * Лента страниц: созданные плюс, если в последней настроена АТС, одна пустая справа.
+     */
     private static final class Pages extends FragmentStateAdapter {
         private final FragmentActivity host;
         private int count;

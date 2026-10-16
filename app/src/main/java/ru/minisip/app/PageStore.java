@@ -13,13 +13,16 @@ import java.util.Map;
  */
 final class PageStore {
 
-    private PageStore() {}
+    private PageStore() {
+    }
 
     static SharedPreferences prefs(Context c, int page) {
         return c.getSharedPreferences(page == 0 ? "cfg" : "cfg" + page, Context.MODE_PRIVATE);
     }
 
-    /** Сколько страниц уже создано (не меньше одной). */
+    /**
+     * Сколько страниц уже создано (не меньше одной).
+     */
     static int count(Context c) {
         return Math.max(1, c.getSharedPreferences("pages", Context.MODE_PRIVATE).getInt("count", 1));
     }
@@ -28,29 +31,17 @@ final class PageStore {
         c.getSharedPreferences("pages", Context.MODE_PRIVATE).edit().putInt("count", Math.max(1, n)).apply();
     }
 
-    /** АТС страницы настроена: указаны сервер и логин (минимум, без которого к АТС не подключиться). */
+    /**
+     * АТС страницы настроена: указаны сервер и логин (минимум, без которого к АТС не подключиться).
+     */
     static boolean configured(Context c, int page) {
         SharedPreferences p = prefs(c, page);
         return !p.getString("server", "").trim().isEmpty() && !p.getString("login", "").trim().isEmpty();
     }
 
-    /** Один контакт перевода. login обязателен, name — то, что видно в списке. */
-    static final class Refer {
-        final String login;
-        final String name;
-
-        Refer(String login, String name) {
-            this.login = login == null ? "" : login.trim();
-            this.name = name == null ? "" : name.trim();
-        }
-
-        /** Подпись строки в UI: name, иначе login. */
-        String label() {
-            return name.isEmpty() ? login : name;
-        }
-    }
-
-    /** Список контактов перевода страницы. Хранение: строки "login\tname", разделённые '\n'. */
+    /**
+     * Список контактов перевода страницы. Хранение: строки "login\tname", разделённые '\n'.
+     */
     static List<Refer> refers(Context c, int page) {
         List<Refer> out = new ArrayList<>();
         String raw = prefs(c, page).getString("refers", "");
@@ -71,7 +62,9 @@ final class PageStore {
         prefs(c, page).edit().putString("refers", sb.toString()).apply();
     }
 
-    /** Удаляет указанную страницу, сдвигая последующие страницы назад. */
+    /**
+     * Удаляет указанную страницу, сдвигая последующие страницы назад.
+     */
     static void deletePage(Context c, int pageToDelete) {
         int n = count(c);
         if (n <= 1 || pageToDelete < 0 || pageToDelete >= n) return;
@@ -94,5 +87,25 @@ final class PageStore {
 
         prefs(c, n - 1).edit().clear().apply();
         setCount(c, n - 1);
+    }
+
+    /**
+     * Один контакт перевода. login обязателен, name — то, что видно в списке.
+     */
+    static final class Refer {
+        final String login;
+        final String name;
+
+        Refer(String login, String name) {
+            this.login = login == null ? "" : login.trim();
+            this.name = name == null ? "" : name.trim();
+        }
+
+        /**
+         * Подпись строки в UI: name, иначе login.
+         */
+        String label() {
+            return name.isEmpty() ? login : name;
+        }
     }
 }

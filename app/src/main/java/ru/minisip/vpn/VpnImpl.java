@@ -14,41 +14,49 @@ import ru.minisip.log.LogSink;
 
 /**
  * Связывает публичный интерфейс, системный сервис и Tunnel.
- *
+ * <p>
  * Принципы живучести:
- *  1. Первый подъём и переподключение идут одним циклом recover(): сетевые сбои повторяются
- *     (паузы 2, 2, 4, 4, 8, 8 с по кругу), конец только при disconnect(), onRevoke() нашего же
- *     экземпляра сервиса или фатальной ошибке (неверный пароль, сертификат, алгоритмы).
- *  2. Нет сети — не тратим попытки: ждём её появления.
- *  3. Смена сети при согласованном MOBIKE: туннель и tun остаются, меняется только сокет.
- *     Без MOBIKE или при неудаче — полное переподключение.
- *  4. Чужие VPN (в том числе в другом профиле) на нас не влияют: Android держит VPN отдельно на
- *     каждого пользователя/профиль, а наши сети ищем только среди NOT_VPN. Вытеснение — только
- *     onRevoke() текущего экземпляра TunService.
- *  5. PARTIAL_WAKE_LOCK держим всегда, пока VPN запущен (нужен постоянному NAT-keepalive).
- *     Два режима (setStrict): АТС подключена — Tunnel рвёт связь жёстким watchdog'ом;
- *     АТС нет — мягкий watchdog (MOBIKE-refresh, затем реконнект).
+ * 1. Первый подъём и переподключение идут одним циклом recover(): сетевые сбои повторяются
+ * (паузы 2, 2, 4, 4, 8, 8 с по кругу), конец только при disconnect(), onRevoke() нашего же
+ * экземпляра сервиса или фатальной ошибке (неверный пароль, сертификат, алгоритмы).
+ * 2. Нет сети — не тратим попытки: ждём её появления.
+ * 3. Смена сети при согласованном MOBIKE: туннель и tun остаются, меняется только сокет.
+ * Без MOBIKE или при неудаче — полное переподключение.
+ * 4. Чужие VPN (в том числе в другом профиле) на нас не влияют: Android держит VPN отдельно на
+ * каждого пользователя/профиль, а наши сети ищем только среди NOT_VPN. Вытеснение — только
+ * onRevoke() текущего экземпляра TunService.
+ * 5. PARTIAL_WAKE_LOCK держим всегда, пока VPN запущен (нужен постоянному NAT-keepalive).
+ * Два режима (setStrict): АТС подключена — Tunnel рвёт связь жёстким watchdog'ом;
+ * АТС нет — мягкий watchdog (MOBIKE-refresh, затем реконнект).
  * Все вызовы слушателя идут под замком VpnImpl.
  */
 final class VpnImpl implements Vpn {
 
     private static final String TAG = "MiniSIP-VPN";
-
-    /** Сервис создаёт система, поэтому находит владельца через статическую ссылку. */
-    static volatile VpnImpl live;
-
-    /** Пауза перед первой попыткой после обрыва: старый интерфейс успевает исчезнуть. */
+    /**
+     * Пауза перед первой попыткой после обрыва: старый интерфейс успевает исчезнуть.
+     */
     private static final long SETTLE_MS = 700;
-    /** Паузы после неудачной попытки; по кругу. */
+    /**
+     * Паузы после неудачной попытки; по кругу.
+     */
     private static final long[] BACKOFF_MS = {5000, 5000, 10000, 10000};
-    /** Сколько ждём одну попытку целиком (рукопожатие). */
+    /**
+     * Сколько ждём одну попытку целиком (рукопожатие).
+     */
     private static final long ATTEMPT_MS = 20_000;
-    /** Период необязательного ping через туннель (если задан healthcheckIp). */
+    /**
+     * Период необязательного ping через туннель (если задан healthcheckIp).
+     */
     private static final int PING_MS = 5_000;
-
+    /**
+     * Сервис создаёт система, поэтому находит владельца через статическую ссылку.
+     */
+    static volatile VpnImpl live;
     private final Context ctx;
     private final NetWatch watch;
-    private volatile Listener lis = new Listener() {};
+    private volatile Listener lis = new Listener() {
+    };
     private volatile LogSink sink;
     private volatile Tunnel tunnel;                 // действующий (или поднимающийся) сеанс; null — сеанса нет
     private TunService svc;                // живой экземпляр сервиса сеанса
@@ -78,7 +86,9 @@ final class VpnImpl implements Vpn {
         sink = s;
     }
 
-    /** Одна точка журнала: logcat и панель лога. Секреты сюда не передавать. */
+    /**
+     * Одна точка журнала: logcat и панель лога. Секреты сюда не передавать.
+     */
     private void log(String m) {
         Log.i(TAG, m);
         LogSink s = sink;
@@ -99,6 +109,11 @@ final class VpnImpl implements Vpn {
         return false;
     }
 
+    @Override
+    public synchronized boolean isStrict() {
+        return strict;
+    }
+
     /**
      * Режим работы. true — АТС подключена: Tunnel жёстко следит за ответами (watchdog рвёт связь).
      * false — обычный VPN: watchdog мягкий (MOBIKE-refresh, потом реконнект). Wake lock в обоих
@@ -113,11 +128,6 @@ final class VpnImpl implements Vpn {
         Tunnel t = tunnel;
         if (t != null) t.strict = on;
         updateWake();
-    }
-
-    @Override
-    public synchronized boolean isStrict() {
-        return strict;
     }
 
     /**
@@ -175,19 +185,25 @@ final class VpnImpl implements Vpn {
         ctx.startService(new Intent(ctx, TunService.class));
     }
 
-    /** Фактический статус DPD для подписи на кнопке. */
+    /**
+     * Фактический статус DPD для подписи на кнопке.
+     */
     public String dpdState() {
         Tunnel t = tunnel;
         return t == null ? "" : t.dpdState();
     }
 
-    /** Сколько ping оценено в текущем сеансе (знаменатель для Loss). */
+    /**
+     * Сколько ping оценено в текущем сеансе (знаменатель для Loss).
+     */
     public int pingEvaluated() {
         Tunnel t = tunnel;
         return t == null ? 0 : t.pingEval;
     }
 
-    /** Для строки статуса рядом с Recon/Loss: «Mig:1 | Heal:2 | Silence:3 | Kept:0». */
+    /**
+     * Для строки статуса рядом с Recon/Loss: «Mig:1 | Heal:2 | Silence:3 | Kept:0».
+     */
     public String extraStats() {
         return "Mig:" + migs + " | Heal:" + heals + " | Silence:" + silences + " | Kept:" + kept;
     }
@@ -198,7 +214,9 @@ final class VpnImpl implements Vpn {
         cancel("disconnected");
     }
 
-    /** Из TunService.onStartCommand. false — запускать нечего, сервис можно гасить. */
+    /**
+     * Из TunService.onStartCommand. false — запускать нечего, сервис можно гасить.
+     */
     synchronized boolean serviceReady(TunService s) {
         if (!want) return false;
         want = false;
@@ -223,7 +241,9 @@ final class VpnImpl implements Vpn {
 
     // ---------------------------------------------------------------- сеть
 
-    /** Сеть под VPN изменилась (другая, пропала, вернулась). Под замком. */
+    /**
+     * Сеть под VPN изменилась (другая, пропала, вернулась). Под замком.
+     */
     private synchronized void networkChanged() {
         log("networkChanged: running=" + running + " want=" + want + " svc=" + (svc != null)
                 + " tunnel=" + (tunnel != null ? "up=" + tunnel.isUp() + " mobike=" + tunnel.mobike() : "none"));
@@ -279,7 +299,9 @@ final class VpnImpl implements Vpn {
 
     // ---------------------------------------------------------------- управление сеансом
 
-    /** Полное переподключение с нуля (старый Tunnel молчит). Под замком. */
+    /**
+     * Полное переподключение с нуля (старый Tunnel молчит). Под замком.
+     */
     private void restart(String reason) {
         log("restart: " + reason);
         gen++;
@@ -295,7 +317,9 @@ final class VpnImpl implements Vpn {
         startRecovery(SETTLE_MS, false);
     }
 
-    /** Останавливает сеанс и восстановление, сообщает onDown (под замком). */
+    /**
+     * Останавливает сеанс и восстановление, сообщает onDown (под замком).
+     */
     private void cancel(String reason) {
         gen++;
         Thread r = recovery;
@@ -316,7 +340,9 @@ final class VpnImpl implements Vpn {
         }
     }
 
-    /** Окончательный конец (фатальная ошибка): всё в исходное состояние. Под замком. */
+    /**
+     * Окончательный конец (фатальная ошибка): всё в исходное состояние. Под замком.
+     */
     private void abandon(String reason) {
         gen++;
         recovery = null;
@@ -371,7 +397,7 @@ final class VpnImpl implements Vpn {
         int step = 0;
         int attempts = 1;
         try {
-            for (;;) {
+            for (; ; ) {
                 if (wait > 0) Thread.sleep(wait);
                 boolean told = false;
                 while (!watch.validated()) {
@@ -418,15 +444,19 @@ final class VpnImpl implements Vpn {
         }
     }
 
-    /** Пропускает события только от действующего сеанса: старые, заменённые, молчат. */
+    /**
+     * Пропускает события только от действующего сеанса: старые, заменённые, молчат.
+     */
     private final class Guard implements Listener, Tunnel.PathEvents {
-        volatile Tunnel owner;
         final CountDownLatch done = new CountDownLatch(1);
+        volatile Tunnel owner;
         volatile boolean ok;                       // дошла до onUp
         volatile boolean retryable;                // неудача сетевая, можно повторять
         volatile String why;
 
-        /** Лечение пути и срабатывания детекторов: отдельные счётчики, Recon и Loss не трогаем. */
+        /**
+         * Лечение пути и срабатывания детекторов: отдельные счётчики, Recon и Loss не трогаем.
+         */
         @Override
         public void heal(String why) {
             synchronized (VpnImpl.this) {
@@ -474,7 +504,9 @@ final class VpnImpl implements Vpn {
             done.countDown();
         }
 
-        /** Поднятый сеанс оборвался: переподключаемся. */
+        /**
+         * Поднятый сеанс оборвался: переподключаемся.
+         */
         @Override
         public void onReconnecting(String reason) {
             log("tunnel lost: " + reason);
@@ -495,7 +527,7 @@ final class VpnImpl implements Vpn {
                 lis.onPingLoss(lostCount);
             }
         }
-	
+
         @Override
         public void onRekey(String info) {
             synchronized (VpnImpl.this) {

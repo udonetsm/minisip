@@ -3,14 +3,12 @@ package ru.minisip.vpn;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
+import android.net.LinkAddress;
 import android.net.LinkProperties;
 import android.net.Network;
-import android.net.LinkAddress;
 import android.net.NetworkCapabilities;
 import android.net.VpnService;
-import android.os.Build;
 import android.os.ParcelFileDescriptor;
-import android.os.Process;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -19,10 +17,12 @@ import java.net.DatagramSocket;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-/** Tun на Android: VpnService.Builder.establish() даёт дескриптор интерфейса. */
+/**
+ * Tun на Android: VpnService.Builder.establish() даёт дескриптор интерфейса.
+ */
 final class AndroidTun implements Tun {
-    volatile boolean transientFail;
     private final TunService svc;
+    volatile boolean transientFail;
     private volatile ParcelFileDescriptor fd;
     private volatile FileInputStream in;
     private volatile FileOutputStream out;
@@ -60,14 +60,15 @@ final class AndroidTun implements Tun {
             }
             for (String r : routes.split(" ")) {
                 int slash = r.indexOf('/');
-                if (slash > 0) b.addRoute(r.substring(0, slash), Integer.parseInt(r.substring(slash + 1)));
+                if (slash > 0)
+                    b.addRoute(r.substring(0, slash), Integer.parseInt(r.substring(slash + 1)));
             }
             for (String d : dns.split(" ")) {
                 if (!d.isEmpty()) b.addDnsServer(d);
             }
             ParcelFileDescriptor f = b.establish();     // заодно вытесняет любой другой действующий VPN
-             if (f == null) {
- // Система временно не даёт VPN (например, только что отозвала разрешение или
+            if (f == null) {
+                // Система временно не даёт VPN (например, только что отозвала разрешение или
                 // активировалось другое VPN). Это сетевая, а не фатальная причина: пробуем снова.
                 transientFail = true;
                 return null;
@@ -84,8 +85,7 @@ final class AndroidTun implements Tun {
             return null;
         }
     }
-    
-    
+
 
     /**
      * Имя интерфейса именно нашей VPN-сети. Система регистрирует её через долю секунды после

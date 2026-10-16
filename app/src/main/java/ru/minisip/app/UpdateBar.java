@@ -44,7 +44,9 @@ final class UpdateBar extends LinearLayout {
         addView(label, lp);
     }
 
-    /** Кого ужимать снизу, когда полоса видна (обычно ViewPager2). */
+    /**
+     * Кого ужимать снизу, когда полоса видна (обычно ViewPager2).
+     */
     void attachInset(View v) {
         insetTarget = v;
     }
@@ -58,7 +60,9 @@ final class UpdateBar extends LinearLayout {
                 insetTarget.getPaddingRight(), px);
     }
 
-    /** Прогресс скачивания. percent=-1 — длина неизвестна. tag — строка релиза (может быть пустой). */
+    /**
+     * Прогресс скачивания. percent=-1 — длина неизвестна. tag — строка релиза (может быть пустой).
+     */
     void showProgress(int percent, String tag) {
         progress.setVisibility(VISIBLE);
         configureLabel(false);
@@ -71,7 +75,9 @@ final class UpdateBar extends LinearLayout {
         setVisibility(VISIBLE);
     }
 
-    /** Скачано: на той же полосе — кликабельная надпись «Install» на всю ширину. */
+    /**
+     * Скачано: на той же полосе — кликабельная надпись «Install» на всю ширину.
+     */
     void showInstall(OnClickListener onInstall) {
         progress.setVisibility(GONE);
         configureLabel(true);

@@ -24,7 +24,8 @@ import java.util.Locale;
  */
 public final class LogFile {
 
-    private LogFile() {}
+    private LogFile() {
+    }
 
     public static String save(Context ctx, String prefix, String text) {
         String name = prefix + "-"

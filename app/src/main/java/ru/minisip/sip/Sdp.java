@@ -1,11 +1,16 @@
 package ru.minisip.sip;
 
-/** Минимальный SDP: один аудио-поток, только G.711. */
+/**
+ * Минимальный SDP: один аудио-поток, только G.711.
+ */
 final class Sdp {
 
-    private Sdp() {}
+    private Sdp() {
+    }
 
-    /** pts — предлагаемые типы по порядку предпочтения: 8 = PCMA, 0 = PCMU. */
+    /**
+     * pts — предлагаемые типы по порядку предпочтения: 8 = PCMA, 0 = PCMU.
+     */
     static String make(String ip, int port, int... pts) {
         StringBuilder fmts = new StringBuilder();
         StringBuilder map = new StringBuilder();

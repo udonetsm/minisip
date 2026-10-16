@@ -3,14 +3,14 @@ package ru.minisip.net;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
-import java.net.InetAddress;
 import java.net.Inet4Address;
+import java.net.InetAddress;
 import java.net.SocketException;
 import java.util.Arrays;
 
 final class UdpImpl implements Udp {
-    private volatile String err = "";
     private final Binder binder;
+    private volatile String err = "";
     private DatagramSocket sock;
     private volatile String iface;     // null — основной стек системы
 
@@ -18,12 +18,20 @@ final class UdpImpl implements Udp {
         this.binder = binder;
     }
 
+    private static InetAddress v4(String host) throws IOException {
+        InetAddress[] all = InetAddress.getAllByName(host);
+        for (InetAddress a : all) if (a instanceof Inet4Address) return a;
+        return all[0];
+    }
+
     @Override
     public void bind(String iface) {
         this.iface = iface;
     }
 
-    /** Привязывает свежий сокет к выбранному интерфейсу; без привязки всегда true. */
+    /**
+     * Привязывает свежий сокет к выбранному интерфейсу; без привязки всегда true.
+     */
     private boolean attach(DatagramSocket s) {
         String f = iface;
         if (f == null) return true;
@@ -107,12 +115,8 @@ final class UdpImpl implements Udp {
         }
     }
 
-    private static InetAddress v4(String host) throws IOException {
-        InetAddress[] all = InetAddress.getAllByName(host);
-        for (InetAddress a : all) if (a instanceof Inet4Address) return a;
-        return all[0];
-    }
-
     @Override
-    public String error() { return err; }
+    public String error() {
+        return err;
+    }
 }

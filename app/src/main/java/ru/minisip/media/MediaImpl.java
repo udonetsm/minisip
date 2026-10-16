@@ -7,7 +7,9 @@ import java.util.concurrent.TimeUnit;
 
 import ru.minisip.net.Udp;
 
-/** RTP-поток 20 мс на пакет: 160 сэмплов 8 кГц = 160 байт G.711 + 12 байт заголовка. */
+/**
+ * RTP-поток 20 мс на пакет: 160 сэмплов 8 кГц = 160 байт G.711 + 12 байт заголовка.
+ */
 final class MediaImpl implements Media, Udp.Listener {
 
     private static final int FRAME = 160;
@@ -27,6 +29,22 @@ final class MediaImpl implements Media, Udp.Listener {
     MediaImpl(Udp udp, Audio audio) {
         this.udp = udp;
         this.audio = audio;
+    }
+
+    private static void join(Thread t) {
+        if (t == null) return;
+        try {
+            t.join(500);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static void put32(byte[] b, int off, int v) {
+        b[off] = (byte) (v >> 24);
+        b[off + 1] = (byte) (v >> 16);
+        b[off + 2] = (byte) (v >> 8);
+        b[off + 3] = (byte) v;
     }
 
     @Override
@@ -89,15 +107,6 @@ final class MediaImpl implements Media, Udp.Listener {
         udp.close();
     }
 
-    private static void join(Thread t) {
-        if (t == null) return;
-        try {
-            t.join(500);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-    }
-
     // ---- микрофон -> сеть ----
     private void captureLoop() {
         short[] pcm = new short[FRAME];
@@ -120,13 +129,6 @@ final class MediaImpl implements Media, Udp.Listener {
             seq = (seq + 1) & 0xFFFF;
             ts += FRAME;
         }
-    }
-
-    private static void put32(byte[] b, int off, int v) {
-        b[off] = (byte) (v >> 24);
-        b[off + 1] = (byte) (v >> 16);
-        b[off + 2] = (byte) (v >> 8);
-        b[off + 3] = (byte) v;
     }
 
     // ---- сеть -> очередь ----

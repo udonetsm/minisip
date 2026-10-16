@@ -1,7 +1,6 @@
 package ru.minisip.app;
 
 import android.Manifest;
-import android.animation.LayoutTransition;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -49,9 +48,6 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
 
-import ru.minisip.log.LogFile;
-import ru.minisip.update.Update;
-
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.util.ArrayList;
@@ -60,6 +56,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import ru.minisip.log.LogFile;
+import ru.minisip.update.Update;
+
 /**
  * Одна страница настроек: SIP-аккаунт, звонок и VPN. Страниц может быть сколько угодно,
  * их листает MainActivity. Интерфейс собран в коде (xml-ресурсов нет), виджеты — Material 3.
@@ -67,6 +66,72 @@ import java.util.Set;
 public final class SettingsFragment extends Fragment {
 
     private static final String ARG_PAGE = "page";
+    private final Handler gestureHandler = new Handler(Looper.getMainLooper());
+    private App app;
+    /**
+     * Мост LogBuffer -> поле панели: буфер зовёт из своего потока, поле обновляем через post.
+     */
+    private final Runnable vpnLogUpdate = () -> {
+        LogArea a = this.vpnLog;
+        if (a != null && app != null) a.setText(app.vpnLog().text());
+    };
+    /**
+     * Мост LogBuffer -> поле панели для блока «Звонок».
+     */
+    private final Runnable callLogUpdate = () -> {
+        LogArea a = this.callLog;
+        if (a != null && app != null) a.setText(app.callLog().text());
+    };
+    private SharedPreferences prefs;
+    private int page;                  // номер страницы; от него зависят и настройки, и право на подключение
+    private boolean loading;           // поля заполняются из настроек: изменения не сохранять заново
+    private Runnable revealDeleteRunnable;
+    private float touchDownY;
+    private MaterialButton deleteBtn;
+    private MaterialCardView currentlyDraggedCard;
+    private TextInputEditText server, login, pass, number, vpnServer, vpnLogin, vpnPass, vpnKey, vpnCa, vpnHealthcheck;
+    private TextView status, vpnStatus;
+    private final ActivityResultLauncher<String> micPermission = registerForActivityResult(
+            new ActivityResultContracts.RequestPermission(), granted -> {
+                if (!granted && status != null) status.setText("Microphone permission required");
+            });
+    private MaterialButton connect, disconnect, refersBtn, call, hang, spkBtn, earBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
+    /**
+     * Одна и та же ссылка нужна, чтобы в onPause снимать только свой колбэк.
+     */
+    private final Runnable renderer = this::render;
+    private LinearLayout vpnMainSpoilerContainer, vpnAdvancedSpoilerContainer, sipSpoilerContainer;
+    private LogArea sipLog, callLog, vpnLog;
+    /**
+     * Мост LogBuffer -> поле панели для блока «SIP сервер».
+     */
+    private final Runnable sipLogUpdate = () -> {
+        LogArea a = sipLog;
+        if (a != null && app != null) a.setText(app.sipLog().text());
+    };
+    /**
+     * Строка версии внизу страницы: long-press 2 с открывает диалог канала обновлений.
+     */
+    private TextView versionLabel;
+    private LogArea updateLog;    /**
+     * Отложенный показ диалога канала: срабатывает через 2 с удержания на строке версии.
+     */
+    private final Runnable channelDialogRunnable = () -> {
+        if (isAdded()) showChannelDialog();
+    };
+    /**
+     * Отложенное сохранение на Android ≤ 9, пока пользователь не выдаст разрешение.
+     */
+    private Runnable pendingSave;
+    /**
+     * Разрешение на внешнее хранилище для Android ≤ 9; после выдачи продолжаем отложенное сохранение.
+     */
+    private final ActivityResultLauncher<String> storagePermission = registerForActivityResult(
+            new ActivityResultContracts.RequestPermission(), granted -> {
+                Runnable r = pendingSave;
+                pendingSave = null;
+                if (granted && r != null) r.run();
+            });
 
     static SettingsFragment create(int page) {
         Bundle a = new Bundle();
@@ -76,68 +141,37 @@ public final class SettingsFragment extends Fragment {
         return f;
     }
 
-    private App app;
-    private SharedPreferences prefs;
-    private int page;                  // номер страницы; от него зависят и настройки, и право на подключение
-    private boolean loading;           // поля заполняются из настроек: изменения не сохранять заново
+    private static boolean isIpv4(String s) {
+        return s != null && s.matches("^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$");
+    }
 
-    private final Handler gestureHandler = new Handler(Looper.getMainLooper());
-    private Runnable revealDeleteRunnable;
-    private float touchDownY;
-    private MaterialButton deleteBtn;
-    private MaterialCardView currentlyDraggedCard;
+    /**
+     * Двухцветный ColorStateList: цвет для enabled, цвет для disabled.
+     */
+    private static android.content.res.ColorStateList stateful(int enabled, int disabled) {
+        return new android.content.res.ColorStateList(
+                new int[][]{{android.R.attr.state_enabled}, {}},
+                new int[]{enabled, disabled});
+    }
 
-    private TextInputEditText server, login, pass, number, vpnServer, vpnLogin, vpnPass, vpnKey, vpnCa, vpnHealthcheck;
-    private TextView status, vpnStatus;
-    private MaterialButton connect, disconnect, refersBtn, call, hang, spkBtn, earBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
-    private LinearLayout vpnMainSpoilerContainer, vpnAdvancedSpoilerContainer, sipSpoilerContainer;
+    private static void setFieldEnabled(TextInputEditText field, boolean enabled) {
+        if (field != null) {
+            field.setEnabled(enabled);
+            field.setFocusable(enabled);
+            field.setFocusableInTouchMode(enabled);
+        }
+    }
 
-    private LogArea sipLog, callLog, vpnLog;
+    private static MaterialCardView getCardByTag(int id, Block sip, Block call, Block vpn) {
+        if (id == 0) return sip.card;
+        if (id == 1) return call.card;
+        if (id == 2) return vpn.card;
+        return null;
+    }
 
-    /** Строка версии внизу страницы: long-press 2 с открывает диалог канала обновлений. */
-    private TextView versionLabel;
-    private LogArea updateLog;
-
-    /** Отложенный показ диалога канала: срабатывает через 2 с удержания на строке версии. */
-    private final Runnable channelDialogRunnable = () -> {
-        if (isAdded()) showChannelDialog();
-    };
-
-    /** Одна и та же ссылка нужна, чтобы в onPause снимать только свой колбэк. */
-    private final Runnable renderer = this::render;
-
-    /** Мост LogBuffer -> поле панели: буфер зовёт из своего потока, поле обновляем через post. */
-    private final Runnable vpnLogUpdate = () -> {
-        LogArea a = vpnLog;
-        if (a != null && app != null) a.setText(app.vpnLog().text());
-    };
-
-    /** Мост LogBuffer -> поле панели для блока «Звонок». */
-    private final Runnable callLogUpdate = () -> {
-        LogArea a = callLog;
-        if (a != null && app != null) a.setText(app.callLog().text());
-    };
-
-    /** Мост LogBuffer -> поле панели для блока «SIP сервер». */
-    private final Runnable sipLogUpdate = () -> {
-        LogArea a = sipLog;
-        if (a != null && app != null) a.setText(app.sipLog().text());
-    };
-
-    private final ActivityResultLauncher<String> micPermission = registerForActivityResult(
-            new ActivityResultContracts.RequestPermission(), granted -> {
-                if (!granted && status != null) status.setText("Microphone permission required");
-            });
-
-    /** Отложенное сохранение на Android ≤ 9, пока пользователь не выдаст разрешение. */
-    private Runnable pendingSave;
-    /** Разрешение на внешнее хранилище для Android ≤ 9; после выдачи продолжаем отложенное сохранение. */
-    private final ActivityResultLauncher<String> storagePermission = registerForActivityResult(
-            new ActivityResultContracts.RequestPermission(), granted -> {
-                Runnable r = pendingSave;
-                pendingSave = null;
-                if (granted && r != null) r.run();
-            });
+    private static String text(TextInputEditText e) {
+        return e.getText() == null ? "" : e.getText().toString();
+    }
 
     @Override
     public void onCreate(@Nullable Bundle b) {
@@ -313,7 +347,8 @@ public final class SettingsFragment extends Fragment {
                     lp.bottomMargin = dp(16);
                     col.addView(targetCard, lp);
                 }
-            } catch (NumberFormatException ignored) {}
+            } catch (NumberFormatException ignored) {
+            }
         }
         for (Block blk : new Block[]{sipBlock, callBlock, vpnBlock}) {
             if (blk.card.getParent() == null) {
@@ -507,6 +542,8 @@ public final class SettingsFragment extends Fragment {
         render();
     }
 
+    // ---------- действия ----------
+
     @Override
     public void onPause() {
         if (app != null) app.vpnLog().setListener(null);
@@ -517,9 +554,9 @@ public final class SettingsFragment extends Fragment {
         super.onPause();
     }
 
-    // ---------- действия ----------
-
-    /** versionName установленного APK — для подписи под блоками. */
+    /**
+     * versionName установленного APK — для подписи под блоками.
+     */
     private String appVersion() {
         try {
             return requireContext().getPackageManager()
@@ -545,30 +582,6 @@ public final class SettingsFragment extends Fragment {
                 .setNegativeButton("Cancel", null)
                 .show();
     }
-
-    /**
-     * Локальный слушатель check(). Полоса в MainActivity подключена постоянным слушателем
-     * и уже показывает скачивание; здесь — только случаи, когда полосы не будет.
-     */
-    private final Update.Listener checkListener = new Update.Listener() {
-        @Override
-        public void onChecked(Update.Result r) {
-            if (r == null || r.hasUpdate) return;   // показ полосы — не наша забота
-            if (r.noStable) {
-                MainActivity.showCustomConfirmDialog(requireContext(),
-                        "No stable versions yet",
-                        "Check pre-releases?",
-                        () -> {
-                            app.update().setChannel("prerelease");
-                            app.update().check(checkListener);
-                        },
-                        null);
-                return;
-            }
-            Toast.makeText(requireContext(), "You have the latest version", Toast.LENGTH_SHORT).show();
-        }
-        // onError показывает MainActivity (Toast + скрытие полосы) — здесь не дублируем
-    };
 
     private void doConnect() {
         String s = text(server).trim();
@@ -609,7 +622,29 @@ public final class SettingsFragment extends Fragment {
         prefs.edit().putBoolean("muted", muted).apply();
         if (!(app.busy() && app.lastPage != page)) app.setMute(muted);
         render();
-    }
+    }    /**
+     * Локальный слушатель check(). Полоса в MainActivity подключена постоянным слушателем
+     * и уже показывает скачивание; здесь — только случаи, когда полосы не будет.
+     */
+    private final Update.Listener checkListener = new Update.Listener() {
+        @Override
+        public void onChecked(Update.Result r) {
+            if (r == null || r.hasUpdate) return;   // показ полосы — не наша забота
+            if (r.noStable) {
+                MainActivity.showCustomConfirmDialog(requireContext(),
+                        "No stable versions yet",
+                        "Check pre-releases?",
+                        () -> {
+                            app.update().setChannel("prerelease");
+                            app.update().check(checkListener);
+                        },
+                        null);
+                return;
+            }
+            Toast.makeText(requireContext(), "You have the latest version", Toast.LENGTH_SHORT).show();
+        }
+        // onError показывает MainActivity (Toast + скрытие полосы) — здесь не дублируем
+    };
 
     private void doVpnConnect() {
         String h = text(vpnServer).trim();
@@ -625,7 +660,9 @@ public final class SettingsFragment extends Fragment {
         if (app.vpnConsent(requireActivity(), MainActivity.REQ_VPN)) vpnStart();
     }
 
-    /** Ответ на системный запрос согласия на VPN (его получает MainActivity). */
+    /**
+     * Ответ на системный запрос согласия на VPN (его получает MainActivity).
+     */
     void onVpnConsent(boolean granted) {
         if (granted) vpnStart();
         else app.vpnDenied(page);
@@ -670,11 +707,9 @@ public final class SettingsFragment extends Fragment {
         }).start();
     }
 
-    private static boolean isIpv4(String s) {
-        return s != null && s.matches("^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$");
-    }
-
-    /** Список приложений с галочками: их трафик пойдёт через VPN. MiniSIP включён всегда. */
+    /**
+     * Список приложений с галочками: их трафик пойдёт через VPN. MiniSIP включён всегда.
+     */
     private void pickApps() {
         PackageManager pm = requireContext().getPackageManager();
         Intent main = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
@@ -697,7 +732,8 @@ public final class SettingsFragment extends Fragment {
                 .setMultiChoiceItems(names.toArray(new String[0]), on, (d, i, c) -> on[i] = c)
                 .setPositiveButton("OK", (d, w) -> {
                     StringBuilder sb = new StringBuilder();
-                    for (int i = 0; i < on.length; i++) if (on[i]) sb.append(pkgs.get(i)).append('\n');
+                    for (int i = 0; i < on.length; i++)
+                        if (on[i]) sb.append(pkgs.get(i)).append('\n');
                     prefs.edit().putString("vpnApps", sb.toString().trim()).apply();
                     render();
                 })
@@ -705,14 +741,18 @@ public final class SettingsFragment extends Fragment {
                 .show();
     }
 
-    /** Переключение источника звука: применяется сразу, в том числе посреди вызова. */
+    /**
+     * Переключение источника звука: применяется сразу, в том числе посреди вызова.
+     */
     private void pickSpeaker(boolean speaker) {
         prefs.edit().putBoolean("speaker", speaker).apply();
         if (!(app.busy() && app.lastPage != page)) app.setSpeaker(speaker);
         render();
     }
 
-    /** Диалог со списком Refers: строки правятся на месте, Use — blind transfer, ✕ — удалить. */
+    /**
+     * Диалог со списком Refers: строки правятся на месте, Use — blind transfer, ✕ — удалить.
+     */
     private void showRefersDialog() {
         final Context ctx = requireContext();
         final LinearLayout box = new LinearLayout(ctx);
@@ -744,9 +784,16 @@ public final class SettingsFragment extends Fragment {
                 login.setLayoutParams(new LinearLayout.LayoutParams(0,
                         ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
                 login.addTextChangedListener(new TextWatcher() {
-                    @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
-                    @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
-                    @Override public void afterTextChanged(Editable s) {
+                    @Override
+                    public void beforeTextChanged(CharSequence s, int a, int b, int c) {
+                    }
+
+                    @Override
+                    public void onTextChanged(CharSequence s, int a, int b, int c) {
+                    }
+
+                    @Override
+                    public void afterTextChanged(Editable s) {
                         PageStore.Refer old = working.get(idx);
                         working.set(idx, new PageStore.Refer(s.toString(), old.name));
                         PageStore.setRefers(ctx, page, working);
@@ -761,9 +808,16 @@ public final class SettingsFragment extends Fragment {
                 name.setLayoutParams(new LinearLayout.LayoutParams(0,
                         ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
                 name.addTextChangedListener(new TextWatcher() {
-                    @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
-                    @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
-                    @Override public void afterTextChanged(Editable s) {
+                    @Override
+                    public void beforeTextChanged(CharSequence s, int a, int b, int c) {
+                    }
+
+                    @Override
+                    public void onTextChanged(CharSequence s, int a, int b, int c) {
+                    }
+
+                    @Override
+                    public void afterTextChanged(Editable s) {
                         PageStore.Refer old = working.get(idx);
                         working.set(idx, new PageStore.Refer(old.login, s.toString()));
                         PageStore.setRefers(ctx, page, working);
@@ -928,30 +982,19 @@ public final class SettingsFragment extends Fragment {
         }
         vpnDisconnect.setEnabled(vUp || vConn);
     }
-    
-        /** Двухцветный ColorStateList: цвет для enabled, цвет для disabled. */
-    private static android.content.res.ColorStateList stateful(int enabled, int disabled) {
-        return new android.content.res.ColorStateList(
-                new int[][]{ { android.R.attr.state_enabled }, {} },
-                new int[]{ enabled, disabled });
-    }
 
-    private static void setFieldEnabled(TextInputEditText field, boolean enabled) {
-        if (field != null) {
-            field.setEnabled(enabled);
-            field.setFocusable(enabled);
-            field.setFocusableInTouchMode(enabled);
-        }
-    }
-
-    /** Запоминает поле в настройках страницы по мере набора. */
+    /**
+     * Запоминает поле в настройках страницы по мере набора.
+     */
     private void save(TextInputEditText e, String key) {
         e.addTextChangedListener(new TextWatcher() {
             @Override
-            public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) {
+            }
 
             @Override
-            public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            public void onTextChanged(CharSequence s, int a, int b, int c) {
+            }
 
             @Override
             public void afterTextChanged(Editable s) {
@@ -959,30 +1002,22 @@ public final class SettingsFragment extends Fragment {
                 prefs.edit().putString(key, s.toString()).apply();
                 // от сервера и логина зависит, можно ли листать дальше и создавать новую страницу
                 if (key.equals("server") || key.equals("login")) {
-                    if (getActivity() instanceof MainActivity) ((MainActivity) getActivity()).pagesChanged();
+                    if (getActivity() instanceof MainActivity)
+                        ((MainActivity) getActivity()).pagesChanged();
                 }
             }
         });
     }
 
-    /** Подтягивает поле из настроек (их мог поменять другой экземпляр этой же страницы). */
+    /**
+     * Подтягивает поле из настроек (их мог поменять другой экземпляр этой же страницы).
+     */
     private void load(TextInputEditText e, String key) {
         String v = prefs.getString(key, "");
         if (text(e).equals(v)) return;
         loading = true;
         e.setText(v);
         loading = false;
-    }
-
-    // ---------- мелочи вёрстки ----------
-
-    private static final class Block {
-        final MaterialCardView card;
-        final LinearLayout container;
-        Block(MaterialCardView card, LinearLayout container) {
-            this.card = card;
-            this.container = container;
-        }
     }
 
     private Block createBlock(int blockTag) {
@@ -994,7 +1029,8 @@ public final class SettingsFragment extends Fragment {
         card.setStrokeWidth(dp(1));
 
         int attrId = ctx.getResources().getIdentifier("colorOutline", "attr", ctx.getPackageName());
-        if (attrId == 0) attrId = ctx.getResources().getIdentifier("colorOutline", "attr", "com.google.android.material");
+        if (attrId == 0)
+            attrId = ctx.getResources().getIdentifier("colorOutline", "attr", "com.google.android.material");
         int strokeColor = attrId != 0 ? MaterialColors.getColor(card, attrId, 0x44888888) : 0x44888888;
         card.setStrokeColor(strokeColor);
 
@@ -1069,13 +1105,6 @@ public final class SettingsFragment extends Fragment {
         prefs.edit().putString("blockOrder", sb.toString()).apply();
     }
 
-    private static MaterialCardView getCardByTag(int id, Block sip, Block call, Block vpn) {
-        if (id == 0) return sip.card;
-        if (id == 1) return call.card;
-        if (id == 2) return vpn.card;
-        return null;
-    }
-
     private void cancelHoldTimer() {
         if (revealDeleteRunnable != null) {
             gestureHandler.removeCallbacks(revealDeleteRunnable);
@@ -1096,13 +1125,11 @@ public final class SettingsFragment extends Fragment {
                 null);
     }
 
-    private static String text(TextInputEditText e) {
-        return e.getText() == null ? "" : e.getText().toString();
-    }
-
     private int dp(int v) {
         return (int) (v * getResources().getDisplayMetrics().density);
     }
+
+    // ---------- мелочи вёрстки ----------
 
     private LinearLayout.LayoutParams row(int top) {
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
@@ -1195,7 +1222,8 @@ public final class SettingsFragment extends Fragment {
                 boolean next = !item.isChecked();
                 item.setChecked(next);
                 prefs.edit().putBoolean("vpnStrict", next).apply();
-                if (app.lastPage == page && (app.vpnUp || app.vpnConnecting)) app.setVpnStrict(next);
+                if (app.lastPage == page && (app.vpnUp || app.vpnConnecting))
+                    app.setVpnStrict(next);
                 return true;
             });
             pm.show();
@@ -1204,12 +1232,86 @@ public final class SettingsFragment extends Fragment {
         return area;
     }
 
-    /** Панель лога блока: контейнер, поле для текста и кнопки. */
+    private MaterialButton smallButton(Context ctx, String label) {
+        MaterialButton b = new MaterialButton(ctx);
+        b.setText(label);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
+        b.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return b;
+    }
+
+    private void saveLog(String prefix, LogArea area) {
+        String text = area.text.getText().toString();
+        if (text.trim().isEmpty()) {
+            Toast.makeText(requireContext(), "Log is empty", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (Build.VERSION.SDK_INT <= 28
+                && requireContext().checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+            pendingSave = () -> saveLog(prefix, area);
+            storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+            return;
+        }
+        String result = LogFile.save(requireContext(), prefix, text);
+        Toast.makeText(requireContext(),
+                result.startsWith("error:") ? result : "Saved: " + result,
+                Toast.LENGTH_LONG).show();
+    }
+
+    private TextView body(LinearLayout parent, int top) {
+        TextView t = new TextView(parent.getContext());
+        t.setTextAppearance(android.R.style.TextAppearance_Small);
+        parent.addView(t, row(top));
+        return t;
+    }
+
+    private TextInputEditText field(LinearLayout parent, String hint, String helper, String value,
+                                    int inputType, boolean secret) {
+        TextInputLayout til = new TextInputLayout(parent.getContext());
+        til.setHint(hint);
+        if (helper != null) til.setHelperText(helper);
+        TextInputEditText e = new TextInputEditText(til.getContext());
+        e.setInputType(inputType);
+        e.setText(value);
+        til.addView(e, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        if (secret) {
+            til.setEndIconMode(TextInputLayout.END_ICON_PASSWORD_TOGGLE);
+            til.setEndIconContentDescription("Show password");
+        }
+        parent.addView(til, row(dp(8)));
+        return e;
+    }
+
+    private MaterialButton button(LinearLayout parent, String text, boolean outlined, View.OnClickListener l) {
+        Context ctx = parent.getContext();
+        MaterialButton b = new MaterialButton(ctx);
+        b.setText(text);
+        b.setOnClickListener(l);
+        parent.addView(b, row(dp(8)));
+        return b;
+    }
+
+    private static final class Block {
+        final MaterialCardView card;
+        final LinearLayout container;
+
+        Block(MaterialCardView card, LinearLayout container) {
+            this.card = card;
+            this.container = container;
+        }
+    }
+
+    /**
+     * Панель лога блока: контейнер, поле для текста и кнопки.
+     */
     private final class LogArea {
-        volatile boolean enabled = false;
         final LinearLayout panel;
         final EditText text;
         final MaterialButton toggle;
+        volatile boolean enabled = false;
         Runnable onEnable;
         Runnable onClear;
         Runnable onSave;
@@ -1342,65 +1444,9 @@ public final class SettingsFragment extends Fragment {
         }
     }
 
-    private MaterialButton smallButton(Context ctx, String label) {
-        MaterialButton b = new MaterialButton(ctx);
-        b.setText(label);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
-        b.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        return b;
-    }
 
-    private void saveLog(String prefix, LogArea area) {
-        String text = area.text.getText().toString();
-        if (text.trim().isEmpty()) {
-            Toast.makeText(requireContext(), "Log is empty", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (Build.VERSION.SDK_INT <= 28
-                && requireContext().checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                != PackageManager.PERMISSION_GRANTED) {
-            pendingSave = () -> saveLog(prefix, area);
-            storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE);
-            return;
-        }
-        String result = LogFile.save(requireContext(), prefix, text);
-        Toast.makeText(requireContext(),
-                result.startsWith("error:") ? result : "Saved: " + result,
-                Toast.LENGTH_LONG).show();
-    }
 
-    private TextView body(LinearLayout parent, int top) {
-        TextView t = new TextView(parent.getContext());
-        t.setTextAppearance(android.R.style.TextAppearance_Small);
-        parent.addView(t, row(top));
-        return t;
-    }
 
-    private TextInputEditText field(LinearLayout parent, String hint, String helper, String value,
-                                    int inputType, boolean secret) {
-        TextInputLayout til = new TextInputLayout(parent.getContext());
-        til.setHint(hint);
-        if (helper != null) til.setHelperText(helper);
-        TextInputEditText e = new TextInputEditText(til.getContext());
-        e.setInputType(inputType);
-        e.setText(value);
-        til.addView(e, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        if (secret) {
-            til.setEndIconMode(TextInputLayout.END_ICON_PASSWORD_TOGGLE);
-            til.setEndIconContentDescription("Show password");
-        }
-        parent.addView(til, row(dp(8)));
-        return e;
-    }
 
-    private MaterialButton button(LinearLayout parent, String text, boolean outlined, View.OnClickListener l) {
-        Context ctx = parent.getContext();
-        MaterialButton b = new MaterialButton(ctx);
-        b.setText(text);
-        b.setOnClickListener(l);
-        parent.addView(b, row(dp(8)));
-        return b;
-    }
+
 }

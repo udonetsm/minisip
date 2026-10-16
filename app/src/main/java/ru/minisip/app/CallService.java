@@ -9,7 +9,9 @@ import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
 
-/** Держит процесс «передним» на время вызова, чтобы микрофон работал при погашенном экране. */
+/**
+ * Держит процесс «передним» на время вызова, чтобы микрофон работал при погашенном экране.
+ */
 public final class CallService extends Service {
 
     private static final String CHANNEL = "call";

@@ -5,9 +5,12 @@ import java.util.Date;
 import java.util.Locale;
 import java.util.TimeZone;
 
-/** ISO 8601 из GitHub → миллисекунды UTC. Ошибка парсинга → 0. */
+/**
+ * ISO 8601 из GitHub → миллисекунды UTC. Ошибка парсинга → 0.
+ */
 final class Timestamps {
-    private Timestamps() {}
+    private Timestamps() {
+    }
 
     static long parseIso8601(String iso) {
         if (iso == null || iso.isEmpty()) return 0L;

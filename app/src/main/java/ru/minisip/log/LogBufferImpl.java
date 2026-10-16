@@ -5,7 +5,9 @@ import java.util.ArrayDeque;
 import java.util.Date;
 import java.util.Locale;
 
-/** Реализация LogBuffer: ArrayDeque под замком, строки с меткой времени. */
+/**
+ * Реализация LogBuffer: ArrayDeque под замком, строки с меткой времени.
+ */
 final class LogBufferImpl implements LogBuffer {
 
     private final int max;
@@ -29,13 +31,13 @@ final class LogBufferImpl implements LogBuffer {
     }
 
     @Override
-    public void setEnabled(boolean on) {
-        enabled = on;
+    public boolean isEnabled() {
+        return enabled;
     }
 
     @Override
-    public boolean isEnabled() {
-        return enabled;
+    public void setEnabled(boolean on) {
+        enabled = on;
     }
 
     @Override

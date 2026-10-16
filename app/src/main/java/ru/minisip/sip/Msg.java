@@ -10,7 +10,9 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Разобранное SIP-сообщение. Имена заголовков — в нижнем регистре, компактные формы раскрыты. */
+/**
+ * Разобранное SIP-сообщение. Имена заголовков — в нижнем регистре, компактные формы раскрыты.
+ */
 final class Msg {
 
     private static final Map<String, String> COMPACT = new HashMap<>();
@@ -36,7 +38,9 @@ final class Msg {
         this.body = body;
     }
 
-    /** null — если это не SIP (например, keep-alive CRLF). */
+    /**
+     * null — если это не SIP (например, keep-alive CRLF).
+     */
     static Msg parse(byte[] data) {
         String s = new String(data, StandardCharsets.UTF_8);
         int i = s.indexOf("\r\n\r\n");
@@ -69,11 +73,9 @@ final class Msg {
         return m;
     }
 
-    private void add(String name, String v) {
-        h.computeIfAbsent(name, k -> new ArrayList<>()).add(v);
-    }
-
-    /** Делит "a, b" по запятым, не трогая запятые внутри <> и кавычек. */
+    /**
+     * Делит "a, b" по запятым, не трогая запятые внутри <> и кавычек.
+     */
     private static List<String> split(String v) {
         List<String> out = new ArrayList<>();
         int depth = 0;
@@ -92,6 +94,54 @@ final class Msg {
         }
         out.add(v.substring(start).trim());
         return out;
+    }
+
+    /**
+     * Значение параметра ";name=value" из заголовка (tag, expires, ...).
+     */
+    static String param(String hdr, String name) {
+        if (hdr == null) return null;
+        Matcher m = Pattern.compile(";\\s*" + Pattern.quote(name) + "=([^;,>\\s]+)",
+                Pattern.CASE_INSENSITIVE).matcher(hdr);
+        return m.find() ? m.group(1) : null;
+    }
+
+    /**
+     * URI из значения вида  "Имя" <sip:user@host;lr>;tag=x  или  sip:user@host.
+     */
+    static String uri(String nameAddr) {
+        if (nameAddr == null) return null;
+        int a = nameAddr.indexOf('<');
+        if (a >= 0) {
+            int b = nameAddr.indexOf('>', a);
+            return nameAddr.substring(a + 1, b > 0 ? b : nameAddr.length());
+        }
+        return nameAddr.split(";")[0].trim();
+    }
+
+    /**
+     * Пользовательская часть URI (для показа номера звонящего).
+     */
+    static String user(String nameAddr) {
+        String u = uri(nameAddr);
+        if (u == null) return "";
+        int c = u.indexOf(':');
+        if (c >= 0) u = u.substring(c + 1);
+        int at = u.indexOf('@');
+        return at >= 0 ? u.substring(0, at) : u;
+    }
+
+    /**
+     * Имя события из заголовка Event: "refer" из "refer;id=123". Пустая строка, если null.
+     */
+    static String eventName(String hdr) {
+        if (hdr == null) return "";
+        int c = hdr.indexOf(';');
+        return (c < 0 ? hdr : hdr.substring(0, c)).trim().toLowerCase(Locale.ROOT);
+    }
+
+    private void add(String name, String v) {
+        h.computeIfAbsent(name, k -> new ArrayList<>()).add(v);
     }
 
     boolean isResp() {
@@ -143,44 +193,10 @@ final class Msg {
         return p.length > 1 ? p[1] : "";
     }
 
-    /** Ключ транзакции для сопоставления ответов: Call-ID|CSeq|метод. */
+    /**
+     * Ключ транзакции для сопоставления ответов: Call-ID|CSeq|метод.
+     */
     String key() {
         return get("call-id") + "|" + cseq() + "|" + cseqMethod();
-    }
-
-    /** Значение параметра ";name=value" из заголовка (tag, expires, ...). */
-    static String param(String hdr, String name) {
-        if (hdr == null) return null;
-        Matcher m = Pattern.compile(";\\s*" + Pattern.quote(name) + "=([^;,>\\s]+)",
-                Pattern.CASE_INSENSITIVE).matcher(hdr);
-        return m.find() ? m.group(1) : null;
-    }
-
-    /** URI из значения вида  "Имя" <sip:user@host;lr>;tag=x  или  sip:user@host. */
-    static String uri(String nameAddr) {
-        if (nameAddr == null) return null;
-        int a = nameAddr.indexOf('<');
-        if (a >= 0) {
-            int b = nameAddr.indexOf('>', a);
-            return nameAddr.substring(a + 1, b > 0 ? b : nameAddr.length());
-        }
-        return nameAddr.split(";")[0].trim();
-    }
-
-    /** Пользовательская часть URI (для показа номера звонящего). */
-    static String user(String nameAddr) {
-        String u = uri(nameAddr);
-        if (u == null) return "";
-        int c = u.indexOf(':');
-        if (c >= 0) u = u.substring(c + 1);
-        int at = u.indexOf('@');
-        return at >= 0 ? u.substring(0, at) : u;
-    }
-
-    /** Имя события из заголовка Event: "refer" из "refer;id=123". Пустая строка, если null. */
-    static String eventName(String hdr) {
-        if (hdr == null) return "";
-        int c = hdr.indexOf(';');
-        return (c < 0 ? hdr : hdr.substring(0, c)).trim().toLowerCase(Locale.ROOT);
     }
 }

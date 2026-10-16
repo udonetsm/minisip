@@ -50,7 +50,9 @@ public final class TunService extends VpnService {
         super.onDestroy();
     }
 
-    /** Нас вытеснили: другое VPN-приложение или пользователь отключил VPN в системе. */
+    /**
+     * Нас вытеснили: другое VPN-приложение или пользователь отключил VPN в системе.
+     */
     @Override
     public void onRevoke() {
         VpnImpl v = VpnImpl.live;
