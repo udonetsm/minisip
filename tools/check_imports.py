@@ -23,7 +23,8 @@ ALLOWED = {
     "sip": {"net", "media", "log"},
     "screen": set(),
     "vpn": {"log"},
-    "app": {"net", "media", "sip", "screen", "vpn", "log"},
+    "update": {"log"},
+    "app": {"net", "media", "sip", "screen", "vpn", "log", "update"},
 }
 IFACE = {
     "log": {"LogSink", "LogBuffer", "LogFile"},
@@ -32,6 +33,7 @@ IFACE = {
     "sip": {"Sip"},
     "screen": {"Screen"},
     "vpn": {"Vpn"},
+    "update": {"Update"},
 }
 
 errors = []
@@ -72,7 +74,7 @@ if has_cycle():
 
 # --- 3: сигнатуры публичных интерфейсов ---
 OK_TYPES = {"void", "int", "long", "boolean", "String", "byte[]", "short[]", "Context",
-            "Listener", "Udp", "Media", "Sip", "Screen", "Vpn", "LogSink", "LogBuffer", "Runnable", "int...", "Object"}
+            "Listener", "Udp", "Media", "Sip", "Screen", "Vpn", "Update", "LogSink", "LogBuffer", "Runnable", "int...", "Object", "Result", "File"}
 for pkg, names in IFACE.items():
     for name in names:
         f = ROOT / pkg / f"{name}.java"

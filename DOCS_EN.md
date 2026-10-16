@@ -1,191 +1,156 @@
-# 📖 Detailed MiniSIP User Manual
+# 📱 MiniSIP — User Guide
 
-This manual is written in clear and accessible language for users of any skill level. It explains the purpose and usage of every button, input field, status indicator, popup menu, and gesture in the **MiniSIP** application.
+**MiniSIP** is a lightweight, intuitive Android application for secure internet phone calls (SIP telephony) and encrypted VPN tunneling (IKEv2/IPsec).
 
----
-
-## 🌟 1. Application Overview
-
-**MiniSIP** is a compact, high-performance Android application that combines two main features:
-1. **Internet Calls (SIP Telephony)** — Allows you to connect to your corporate or home PBX server and make phone calls over IP.
-2. **Secure Communication (IKEv2 VPN)** — Allows you to encrypt and route your internet traffic through your personal VPN server.
-
-The user interface consists of card blocks arranged on scrollable pages.
+The app is completely free of background clutter, optimizes battery usage, and lets you set up connectivity with your PBX in a matter of seconds.
 
 ---
 
-## 🚦 2. Status Color Indicators (Traffic Light)
-
-All connection and call statuses are accompanied by intuitive color indicators:
-
-- `🔴` **Red Circle**:
-  - **Disconnected** (`Disconnected`) — Connection is not established or was manually stopped.
-  - **Error** (`Error: ...`) — Incorrect login, password, server address, or no internet.
-  - **Call Ended** (`Ended: ...`) — Call finished or was rejected.
-- `🟡` **Yellow Circle**:
-  - **In Progress** (`Connecting...` / `Calling...`) — Registration request in progress, network check, or dialing recipient.
-  - **Reconnecting** (`VPN: reconnecting`) — Temporary network drop, VPN automatically recovering connection.
-- `🟢` **Green Circle**:
-  - **Connected** (`🟢 Connected`) — Successfully registered on PBX or VPN tunnel is active.
-  - **Dialing** (`🟢 Connected | 🟡 Calling...`) — Outgoing call in progress while registered on PBX.
-  - **Active Call** (`🟢 Connected | 🟢 Call in progress`) — Recipient picked up, active phone call in progress.
-  - **Call Ended** (`🟢 Connected | 🔴 Ended: ...`) — Call finished, returning to active PBX registration.
+## 📑 Table of Contents
+1. [Key Features](#1-key-features)
+2. [Configuring SIP Telephony](#2-configuring-sip-telephony)
+3. [Making and Managing Calls](#3-making-and-managing-calls)
+4. [Call Transfer (Refers)](#4-call-transfer-refers)
+5. [Configuring and Connecting VPN (IKEv2)](#5-configuring-and-connecting-vpn-ikev2)
+6. [Managing Profile Pages and Block Order](#6-managing-profile-pages-and-block-order)
+7. [Viewing and Saving Logs](#7-viewing-and-saving-logs)
+8. [App Updates](#8-app-updates)
 
 ---
 
-## 🏛 3. Block 1: PBX Settings (SIP Server Settings)
+## 1. Key Features
 
-This block manages connection to your PBX phone server.
-
-### Fields and Buttons:
-* **Button `SIP settings ▼`**: Expands or hides the PBX server configuration spoiler.
-* **Field `Server`**: Address of your PBX. Can be a domain name (`pbx.example.com`) or IP address with port (`192.168.1.100:5060`).
-* **Field `Login`**: Your extension number or SIP account login (e.g. `101`).
-* **Field `Password`**: Password for your SIP account.
-* **Button `Connect`**: Sends registration request to the PBX server.
-* **Button `Disconnect`**: Unregisters and disconnects from the PBX server.
-* **Button `Refers`**: Opens the transfer contacts manager dialog.
-* **Status Text**: Displays current PBX connection state (e.g. `🟢 Connected` or `🔴 Disconnected`).
-
-> 💡 **Input Guard**: As soon as PBX is connected (`🟢 Connected`), `Server`, `Login`, and `Password` fields are automatically locked against accidental modifications. To edit settings, tap `Disconnect` first.
-
-### Transfer Contacts Dialog (`Refers`):
-Tapping the **`Refers`** button opens the transfer contact manager:
-* **Dialog Header**: Features the **`Refers`** title on the left and an **`Add`** button on the right to append new entries.
-* **Contact Rows**: Includes inline editable `Login` and `Name` fields.
-* **Transfer Icon `↩️`**: A rounded blue action button next to each contact. Tapping it during an active call prompts confirmation (*"Transfer to login?"*) and executes an immediate blind transfer.
-* **Delete Icon `✕`**: Removes the contact row from the list.
-* **Button `OK`**: Saves changes and closes the dialog window.
+- **SIP Telephony**: Connects to corporate and public IP PBXs (Asterisk, FreePBX, 3CX, etc.) using the G.711 codec (PCMA/PCMU).
+- **Built-in IKEv2 VPN**: Secure tunnel supporting passwords, pre-shared keys (PSK), CA certificates, and auto-reconnection.
+- **App Traffic Routing**: Selectively route other Android apps through the encrypted VPN tunnel.
+- **Blind Call Transfer (Refers)**: Instantly transfer active calls to contacts in your Refers list.
+- **Multi-Profile Management**: Create and switch between multiple independent configuration pages.
+- **Customizable Layout**: Reorder settings blocks via intuitive Drag-and-Drop.
 
 ---
 
-## 📞 4. Block 2: Number and Voice Source (Number and Voice Source)
+## 2. Configuring SIP Telephony
 
-This block is used for dialing phone numbers, making calls, and controlling audio routing.
+To configure your SIP account, locate the **"SIP server settings"** block:
 
-### Improved Button Layout & Controls:
-* **Field `Number`**: Large input field for the phone number with extra-large digits (`35 sp`).
-* **Two-Column Call Row**:
-  * **Button `📞 Call`** (Left) — Initiates an outgoing call. Enabled when registered on PBX (`🟢 Connected`).
-  * **Button `🚫 Discard`** (Right) — Cancels dialing or hangs up an active call. Highlighted in translucent red background (70% opacity) with white text.
-* **Two-Column Audio Output Row**:
-  * **Button `📢 Speaker`** (Left) — Switches audio output to loudspeaker/speakerphone.
-  * **Button `👂 Earpiece`** (Right) — Switches audio output to earpiece speaker.
-  * *Active Selection*: The active audio output button is highlighted with a thick **green border** (`3 dp`).
-* **Microphone Mute Button**:
-  * **`🤫 Mute mic`** — Tap to mute microphone (microphone is active).
-  * **`👄 Unmute mic`** — Tap to restore microphone (microphone is muted).
+1. Tap **"SIP settings ▼"** to expand the input fields.
+2. Enter your account credentials:
+   - **Server**: IP address or domain name of your PBX (e.g., `192.168.1.100` or `pbx.example.org`). If your PBX uses a non-standard port, append it after a colon: `pbx.example.org:5060`.
+   - **Login**: Your extension number or SIP username (e.g., `101`).
+   - **Password**: Your SIP account password.
+3. Tap **"Connect"**.
+4. Check the status indicator:
+   - 🟡 **Connecting...** — connecting to the SIP server.
+   - 🟢 **Connected** — successfully registered and ready to make calls.
+   - 🔴 **Error...** — registration failed (check your credentials and server address).
 
-### Call Transfer (Blind Transfer):
-1. During an active call (`🟢 Call in progress`), tap the **`Refers`** button in the PBX settings block.
-2. Tap the blue **`↩️`** icon next to the target contact in the dialog.
-3. Tap **`Yes`** in the confirmation dialog to initiate transfer.
-4. The app sends a `REFER` request with the target URI to the PBX. Upon receiving PBX confirmation (`202 Accepted` and `NOTIFY 200 OK`), the initial call automatically terminates.
-
-### Smart Features During Calls:
-* **Proximity Sensor**: Holding the phone to your ear automatically turns off the screen to prevent accidental cheek touches.
-* **Music Pause (Audio Focus)**: Playing music or YouTube videos automatically pause when a call starts and resume after hanging up.
-* **Number Locking**: During an active call, the phone number input field is locked.
+To unregister from the PBX, tap **"Disconnect"**.
 
 ---
 
-## 🛡 5. Block 3: VPN Settings (VPN Settings IKEv2)
+## 3. Making and Managing Calls
 
-This block secures traffic for the entire device or selected applications.
+The **"Number and voice source"** block is used for dialing and audio routing:
 
-### Main Settings:
-* **Button `VPN settings ▼`**: Expands or hides main VPN settings.
-* **Field `VPN server`**: IP address or domain of your VPN server.
-* **Field `VPN login`**: Your VPN username.
-* **Field `VPN password`**: Your VPN password.
-* **Button `Apps using VPN`**: Opens the list of installed Android apps. Check individual apps whose traffic should be routed through the VPN (Split Tunneling).
+### Making a Call:
+1. Enter the destination number in the large **"Number"** field.
+2. Tap the blue **"📞 Call"** button.
+3. Grant microphone permission when prompted by Android on the first call.
+4. During an active call, the status will show 🟢 **Call in progress**.
+5. To end the call, tap the red **"🚫 Discard"** button.
 
-### Advanced Settings (Nested Spoiler):
-* **Button `Advanced VPN settings ▼`**: Expands secondary VPN parameters:
-  * **`VPN pre-shared key`**: Shared PSK key (if your server uses key-based authentication instead of passwords).
-  * **`VPN CA certificate (PEM)`**: Custom SSL/TLS certificate (if using a self-signed server certificate).
-  * **`Healthcheck address`**: Address for checking tunnel connectivity (defaults to `google.com`). Sends raw ICMP ping packets every 2 seconds.
-* **Buttons `VPN connect` / `VPN disconnect`**: Starts or stops the encrypted tunnel.
-* **VPN Status Text**: Displays current VPN state (e.g. `🟢 VPN: connected (tun0)`).
-
-> 🛡 **Network Reliability & Roaming**: To avoid false tunnel disconnects in subways or poor cell signal areas, VPN checks for 5 consecutive lost pings (10 seconds of silence) before sending DPD verification requests. It also fully supports **MOBIKE (RFC 4555)**: if your VPN server supports this standard, switching between Wi-Fi and mobile data instantly migrates the tunnel on the fly without dropping connection. If the server does not support MOBIKE, the app automatically performs a full reconnect through the new network interface. VPN settings can be edited even during an active SIP call.
+### Managing Audio Options:
+- **📢 Speaker / 👂 Earpiece**: Switch between hands-free speakerphone and earpiece speaker. The active output is highlighted with a green outline.
+- **🤫 Mute mic / 👄 Unmute mic**: Mute or unmute your microphone during a call.
 
 ---
 
-## 📋 6. Built-in Logs and Debugging (Log Console)
+## 4. Call Transfer (Refers)
 
-Each of the three block cards features an integrated logging panel for connection diagnostics and error troubleshooting.
+The **Refers** feature allows you to perform an instant blind transfer of an active call to another extension.
 
-### Opening Block Logs:
-1. Tap the `⋮` (three dots) menu button on the right side of any block header (`SIP server settings`, `Number and voice source`, `VPN settings`) or next to the version label.
-2. Select **`Log`**.
-3. An interactive log console opens below the block card.
+### Setting Up Refers Contacts:
+1. In the SIP block, tap **"Refers"**.
+2. Tap **"Add"** to create a new contact row.
+3. Fill in the **Login** (extension number) and **Name** (display label).
+4. All entries are saved automatically.
 
-### Log Controls:
-* **Button `Enable` / `Disable`**: Toggles recording and rendering of log messages in the chosen buffer.
-* **Button `Clear`**: Clears the current log buffer.
-* **Button `Copy`**: Copies all accumulated log text to the system clipboard.
-* **Button `Save`**: Exports logs to a text file.
-  - Files are saved to the public **`Downloads/MiniSIP/logs/`** directory.
-  - Android 10+ uses Scoped Storage (`MediaStore`). Android 9 and lower prompts for storage write permission (`WRITE_EXTERNAL_STORAGE`).
-* **Arrow `▼`**: Instantly scrolls to the bottom of the log console.
-* **Cross `✕`**: Closes the log console.
-
-> 💡 **Smart Auto-scroll**: Auto-scroll keeps up with incoming log entries as long as you are at the bottom of the text view. If you manually scroll up to read earlier entries, auto-scroll pauses so your view is not interrupted.
+### Transferring an Active Call:
+1. During an active call, tap **"Refers"**.
+2. Locate the desired contact and tap the transfer icon **↪️**.
+3. Confirm the transfer prompt.
+4. The call will immediately be transferred to the selected contact.
 
 ---
 
-## 🔀 7. Card Drag-and-Drop Reordering
+## 5. Configuring and Connecting VPN (IKEv2)
 
-You can customize the vertical order of blocks on your screen:
-1. **Long-press** any of the three cards (`SIP server settings`, `Number and voice source`, `VPN settings`).
-2. Without lifting your finger, drag the card up or down.
-3. The new card order is saved automatically in phone memory for that page.
+The **"VPN settings (IKEv2)"** block manages your encrypted VPN tunnel connection.
 
----
+### Basic Configuration:
+1. Tap **"VPN settings ▼"**.
+2. Enter your connection details:
+   - **VPN server**: Server IP address or domain.
+   - **VPN login**: Your VPN username (e.g., `user@example.org`).
+   - **VPN password**: Your VPN password.
+3. Tap **"VPN connect"**. Grant the Android system VPN permission on first use.
 
-## 📄 8. Page Management (Multi-Account Support)
+### Advanced VPN Options:
+Tap **"Advanced VPN settings ▼"** for additional configuration:
+- **VPN pre-shared key**: Pre-shared secret key (PSK) if password authentication is not used.
+- **VPN CA certificate (PEM)**: Root CA certificate in PEM format (optional).
+- **Healthcheck address**: IP address or domain for tunnel health probing.
+- **Apps using VPN**: Select which installed apps route their traffic through the VPN.
 
-The app allows configuring multiple independent profiles (e.g., Work, Home, Travel).
-
-### Creating a New Page:
-- When the current page is configured, a new page slot appears on the right.
-- Swipe right.
-- A confirmation dialog appears: **`Create New Card`** (*"Are you sure you want to create another settings card?"*).
-  - Tap **`Yes`** to create the new page.
-  - Tap **`No`** to remain on the current page.
-
-### Deleting a Page (Hold Gesture):
-1. Scroll all the way to the bottom of the page.
-2. Pull upward **anywhere on the screen** and hold for **1 second**.
-3. A red button **`Delete Page 🗑`** smoothly appears at the bottom, and the screen automatically scrolls to it.
-4. Tap **`Delete Page 🗑`**.
-5. A confirmation dialog appears asking to confirm page deletion.
-> ⚠️ **Note**: If only one page remains, page deletion is disabled.
-
-### 🎨 Dialog Button Styling (`Yes` / `No`):
-In all confirmation popup dialogs:
-- **`No` Button** (Cancel) is styled in **bright bold blue** (`#2196F3`) to prevent accidental actions.
-- **`Yes` Button** (Confirm) is styled in **dim gray** (`#888888`) with 20% translucency (`alpha = 0.80f`).
+### VPN Status Indicators:
+- 🟢 **VPN: connected (tun0)** — tunnel is active and connected.
+- 🟡 **VPN: reconnecting...** — automatic reconnection during network transitions.
+- Status bar metrics:
+  - **Loss**: count of lost healthcheck probe packets.
+  - **Recon**: total reconnection attempts count.
+  - **MOBIKE**: status of seamless Wi-Fi / cellular interface migration.
+  - **DPD**: server dead-peer-detection state.
 
 ---
 
-## 🔄 9. App Updates (Auto-Update)
+## 6. Managing Profile Pages and Block Order
 
-The app features an integrated updater for checking and installing updates directly from GitHub Releases.
+### Multi-Profile Setup:
+- You can create separate profile pages for different environments (e.g., "Office", "Home", "Travel").
+- Swipe left or right to switch between profiles.
+- Scroll to the bottom of the page and hold the **"Delete Page 🗑"** button to remove a profile.
 
-### Checking for Updates:
-1. Scroll to the bottom of any settings page to find the version label (e.g., `v2.0.7`).
-2. Press and hold the version label for **2 seconds**.
-3. A dialog will prompt you to choose an update channel:
-   - **`Stable`** — Official stable release builds.
-   - **`Pre-release`** — Preview and pre-release builds.
-4. Tap **`Check`**.
+### Reordering Blocks (Drag-and-Drop):
+- You can change the vertical order of the settings cards ("SIP server settings", "Number and voice source", "VPN settings").
+- Long-press any card for 1 second and drag it up or down to your preferred position. Layout order is saved automatically.
 
-### Download and Installation Flow:
-* **Background Check**: The app queries the GitHub Releases API in the background and compares the release date to the installed package timestamp.
-* **Progress Bar**: If a new release is available, a dark **`UpdateBar`** slides up at the bottom of the screen displaying the download progress (`Downloading vX.X.X — 45%`).
-* **One-Tap Install**: Once downloaded, the bar displays an **`Install`** button. Tapping it:
-  - Prompts for `REQUEST_INSTALL_PACKAGES` permission on Android 8+ if not already granted.
-  - Launches Android's native package installer via a secure `FileProvider`.
-* **Update Log**: Access the update service log anytime via the `⋮` menu next to the version string -> `Log`.
+---
+
+## 7. Viewing and Saving Logs
+
+Each settings block features an embedded log viewer for troubleshooting:
+
+1. Tap the three dots **⋮** in the upper right corner of any block and select **"Log"**.
+2. Tap **"Enable"** in the log panel to activate live logging.
+3. Available log actions:
+   - **Clear**: Clear current log contents.
+   - **Copy**: Copy all log text to the system clipboard.
+   - **Save**: Save log text to a file in your device's `Downloads/MiniSIP/logs` folder.
+
+---
+
+## 8. App Updates
+
+The current app version is displayed at the bottom of the screen (e.g., `v1.0.0`).
+
+### Selecting Update Channel:
+1. Press and hold the version text for 2 seconds.
+2. Select your preferred channel:
+   - **Stable**: Official production releases.
+   - **Pre-release**: Beta versions with early access features.
+3. Tap **"Check"** to scan for updates.
+
+When an update is found, a progress bar will appear at the top of the main screen with an **"Install"** button.
+
+---
+*Thank you for using MiniSIP!*
