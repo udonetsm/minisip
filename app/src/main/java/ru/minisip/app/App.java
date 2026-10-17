@@ -8,6 +8,9 @@ import android.net.Network;
 import android.os.Handler;
 import android.os.Looper;
 
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+
 import ru.minisip.log.LogBuffer;
 import ru.minisip.media.Media;
 import ru.minisip.net.Udp;
@@ -36,6 +39,19 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     String vpnIface = "tun0";
     String vpnStatus = "🔴 VPN: disconnected";
     Runnable onChange;
+    private final List<Runnable> changeListeners = new CopyOnWriteArrayList<>();
+
+    void addChangeListener(Runnable r) {
+        changeListeners.add(r);
+    }
+
+    void removeChangeListener(Runnable r) {
+        changeListeners.remove(r);
+    }
+
+    boolean isCallActive() {
+        return state != IDLE;
+    }
     /**
      * Страница настроек, которая последней управляла подключением. SIP-стек и VPN у приложения один,
      * поэтому пока что-то активно (VPN, регистрация, вызов), им владеет одна страница, остальные
@@ -478,6 +494,9 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
 
     private void changed() {
         if (onChange != null) onChange.run();
+        for (Runnable r : changeListeners) {
+            r.run();
+        }
     }
 
 

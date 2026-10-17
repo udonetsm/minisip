@@ -247,9 +247,13 @@ public final class SettingsFragment extends Fragment {
         crLp.topMargin = dp(8);
         callBlock.container.addView(callRow, crLp);
 
-        call = button(callRow, "📞 Call", false, v -> doCall());
+        String callText = "📞 Call";
+        call = button(callRow, callText, false, v -> doCall());
         call.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
         call.setPadding(0, dp(18), 0, dp(18));
+        SpannableString callSpan = new SpannableString(callText);
+        callSpan.setSpan(new RelativeSizeSpan(1.4f), 0, Character.charCount(callText.codePointAt(0)), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        call.setText(callSpan);
         call.setBackgroundTintList(stateful(0xFF1976D2, 0x33808080));
         call.setTextColor(stateful(0xFFFFFFFF, 0x99FFFFFF));
         LinearLayout.LayoutParams callLp = new LinearLayout.LayoutParams(0,
@@ -257,9 +261,13 @@ public final class SettingsFragment extends Fragment {
         callLp.rightMargin = dp(8);
         call.setLayoutParams(callLp);
 
-        hang = button(callRow, "🚫 Discard", true, v -> app.hangup(page));
+        String hangText = "🚫 Discard";
+        hang = button(callRow, hangText, true, v -> app.hangup(page));
         hang.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
         hang.setPadding(0, dp(18), 0, dp(18));
+        SpannableString hangSpan = new SpannableString(hangText);
+        hangSpan.setSpan(new RelativeSizeSpan(1.4f), 0, Character.charCount(hangText.codePointAt(0)), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        hang.setText(hangSpan);
         hang.setBackgroundTintList(stateful(0xB3D32F2F, 0x33808080));
         hang.setStrokeColor(stateful(0xB3D32F2F, 0x33808080));
         hang.setTextColor(stateful(0xFFFFFFFF, 0x99FFFFFF));
@@ -273,12 +281,16 @@ public final class SettingsFragment extends Fragment {
         callBlock.container.addView(audioRow, arLp);
 
         muteBtn = button(audioRow, "🤫", true, v -> toggleMute());
+        muteBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f);
+        muteBtn.setPadding(0, dp(12), 0, dp(12));
         LinearLayout.LayoutParams muteLp = new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         muteLp.rightMargin = dp(8);
         muteBtn.setLayoutParams(muteLp);
 
         spkBtn = button(audioRow, "📢", true, v -> pickSpeaker(!prefs.getBoolean("speaker", false)));
+        spkBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f);
+        spkBtn.setPadding(0, dp(12), 0, dp(12));
         spkBtn.setLayoutParams(new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -421,7 +433,12 @@ public final class SettingsFragment extends Fragment {
         col.addView(updateLog.panel, row(dp(8)));
 
         // Кнопка удаления страницы
-        deleteBtn = button(col, "Delete Page 🗑", true, v -> confirmDeletePage());
+        String delText = "Delete Page 🗑";
+        deleteBtn = button(col, delText, true, v -> confirmDeletePage());
+        SpannableString delSpan = new SpannableString(delText);
+        int delIdx = delText.indexOf("🗑");
+        delSpan.setSpan(new RelativeSizeSpan(1.3f), delIdx, delIdx + Character.charCount(delText.codePointAt(delIdx)), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        deleteBtn.setText(delSpan);
         deleteBtn.setBackgroundColor(0xFFD32F2F);
         deleteBtn.setTextColor(0xFFFFFFFF);
         deleteBtn.setVisibility(View.GONE);
@@ -981,13 +998,19 @@ public final class SettingsFragment extends Fragment {
         hang.setEnabled(!other && inCall);
         muteBtn.setEnabled(!other);
         boolean muted = prefs.getBoolean("muted", false);
-        muteBtn.setText(muted ? "👄" : "🤫");
+        String muteEmoji = muted ? "👄" : "🤫";
+        SpannableString muteSpan = new SpannableString(muteEmoji);
+        muteSpan.setSpan(new RelativeSizeSpan(1.3f), 0, muteEmoji.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        muteBtn.setText(muteSpan);
         muteBtn.setStrokeColor(muted ? stateful(0xFFD32F2F, 0x33808080) : ColorStateList.valueOf(0x33808080));
         muteBtn.setStrokeWidth(muted ? dp(3) : dp(1));
 
         spkBtn.setEnabled(!other);
         boolean spk = prefs.getBoolean("speaker", false);
-        spkBtn.setText(spk ? "👂" : "📢");
+        String spkEmoji = spk ? "👂" : "📢";
+        SpannableString spkSpan = new SpannableString(spkEmoji);
+        spkSpan.setSpan(new RelativeSizeSpan(1.3f), 0, spkEmoji.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        spkBtn.setText(spkSpan);
         connect.setEnabled(!other && idle && !reg && !conn);
         disconnect.setEnabled(reg || conn);
         // VPN: подключить можно только когда он не поднят и нет вызова; отключить — когда поднят или поднимается

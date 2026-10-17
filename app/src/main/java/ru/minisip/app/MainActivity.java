@@ -27,6 +27,8 @@ import androidx.viewpager2.widget.ViewPager2;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
+import java.io.File;
+
 import ru.minisip.update.Update;
 
 /**
@@ -46,6 +48,27 @@ public final class MainActivity extends AppCompatActivity {
     private ViewPager2 pager;
     private Pages pages;
     private UpdateBar updateBar;
+
+    private final Runnable appChangeListener = this::updateLockScreenFlags;
+
+    private void updateLockScreenFlags() {
+        App app = (App) getApplication();
+        boolean active = app.isCallActive();
+        setShowWhenLocked(active);
+        setTurnScreenOn(active);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        updateLockScreenFlags();
+    }
+
+    @Override
+    protected void onDestroy() {
+        ((App) getApplication()).removeChangeListener(appChangeListener);
+        super.onDestroy();
+    }
     /**
      * tag последнего релиза — только для отображения в строке прогресса.
      */
@@ -89,9 +112,9 @@ public final class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle b) {
         super.onCreate(b);
 
-        // экран можно зажигать поверх блокировки (датчик приближения будит телефон у лица)
-        setShowWhenLocked(true);
-        setTurnScreenOn(true);
+        final App app = (App) getApplication();
+        app.addChangeListener(appChangeListener);
+        updateLockScreenFlags();
 
         pager = new ViewPager2(this);
         pager.setId(PAGER_ID);
@@ -137,7 +160,6 @@ public final class MainActivity extends AppCompatActivity {
         updateBar.attachInset(pager);
         pager.setClipToPadding(false);
 
-        final App app = (App) getApplication();
         app.update().setListener(new Update.Listener() {
             @Override
             public void onChecked(Update.Result r) {
@@ -154,7 +176,7 @@ public final class MainActivity extends AppCompatActivity {
             }
 
             @Override
-            public void onDownloaded(java.io.File apk) {
+            public void onDownloaded(File apk) {
                 updateBar.showInstall(v -> app.update().install());
             }
 
