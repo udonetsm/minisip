@@ -618,6 +618,7 @@ final class Tunnel {
         if (x.response) {
             ike.acked(x.id);
             if (ike.childRekeyPending() && x.id == ike.childRekeyId()) {
+                int mode0 = ike.childMode();
                 Esp ne = ike.onRekeyChildResponse(x);
                 if (ne != null) {
                     Esp oe = esp;
@@ -644,7 +645,7 @@ final class Tunnel {
                     if (l != null) l.d("rekey Child failed: " + ike.error);
                     ev.onRekey("Child rekey failed: " + ike.error);
                     ike.abortChildRekey();
-                    childRekeyAt = System.currentTimeMillis() + (30_000L << Math.min(childRekeyFails++, 4));
+                    childRekeyAt = System.currentTimeMillis() + (ike.childMode() != mode0 && childRekeyFails++ < 4 ? 100 : 30_000L << Math.min(childRekeyFails++, 4));
                 }
                 return;
             }

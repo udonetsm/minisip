@@ -84,7 +84,9 @@ final class Ike {
     private byte[] childRekeySpiR;
     private byte[] childRekeyNi;                // наш nonce
     private byte[] childRekeyNr;                // nonce сервера
-    private BigInteger childRekeyX;             // наша DH-пара (PFS)
+    private DhGroup childRekeyDh;               // наша DH-пара (PFS)
+    private boolean childPfs;                   // false: rekey без DH (дефолт strongSwan)
+    private int childDhGroup = DhGroup.MODP3072;  // группа в KE (первая из предложения)
 
     // =====================================================================
     // Сборка и разбор payload'ов
@@ -207,8 +209,10 @@ final class Ike {
      * SA для ESP с DH (PFS) для rekey Child SA: то же, что saEsp(), плюс группа DH.
      */
     private static byte[] saEspPfs(byte[] spi) {
-        int[][] cbc = {{T_ENCR, 12, 256}, {T_ENCR, 12, 128}, {T_INTEG, 12, 0}, {T_INTEG, 2, 0}, {T_DH, Crypto.DH_GROUP, 0}, {T_ESN, 0, 0}};
-        int[][] gcm = {{T_ENCR, 20, 256}, {T_ENCR, 20, 128}, {T_DH, Crypto.DH_GROUP, 0}, {T_ESN, 0, 0}};
+        int[][] cbc = {{T_ENCR, 12, 256}, {T_ENCR, 12, 128}, {T_INTEG, 12, 0}, {T_INTEG, 2, 0},
+                {T_DH, DhGroup.MODP3072, 0}, {T_DH, DhGroup.ECP256, 0}, {T_DH, DhGroup.MODP2048, 0}, {T_ESN, 0, 0}};
+        int[][] gcm = {{T_ENCR, 20, 256}, {T_ENCR, 20, 128},
+                {T_DH, DhGroup.MODP3072, 0}, {T_DH, DhGroup.ECP256, 0}, {T_DH, DhGroup.MODP2048, 0}, {T_ESN, 0, 0}};
         return cat(proposal(true, 1, 3, spi, cbc), proposal(false, 2, 3, spi, gcm));
     }
 
@@ -326,7 +330,7 @@ final class Ike {
             case N_NO_PROPOSAL:
                 return "server rejected our algorithms (NO_PROPOSAL_CHOSEN)";
             case N_INVALID_KE:
-                return "server wants another DH group (only group 14 is supported)";
+                return "server wants another DH group (INVALID_KE_PAYLOAD)";
             case N_AUTH_FAILED:
                 return "authentication failed";
             case N_TS_UNACCEPTABLE:
@@ -789,9 +793,9 @@ final class Ike {
         // (для AEAD e включает 4 байта соли, i = 0).
         Crypto.Box out = new Crypto.Box(c,
                 Arrays.copyOfRange(k, 0, e),
-                Arrays.copyOfRange(k, 2 * e, 2 * e + i));
+                Arrays.copyOfRange(k, e, e + i));
         Crypto.Box in = new Crypto.Box(c,
-                Arrays.copyOfRange(k, e, 2 * e),
+                Arrays.copyOfRange(k, e + i, 2 * e + i),
                 Arrays.copyOfRange(k, 2 * e + i, 2 * (e + i)));
         spiOut = u32(sa.spi, 0);
         esp = new Esp(c, out, in, spiOut, spiIn);
@@ -832,6 +836,13 @@ final class Ike {
     }
 
     /**
+     * Режим Child rekey: 0 — без DH, иначе номер группы в KE. Меняется после отказа сервера.
+     */
+    int childMode() {
+        return childPfs ? childDhGroup : 0;
+    }
+
+    /**
      * Payload'ы CREATE_CHILD_SA для Child rekey (RFC 7296 §2.8.2): SA, Ni, KEi, TSi, TSR.
      * PFS включён — KE обязателен. Вызывающий сам шлёт через seal(CHILD, false, childRekeyId(), pls).
      * null — rekey уже идёт.
@@ -844,11 +855,15 @@ final class Ike {
             Crypto.RND.nextBytes(childRekeySpiI);
         } while (u32(childRekeySpiI, 0) == 0);
         childRekeyNi = Crypto.random(32);
-        childRekeyX = Crypto.dhPrivate();
-        childRekeyKe = Crypto.dhPublic(childRekeyX);
-        byte[] ke = new byte[4 + Crypto.DH_BYTES];
-        put16(ke, 0, Crypto.DH_GROUP);
-        System.arraycopy(childRekeyKe, 0, ke, 4, childRekeyKe.length);
+        byte[] ke = null;
+        if (childPfs) {
+            childRekeyDh = DhGroup.of(childDhGroup);
+            childRekeyDh.generate();
+            childRekeyKe = childRekeyDh.publicKey();
+            ke = new byte[4 + childRekeyKe.length];
+            put16(ke, 0, childRekeyDh.id);
+            System.arraycopy(childRekeyKe, 0, ke, 4, childRekeyKe.length);
+        }
         List<Pl> l = new ArrayList<>();
         // RFC 7296 §1.3.3: N(REKEY_SA) с SPI заменяемого SA — тем, что мы ждём во входящих ESP; идёт первым
         byte[] rk = new byte[8];
@@ -857,9 +872,9 @@ final class Ike {
         put16(rk, 2, N_REKEY_SA);
         put32(rk, 4, oldSpiIn);
         l.add(new Pl(NOTIFY, rk));
-        l.add(new Pl(SA, saEspPfs(childRekeySpiI)));
+        l.add(new Pl(SA, childPfs ? saEspPfs(childRekeySpiI) : saEsp(childRekeySpiI)));
         l.add(new Pl(NONCE, childRekeyNi));
-        l.add(new Pl(KE, ke));
+        if (childPfs) l.add(new Pl(KE, ke));
         l.add(new Pl(TSI, ts()));
         l.add(new Pl(TSR, ts()));
         return l;
@@ -875,20 +890,24 @@ final class Ike {
         for (Pl p : r.pl) {
             if (p.type == NOTIFY && p.body.length >= 4 && u16(p.body, 2) < 16384) {
                 error = notifyText(u16(p.body, 2));
+                if (u16(p.body, 2) == N_NO_PROPOSAL && !childPfs) childPfs = true;
+                else if (u16(p.body, 2) == N_INVALID_KE && p.body.length >= 6 && DhGroup.supported(u16(p.body, 4)))
+                    childDhGroup = u16(p.body, 4);
                 return null;
             }
             if (p.type == SA) sa = parseSa(p.body, 3);
             else if (p.type == NONCE) nrNew = p.body;
-            else if (p.type == KE && p.body.length == 4 + Crypto.DH_BYTES) {
+            else if (p.type == KE && childRekeyDh != null && p.body.length == 4 + childRekeyDh.keBytes()
+                    && u16(p.body, 0) == childRekeyDh.id) {
                 ke = Arrays.copyOfRange(p.body, 4, p.body.length);
             }
         }
-        if (sa == null || nrNew == null || ke == null || sa.spi.length != 4
-                || !sa.suite.supported(false) || (sa.dh > 0 && sa.dh != Crypto.DH_GROUP)) {
+        if (sa == null || nrNew == null || (childPfs && ke == null) || sa.spi.length != 4
+                || !sa.suite.supported(false) || (sa.dh > 0 && (!childPfs || sa.dh != childRekeyDh.id))) {
             error = "bad CREATE_CHILD_SA reply (Child rekey)";
             return null;
         }
-        byte[] g = Crypto.dhShared(childRekeyX, ke);
+        byte[] g = childPfs ? childRekeyDh.shared(ke) : new byte[0];
         if (g == null) {
             error = "bad DH in Child rekey reply";
             return null;
@@ -901,9 +920,9 @@ final class Ike {
         byte[] k = suite.prfPlus(skD, cat(g, childRekeyNi, childRekeyNr), 2 * (e + i));
         Crypto.Box out = new Crypto.Box(c,
                 Arrays.copyOfRange(k, 0, e),
-                Arrays.copyOfRange(k, 2 * e, 2 * e + i));
+                Arrays.copyOfRange(k, e, e + i));
         Crypto.Box in = new Crypto.Box(c,
-                Arrays.copyOfRange(k, e, 2 * e),
+                Arrays.copyOfRange(k, e + i, 2 * e + i),
                 Arrays.copyOfRange(k, 2 * e + i, 2 * (e + i)));
         long newSpiOut = u32(childRekeySpiR, 0);
         long newSpiIn = u32(childRekeySpiI, 0);
@@ -917,7 +936,7 @@ final class Ike {
     void abortChildRekey() {
         childRekeyId = -1;
         childRekeySpiI = childRekeySpiR = childRekeyNi = childRekeyNr = childRekeyKe = null;
-        childRekeyX = null;
+        childRekeyDh = null;
     }
 
     boolean ikeRekeyPending() {
@@ -1161,9 +1180,9 @@ final class Ike {
         byte[] k = suite.prfPlus(skD, cat(g, ni, nr), 2 * (e + i));
         Crypto.Box in = new Crypto.Box(c,
                 Arrays.copyOfRange(k, 0, e),
-                Arrays.copyOfRange(k, 2 * e, 2 * e + i));
+                Arrays.copyOfRange(k, e, e + i));
         Crypto.Box out = new Crypto.Box(c,
-                Arrays.copyOfRange(k, e, 2 * e),
+                Arrays.copyOfRange(k, e + i, 2 * e + i),
                 Arrays.copyOfRange(k, 2 * e + i, 2 * (e + i)));
         ChildRekeyResp resp = new ChildRekeyResp();
         resp.pls = pls;

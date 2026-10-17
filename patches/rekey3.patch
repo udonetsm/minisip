@@ -1,0 +1,72 @@
+diff --git a/app/src/main/java/ru/minisip/vpn/Ike.java b/app/src/main/java/ru/minisip/vpn/Ike.java
+index 828282a..a577629 100644
+--- a/app/src/main/java/ru/minisip/vpn/Ike.java
++++ b/app/src/main/java/ru/minisip/vpn/Ike.java
+@@ -84,7 +84,7 @@ final class Ike {
+     private byte[] childRekeySpiR;
+     private byte[] childRekeyNi;                // наш nonce
+     private byte[] childRekeyNr;                // nonce сервера
+-    private BigInteger childRekeyX;             // наша DH-пара (PFS)
++    private DhGroup childRekeyDh;               // наша DH-пара (PFS)
+     private boolean childPfs;                   // false: rekey без DH (дефолт strongSwan)
+ 
+     // =====================================================================
+@@ -208,8 +208,10 @@ final class Ike {
+      * SA для ESP с DH (PFS) для rekey Child SA: то же, что saEsp(), плюс группа DH.
+      */
+     private static byte[] saEspPfs(byte[] spi) {
+-        int[][] cbc = {{T_ENCR, 12, 256}, {T_ENCR, 12, 128}, {T_INTEG, 12, 0}, {T_INTEG, 2, 0}, {T_DH, Crypto.DH_GROUP, 0}, {T_ESN, 0, 0}};
+-        int[][] gcm = {{T_ENCR, 20, 256}, {T_ENCR, 20, 128}, {T_DH, Crypto.DH_GROUP, 0}, {T_ESN, 0, 0}};
++        int[][] cbc = {{T_ENCR, 12, 256}, {T_ENCR, 12, 128}, {T_INTEG, 12, 0}, {T_INTEG, 2, 0},
++                {T_DH, DhGroup.MODP3072, 0}, {T_DH, DhGroup.ECP256, 0}, {T_DH, DhGroup.MODP2048, 0}, {T_ESN, 0, 0}};
++        int[][] gcm = {{T_ENCR, 20, 256}, {T_ENCR, 20, 128},
++                {T_DH, DhGroup.MODP3072, 0}, {T_DH, DhGroup.ECP256, 0}, {T_DH, DhGroup.MODP2048, 0}, {T_ESN, 0, 0}};
+         return cat(proposal(true, 1, 3, spi, cbc), proposal(false, 2, 3, spi, gcm));
+     }
+ 
+@@ -854,10 +856,11 @@ final class Ike {
+         childRekeyNi = Crypto.random(32);
+         byte[] ke = null;
+         if (childPfs) {
+-            childRekeyX = Crypto.dhPrivate();
+-            childRekeyKe = Crypto.dhPublic(childRekeyX);
+-            ke = new byte[4 + Crypto.DH_BYTES];
+-            put16(ke, 0, Crypto.DH_GROUP);
++            childRekeyDh = DhGroup.of(DhGroup.MODP3072);
++            childRekeyDh.generate();
++            childRekeyKe = childRekeyDh.publicKey();
++            ke = new byte[4 + childRekeyKe.length];
++            put16(ke, 0, childRekeyDh.id);
+             System.arraycopy(childRekeyKe, 0, ke, 4, childRekeyKe.length);
+         }
+         List<Pl> l = new ArrayList<>();
+@@ -891,16 +894,17 @@ final class Ike {
+             }
+             if (p.type == SA) sa = parseSa(p.body, 3);
+             else if (p.type == NONCE) nrNew = p.body;
+-            else if (p.type == KE && p.body.length == 4 + Crypto.DH_BYTES) {
++            else if (p.type == KE && childRekeyDh != null && p.body.length == 4 + childRekeyDh.keBytes()
++                    && u16(p.body, 0) == childRekeyDh.id) {
+                 ke = Arrays.copyOfRange(p.body, 4, p.body.length);
+             }
+         }
+         if (sa == null || nrNew == null || (childPfs && ke == null) || sa.spi.length != 4
+-                || !sa.suite.supported(false) || (sa.dh > 0 && (!childPfs || sa.dh != Crypto.DH_GROUP))) {
++                || !sa.suite.supported(false) || (sa.dh > 0 && (!childPfs || sa.dh != childRekeyDh.id))) {
+             error = "bad CREATE_CHILD_SA reply (Child rekey)";
+             return null;
+         }
+-        byte[] g = childPfs ? Crypto.dhShared(childRekeyX, ke) : new byte[0];
++        byte[] g = childPfs ? childRekeyDh.shared(ke) : new byte[0];
+         if (g == null) {
+             error = "bad DH in Child rekey reply";
+             return null;
+@@ -929,7 +933,7 @@ final class Ike {
+     void abortChildRekey() {
+         childRekeyId = -1;
+         childRekeySpiI = childRekeySpiR = childRekeyNi = childRekeyNr = childRekeyKe = null;
+-        childRekeyX = null;
++        childRekeyDh = null;
+     }
+ 
+     boolean ikeRekeyPending() {

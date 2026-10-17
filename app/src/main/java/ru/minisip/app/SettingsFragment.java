@@ -9,8 +9,8 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.res.ColorStateList;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -271,19 +271,17 @@ public final class SettingsFragment extends Fragment {
         View leftSpacer = new View(ctx);
         callRow.addView(leftSpacer, new LinearLayout.LayoutParams(0, 0, 1f));
 
-        String callText = "📞 Call";
-        call = button(callRow, callText, false, v -> {
+        call = button(callRow, "📞", false, v -> {
             if (app.state != App.IDLE) {
                 app.hangup(page);
             } else {
                 doCall();
             }
         });
-        call.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
-        call.setPadding(0, dp(18), 0, dp(18));
-        SpannableString callSpan = new SpannableString(callText);
-        callSpan.setSpan(new RelativeSizeSpan(1.4f), 0, Character.charCount(callText.codePointAt(0)), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        call.setText(callSpan);
+        call.setTextSize(TypedValue.COMPLEX_UNIT_SP, 30f);
+        call.setTypeface(null, Typeface.BOLD);
+        call.setGravity(Gravity.CENTER);
+        call.setPadding(0, dp(16), 0, dp(16));
         call.setBackgroundTintList(stateful(0xFF1976D2, 0x33808080));
         call.setTextColor(stateful(0xFFFFFFFF, 0x99FFFFFF));
         LinearLayout.LayoutParams callLp = new LinearLayout.LayoutParams(0,
@@ -877,19 +875,15 @@ public final class SettingsFragment extends Fragment {
 
                 TextView use = new TextView(ctx);
                 use.setText("\u21AA\uFE0F");
-                use.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f);
+                use.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
                 use.setIncludeFontPadding(false);
                 use.setGravity(Gravity.CENTER);
-                use.setPadding(dp(8), dp(2), dp(8), dp(2));  // «выступ» вокруг эмодзи
-                GradientDrawable bg =
-                        new GradientDrawable();
-                bg.setColor(MaterialColors.getColor(use,
-                        com.google.android.material.R.attr.colorPrimary, 0xFF1976D2));
-                bg.setCornerRadius(dp(10));
-                use.setBackground(new RippleDrawable(
-                        ColorStateList.valueOf(0x40FFFFFF), bg, null));
+                use.setPadding(dp(8), dp(8), dp(8), dp(8));
                 use.setClickable(true);
                 use.setFocusable(true);
+                TypedValue outValue = new TypedValue();
+                ctx.getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, outValue, true);
+                use.setBackgroundResource(outValue.resourceId);
                 use.setOnClickListener(v -> {
                     if (app.state != App.TALK || app.lastPage != page) {
                         Toast.makeText(ctx, "No active call", Toast.LENGTH_SHORT).show();
@@ -906,18 +900,35 @@ public final class SettingsFragment extends Fragment {
                             },
                             null);
                 });
+                LinearLayout.LayoutParams useLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT);
+                useLp.gravity = Gravity.CENTER_VERTICAL;
+                use.setLayoutParams(useLp);
                 row.addView(use);
 
                 TextView del = new TextView(ctx);
-                del.setText("\u2715");
-                del.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
-                del.setPadding(dp(10), dp(6), dp(10), dp(6));
+                del.setText("❌");
+                del.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
+                del.setIncludeFontPadding(false);
+                del.setGravity(Gravity.CENTER);
+                del.setPadding(dp(8), dp(8), dp(8), dp(8));
                 del.setClickable(true);
+                del.setFocusable(true);
+                TypedValue outValueDel = new TypedValue();
+                ctx.getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, outValueDel, true);
+                del.setBackgroundResource(outValueDel.resourceId);
                 del.setOnClickListener(v -> {
                     working.remove(idx);
                     PageStore.setRefers(ctx, page, working);
                     rebuild[0].run();
                 });
+                LinearLayout.LayoutParams delLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT);
+                delLp.gravity = Gravity.CENTER_VERTICAL;
+                delLp.leftMargin = dp(6);
+                del.setLayoutParams(delLp);
                 row.addView(del);
 
                 box.addView(row);
@@ -995,19 +1006,13 @@ public final class SettingsFragment extends Fragment {
         vpnStatus.setText(mine ? app.vpnStatus : other ? busy : "VPN: disconnected");
         call.setEnabled(!other && (inCall || reg));
         if (inCall) {
-            String hangText = "🚫 Discard";
-            SpannableString hangSpan = new SpannableString(hangText);
-            hangSpan.setSpan(new RelativeSizeSpan(1.4f), 0, Character.charCount(hangText.codePointAt(0)), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            call.setText(hangSpan);
+            call.setText("🚫");
             call.setBackgroundTintList(stateful(0xB3D32F2F, 0x33808080));
             call.setStrokeColor(stateful(0xB3D32F2F, 0x33808080));
             call.setStrokeWidth(dp(1));
             call.setTextColor(stateful(0xFFFFFFFF, 0x99FFFFFF));
         } else {
-            String callText = "📞 Call";
-            SpannableString callSpan = new SpannableString(callText);
-            callSpan.setSpan(new RelativeSizeSpan(1.4f), 0, Character.charCount(callText.codePointAt(0)), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            call.setText(callSpan);
+            call.setText("📞");
             call.setBackgroundTintList(stateful(0xFF1976D2, 0x33808080));
             call.setStrokeWidth(0);
             call.setTextColor(stateful(0xFFFFFFFF, 0x99FFFFFF));

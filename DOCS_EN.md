@@ -54,10 +54,10 @@ The **"Number and voice source"** block is used for dialing and audio routing:
 
 ### Making a Call:
 1. Enter the destination number in the large **"Number"** field.
-2. Tap the blue **"📞 Call"** button.
+2. Tap the blue **"📞"** button.
 3. Grant microphone permission when prompted by Android on the first call.
 4. During an active call, the status will show 🟢 **Call in progress**.
-5. To end the call, tap the red **"🚫 Discard"** button.
+5. To end the call, tap the red **"🚫"** button.
 
 ### Managing Audio Options:
 - **📢 Speaker / 👂 Earpiece**: Switch between hands-free speakerphone and earpiece speaker. The active output is highlighted with a green outline.
