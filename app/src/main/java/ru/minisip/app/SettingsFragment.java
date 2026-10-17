@@ -102,7 +102,7 @@ public final class SettingsFragment extends Fragment {
             new ActivityResultContracts.RequestPermission(), granted -> {
                 if (!granted && status != null) status.setText("Microphone permission required");
             });
-    private MaterialButton connect, disconnect, refersBtn, call, hang, spkBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
+    private MaterialButton connect, disconnect, refersBtn, call, spkBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
     /**
      * Одна и та же ссылка нужна, чтобы в onPause снимать только свой колбэк.
      */
@@ -240,39 +240,6 @@ public final class SettingsFragment extends Fragment {
             ((TextInputLayout) number.getParent()).setHintTextAppearance(android.R.style.TextAppearance_Medium);
         }
 
-        LinearLayout callRow = new LinearLayout(ctx);
-        callRow.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams crLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        crLp.topMargin = dp(8);
-        callBlock.container.addView(callRow, crLp);
-
-        String callText = "📞 Call";
-        call = button(callRow, callText, false, v -> doCall());
-        call.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
-        call.setPadding(0, dp(18), 0, dp(18));
-        SpannableString callSpan = new SpannableString(callText);
-        callSpan.setSpan(new RelativeSizeSpan(1.4f), 0, Character.charCount(callText.codePointAt(0)), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        call.setText(callSpan);
-        call.setBackgroundTintList(stateful(0xFF1976D2, 0x33808080));
-        call.setTextColor(stateful(0xFFFFFFFF, 0x99FFFFFF));
-        LinearLayout.LayoutParams callLp = new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        callLp.rightMargin = dp(8);
-        call.setLayoutParams(callLp);
-
-        String hangText = "🚫 Discard";
-        hang = button(callRow, hangText, true, v -> app.hangup(page));
-        hang.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
-        hang.setPadding(0, dp(18), 0, dp(18));
-        SpannableString hangSpan = new SpannableString(hangText);
-        hangSpan.setSpan(new RelativeSizeSpan(1.4f), 0, Character.charCount(hangText.codePointAt(0)), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        hang.setText(hangSpan);
-        hang.setBackgroundTintList(stateful(0xB3D32F2F, 0x33808080));
-        hang.setStrokeColor(stateful(0xB3D32F2F, 0x33808080));
-        hang.setTextColor(stateful(0xFFFFFFFF, 0x99FFFFFF));
-        hang.setLayoutParams(new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         LinearLayout audioRow = new LinearLayout(ctx);
         audioRow.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams arLp = new LinearLayout.LayoutParams(
@@ -293,6 +260,38 @@ public final class SettingsFragment extends Fragment {
         spkBtn.setPadding(0, dp(12), 0, dp(12));
         spkBtn.setLayoutParams(new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        LinearLayout callRow = new LinearLayout(ctx);
+        callRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams crLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        crLp.topMargin = dp(8);
+        callBlock.container.addView(callRow, crLp);
+
+        View leftSpacer = new View(ctx);
+        callRow.addView(leftSpacer, new LinearLayout.LayoutParams(0, 0, 1f));
+
+        String callText = "📞 Call";
+        call = button(callRow, callText, false, v -> {
+            if (app.state != App.IDLE) {
+                app.hangup(page);
+            } else {
+                doCall();
+            }
+        });
+        call.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
+        call.setPadding(0, dp(18), 0, dp(18));
+        SpannableString callSpan = new SpannableString(callText);
+        callSpan.setSpan(new RelativeSizeSpan(1.4f), 0, Character.charCount(callText.codePointAt(0)), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        call.setText(callSpan);
+        call.setBackgroundTintList(stateful(0xFF1976D2, 0x33808080));
+        call.setTextColor(stateful(0xFFFFFFFF, 0x99FFFFFF));
+        LinearLayout.LayoutParams callLp = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 2f);
+        call.setLayoutParams(callLp);
+
+        View rightSpacer = new View(ctx);
+        callRow.addView(rightSpacer, new LinearLayout.LayoutParams(0, 0, 1f));
 
         callBlock.container.addView(callLog.panel, row(dp(8)));
 
@@ -516,7 +515,7 @@ public final class SettingsFragment extends Fragment {
         super.onDestroyView();
         server = login = pass = number = vpnServer = vpnLogin = vpnPass = vpnKey = vpnCa = vpnHealthcheck = vpnPingInterval = null;
         status = vpnStatus = null;
-        connect = disconnect = refersBtn = call = hang = spkBtn = muteBtn = vpnConnect = vpnDisconnect = vpnAppsBtn = vpnMainBtn = vpnAdvancedBtn = sipAdvancedBtn = deleteBtn = null;
+        connect = disconnect = refersBtn = call = spkBtn = muteBtn = vpnConnect = vpnDisconnect = vpnAppsBtn = vpnMainBtn = vpnAdvancedBtn = sipAdvancedBtn = deleteBtn = null;
         vpnMainSpoilerContainer = vpnAdvancedSpoilerContainer = sipSpoilerContainer = null;
         versionLabel = null;
         updateLog = null;
@@ -994,8 +993,25 @@ public final class SettingsFragment extends Fragment {
         String busy = "Busy: session in use by page " + (app.lastPage + 1);
         status.setText(mine ? app.status : other ? busy : "Disconnected");
         vpnStatus.setText(mine ? app.vpnStatus : other ? busy : "VPN: disconnected");
-        call.setEnabled(!other && !inCall && reg);
-        hang.setEnabled(!other && inCall);
+        call.setEnabled(!other && (inCall || reg));
+        if (inCall) {
+            String hangText = "🚫 Discard";
+            SpannableString hangSpan = new SpannableString(hangText);
+            hangSpan.setSpan(new RelativeSizeSpan(1.4f), 0, Character.charCount(hangText.codePointAt(0)), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            call.setText(hangSpan);
+            call.setBackgroundTintList(stateful(0xB3D32F2F, 0x33808080));
+            call.setStrokeColor(stateful(0xB3D32F2F, 0x33808080));
+            call.setStrokeWidth(dp(1));
+            call.setTextColor(stateful(0xFFFFFFFF, 0x99FFFFFF));
+        } else {
+            String callText = "📞 Call";
+            SpannableString callSpan = new SpannableString(callText);
+            callSpan.setSpan(new RelativeSizeSpan(1.4f), 0, Character.charCount(callText.codePointAt(0)), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            call.setText(callSpan);
+            call.setBackgroundTintList(stateful(0xFF1976D2, 0x33808080));
+            call.setStrokeWidth(0);
+            call.setTextColor(stateful(0xFFFFFFFF, 0x99FFFFFF));
+        }
         muteBtn.setEnabled(!other);
         boolean muted = prefs.getBoolean("muted", false);
         String muteEmoji = muted ? "👄" : "🤫";
