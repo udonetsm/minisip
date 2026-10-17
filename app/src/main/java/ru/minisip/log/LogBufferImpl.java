@@ -12,7 +12,7 @@ final class LogBufferImpl implements LogBuffer {
 
     private final int max;
     private final ArrayDeque<String> lines = new ArrayDeque<>();
-    private final SimpleDateFormat time = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US);
+    private final SimpleDateFormat time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US);
     private volatile boolean enabled = true;
     private volatile Runnable listener;
 
@@ -24,8 +24,16 @@ final class LogBufferImpl implements LogBuffer {
     public void log(String line) {
         if (!enabled || line == null) return;
         synchronized (this) {
+            String formatted = time.format(new Date()) + " " + line;
+            boolean isRegTrue = line.contains("registered=true");
+            if (isRegTrue && !lines.isEmpty()) {
+                String lastLine = lines.peekLast();
+                if (lastLine != null && lastLine.contains("registered=true")) {
+                    lines.removeLast();
+                }
+            }
             if (lines.size() >= max) lines.removeFirst();
-            lines.addLast(time.format(new Date()) + " " + line);
+            lines.addLast(formatted);
         }
         notifyChanged();
     }

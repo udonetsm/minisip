@@ -1,0 +1,48 @@
+diff --git a/app/src/main/java/ru/minisip/app/SettingsFragment.java b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -843,20 +843,27 @@
+-        // Group into sessions by "dial", discarding pre-dial lines
++        // Group into sessions: a new "dial" starts a session only if the previous
++        // one already finished (hangup/ended/error). Otherwise dial+ringing+
++        // connected+hangup of one call stay in a single chain.
+         List<List<String>> sessions = new ArrayList<>();
+         List<String> currentSession = null;
+         for (String line : validLines) {
+             String lower = line.toLowerCase();
+-            if (lower.contains("dial")) {
+-                if (currentSession != null && !currentSession.isEmpty()) {
+-                    sessions.add(currentSession);
+-                }
++            if (!isCallEvent(lower)) continue;
++
++            if (currentSession == null) {
++                if (!lower.contains("dial")) continue;
+                 currentSession = new ArrayList<>();
++            } else if (lower.contains("dial") && hasTerminalEvent(currentSession)) {
++                sessions.add(currentSession);
++                currentSession = new ArrayList<>();
+             }
+-            if (currentSession != null && isCallEvent(lower)) {
+-                currentSession.add(line);
+-            }
++            currentSession.add(line);
+         }
+         if (currentSession != null && !currentSession.isEmpty()) {
+             sessions.add(currentSession);
+         }
+@@ -1024,6 +1031,14 @@
+         callHistoryScroll.post(() -> callHistoryScroll.fullScroll(View.FOCUS_DOWN));
+     }
+ 
++    private boolean hasTerminalEvent(List<String> session) {
++        if (session.isEmpty()) return false;
++        String last = session.get(session.size() - 1).toLowerCase();
++        return last.contains("hangup")
++                || last.contains("ended")
++                || last.contains("error");
++    }
++
+     private String getEventTitle(String line) {
+         String lower = line.toLowerCase();
+         if (lower.contains("dial")) {

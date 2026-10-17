@@ -34,6 +34,7 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.EditText;
+import android.widget.HorizontalScrollView;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
@@ -86,9 +87,13 @@ public final class SettingsFragment extends Fragment {
      * Мост LogBuffer -> поле панели для блока «Звонок».
      */
     private final Runnable callLogUpdate = () -> {
-        LogArea a = this.callLog;
-        if (a != null && app != null) a.setText(app.callLog().text());
+        if (app != null) {
+            updateCallHistory(app.callLog().text());
+        }
     };
+    private NestedScrollView callHistoryScroll;
+    private LinearLayout callHistoryContainer;
+    private final Set<String> expandedSessions = new HashSet<>();
     private SharedPreferences prefs;
     private int page;                  // номер страницы; от него зависят и настройки, и право на подключение
     private boolean loading;           // поля заполняются из настроек: изменения не сохранять заново
@@ -102,13 +107,13 @@ public final class SettingsFragment extends Fragment {
             new ActivityResultContracts.RequestPermission(), granted -> {
                 if (!granted && status != null) status.setText("Microphone permission required");
             });
-    private MaterialButton connect, disconnect, refersBtn, call, spkBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
+    private MaterialButton connect, disconnect, refersBtn, call, spkBtn, muteBtn, historyBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
     /**
      * Одна и та же ссылка нужна, чтобы в onPause снимать только свой колбэк.
      */
     private final Runnable renderer = this::render;
     private LinearLayout vpnMainSpoilerContainer, vpnAdvancedSpoilerContainer, sipSpoilerContainer;
-    private LogArea sipLog, callLog, vpnLog;
+    private LogArea sipLog, vpnLog;
     /**
      * Мост LogBuffer -> поле панели для блока «SIP сервер».
      */
@@ -232,7 +237,7 @@ public final class SettingsFragment extends Fragment {
 
         // --- Блок 2: Номер телефона и источник звука ---
         Block callBlock = createBlock(1);
-        callLog = title(callBlock.container, "Number and voice source", 0);
+        simpleTitle(callBlock.container, "Number and voice source");
         number = field(callBlock.container, "Number", null, "", InputType.TYPE_CLASS_PHONE, false);
         number.setTextSize(TypedValue.COMPLEX_UNIT_SP, 35f);
         number.setPadding(dp(16), dp(16), dp(16), dp(16));
@@ -252,14 +257,28 @@ public final class SettingsFragment extends Fragment {
         muteBtn.setPadding(0, dp(12), 0, dp(12));
         LinearLayout.LayoutParams muteLp = new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        muteLp.rightMargin = dp(8);
+        muteLp.rightMargin = dp(4);
         muteBtn.setLayoutParams(muteLp);
 
         spkBtn = button(audioRow, "📢", true, v -> pickSpeaker(!prefs.getBoolean("speaker", false)));
         spkBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f);
         spkBtn.setPadding(0, dp(12), 0, dp(12));
-        spkBtn.setLayoutParams(new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout.LayoutParams spkLp = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        spkLp.leftMargin = dp(4);
+        spkLp.rightMargin = dp(4);
+        spkBtn.setLayoutParams(spkLp);
+
+        historyBtn = button(audioRow, "📄", true, v -> {
+            boolean show = callHistoryScroll.getVisibility() == View.GONE;
+            callHistoryScroll.setVisibility(show ? View.VISIBLE : View.GONE);
+        });
+        historyBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f);
+        historyBtn.setPadding(0, dp(12), 0, dp(12));
+        LinearLayout.LayoutParams historyLp = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        historyLp.leftMargin = dp(4);
+        historyBtn.setLayoutParams(historyLp);
 
         LinearLayout callRow = new LinearLayout(ctx);
         callRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -291,7 +310,28 @@ public final class SettingsFragment extends Fragment {
         View rightSpacer = new View(ctx);
         callRow.addView(rightSpacer, new LinearLayout.LayoutParams(0, 0, 1f));
 
-        callBlock.container.addView(callLog.panel, row(dp(8)));
+        callHistoryScroll = new NestedScrollView(ctx);
+        callHistoryScroll.setVerticalScrollBarEnabled(true);
+        LinearLayout.LayoutParams chsLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(200));
+        chsLp.topMargin = dp(8);
+        callHistoryScroll.setLayoutParams(chsLp);
+
+        callHistoryContainer = new LinearLayout(ctx);
+        callHistoryContainer.setOrientation(LinearLayout.VERTICAL);
+        int p = dp(8);
+        callHistoryContainer.setPadding(p, p, p, p);
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0x14808080);
+        bg.setStroke(dp(1), 0x33808080);
+        bg.setCornerRadius(dp(8));
+        callHistoryContainer.setBackground(bg);
+
+        callHistoryScroll.addView(callHistoryContainer, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        callBlock.container.addView(callHistoryScroll, chsLp);
+        callHistoryScroll.setVisibility(View.GONE);
 
         // --- Блок 3: Настройка VPN ---
         Block vpnBlock = createBlock(2);
@@ -513,7 +553,7 @@ public final class SettingsFragment extends Fragment {
         super.onDestroyView();
         server = login = pass = number = vpnServer = vpnLogin = vpnPass = vpnKey = vpnCa = vpnHealthcheck = vpnPingInterval = null;
         status = vpnStatus = null;
-        connect = disconnect = refersBtn = call = spkBtn = muteBtn = vpnConnect = vpnDisconnect = vpnAppsBtn = vpnMainBtn = vpnAdvancedBtn = sipAdvancedBtn = deleteBtn = null;
+        connect = disconnect = refersBtn = call = spkBtn = muteBtn = historyBtn = vpnConnect = vpnDisconnect = vpnAppsBtn = vpnMainBtn = vpnAdvancedBtn = sipAdvancedBtn = deleteBtn = null;
         vpnMainSpoilerContainer = vpnAdvancedSpoilerContainer = sipSpoilerContainer = null;
         versionLabel = null;
         updateLog = null;
@@ -540,11 +580,8 @@ public final class SettingsFragment extends Fragment {
             vpnLog.setText(app.vpnLog().text());
             app.vpnLog().setListener(vpnLogUpdate);
         }
-        if (callLog != null) {
-            callLog.onEnable = callLogUpdate;
-            callLog.onClear = () -> app.callLog().clear();
-            callLog.onSave = () -> saveLog("call", callLog);
-            callLog.setText(app.callLog().text());
+        if (app != null) {
+            updateCallHistory(app.callLog().text());
             app.callLog().setListener(callLogUpdate);
         }
         if (sipLog != null) {
@@ -1032,6 +1069,14 @@ public final class SettingsFragment extends Fragment {
         SpannableString spkSpan = new SpannableString(spkEmoji);
         spkSpan.setSpan(new RelativeSizeSpan(1.3f), 0, spkEmoji.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         spkBtn.setText(spkSpan);
+
+        if (historyBtn != null) {
+            historyBtn.setEnabled(!other);
+            String logEmoji = "📄";
+            SpannableString historySpan = new SpannableString(logEmoji);
+            historySpan.setSpan(new RelativeSizeSpan(1.3f), 0, logEmoji.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            historyBtn.setText(historySpan);
+        }
         connect.setEnabled(!other && idle && !reg && !conn);
         disconnect.setEnabled(reg || conn);
         // VPN: подключить можно только когда он не поднят и нет вызова; отключить — когда поднят или поднимается
@@ -1207,6 +1252,15 @@ public final class SettingsFragment extends Fragment {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         p.topMargin = top;
         return p;
+    }
+
+    private TextView simpleTitle(LinearLayout parent, String text) {
+        Context ctx = parent.getContext();
+        TextView t = new TextView(ctx);
+        t.setText(text);
+        t.setTextAppearance(android.R.style.TextAppearance_Medium);
+        parent.addView(t, row(0));
+        return t;
     }
 
     private LogArea title(LinearLayout parent, String text, int top) {
@@ -1513,5 +1567,277 @@ public final class SettingsFragment extends Fragment {
             int max = maxScroll();
             if (max > 0) text.scrollTo(0, max);
         }
+    }
+
+    private void updateCallHistory(String logText) {
+        if (callHistoryContainer == null || callHistoryScroll == null) return;
+        callHistoryContainer.removeAllViews();
+        if (logText == null || logText.trim().isEmpty()) {
+            callHistoryScroll.setVisibility(View.GONE);
+            return;
+        }
+        callHistoryScroll.setVisibility(View.VISIBLE);
+
+        String[] allLines = logText.split("\n");
+        List<String> validLines = new ArrayList<>();
+        for (String l : allLines) {
+            String trimmed = l.trim();
+            if (!trimmed.isEmpty() && !trimmed.toLowerCase().contains("registered=")) {
+                validLines.add(trimmed);
+            }
+        }
+
+        if (validLines.isEmpty()) {
+            callHistoryScroll.setVisibility(View.GONE);
+            return;
+        }
+
+        // Group into sessions: a new "dial" starts a session only if the previous
+        // one already finished (hangup/ended/error). Otherwise dial+ringing+
+        // connected+hangup of one call stay in a single chain.
+        List<List<String>> sessions = new ArrayList<>();
+        List<String> currentSession = null;
+        for (String line : validLines) {
+            String lower = line.toLowerCase();
+            if (!isCallEvent(lower)) continue;
+
+            if (currentSession == null) {
+                if (!lower.contains("dial")) continue;
+                currentSession = new ArrayList<>();
+            } else if (lower.contains("dial") && hasTerminalEvent(currentSession)) {
+                sessions.add(currentSession);
+                currentSession = new ArrayList<>();
+            }
+            currentSession.add(line);
+        }
+        if (currentSession != null && !currentSession.isEmpty()) {
+            sessions.add(currentSession);
+        }
+
+        if (sessions.isEmpty()) {
+            callHistoryScroll.setVisibility(View.GONE);
+            return;
+        }
+
+        Context ctx = requireContext();
+
+        for (List<String> session : sessions) {
+            String phoneNumber = "";
+            for (String sl : session) {
+                String lowerSl = sl.toLowerCase();
+                if (lowerSl.contains("dial")) {
+                    int idx = lowerSl.indexOf("dial");
+                    phoneNumber = sl.substring(idx + 4).trim();
+                    break;
+                }
+            }
+            if (phoneNumber.isEmpty()) {
+                phoneNumber = "Call";
+            }
+
+            String sessionKey = phoneNumber + "_" + session.get(0);
+            boolean isExpanded = expandedSessions.contains(sessionKey);
+
+            LinearLayout rowWrapper = new LinearLayout(ctx);
+            rowWrapper.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout.LayoutParams rwLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            rwLp.bottomMargin = dp(8);
+            rowWrapper.setLayoutParams(rwLp);
+
+            LinearLayout headerLayout = new LinearLayout(ctx);
+            headerLayout.setOrientation(LinearLayout.HORIZONTAL);
+            headerLayout.setGravity(Gravity.CENTER_VERTICAL);
+            headerLayout.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            TextView copyBtn = new TextView(ctx);
+            copyBtn.setText("📋");
+            copyBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
+            int pad = dp(6);
+            copyBtn.setPadding(pad, pad, pad, pad);
+            copyBtn.setClickable(true);
+            copyBtn.setFocusable(true);
+            final String num = phoneNumber;
+            copyBtn.setOnClickListener(v -> {
+                StringBuilder sb = new StringBuilder();
+                sb.append("Number: ").append(num).append("\n");
+                for (String sl : session) {
+                    sb.append(sl).append("\n");
+                }
+                ClipboardManager cm = (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
+                if (cm != null) {
+                    cm.setPrimaryClip(ClipData.newPlainText("Call Session", sb.toString()));
+                    Toast.makeText(ctx, "Call session copied", Toast.LENGTH_SHORT).show();
+                }
+            });
+            headerLayout.addView(copyBtn);
+
+            TextView phoneTv = new TextView(ctx);
+            phoneTv.setText(phoneNumber);
+            phoneTv.setTextAppearance(android.R.style.TextAppearance_Small);
+            phoneTv.setTypeface(null, Typeface.BOLD);
+            phoneTv.setPadding(dp(8), dp(4), dp(8), dp(4));
+            headerLayout.addView(phoneTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            LinearLayout stackContainer = new LinearLayout(ctx);
+            stackContainer.setOrientation(LinearLayout.HORIZONTAL);
+            stackContainer.setGravity(Gravity.CENTER_VERTICAL);
+            for (int j = 0; j < session.size(); j++) {
+                View sDot = new View(ctx);
+                int sSize = dp(10);
+                LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(sSize, sSize);
+                if (j > 0) {
+                    sLp.leftMargin = dp(3);
+                }
+                sDot.setLayoutParams(sLp);
+
+                GradientDrawable sd = new GradientDrawable();
+                sd.setShape(GradientDrawable.OVAL);
+                sd.setColor(getStatusColor(session.get(j)));
+                sDot.setBackground(sd);
+
+                stackContainer.addView(sDot);
+            }
+            headerLayout.addView(stackContainer);
+
+            TextView expandIndicator = new TextView(ctx);
+            expandIndicator.setText(isExpanded ? "▲" : "▼");
+            expandIndicator.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f);
+            expandIndicator.setPadding(dp(8), dp(4), dp(8), dp(4));
+            headerLayout.addView(expandIndicator);
+
+            rowWrapper.addView(headerLayout);
+
+            HorizontalScrollView hScroll = new HorizontalScrollView(ctx);
+            hScroll.setHorizontalScrollBarEnabled(false);
+            LinearLayout.LayoutParams hsLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            hsLp.leftMargin = dp(24);
+            hsLp.topMargin = dp(2);
+            hScroll.setLayoutParams(hsLp);
+            hScroll.setVisibility(isExpanded ? View.VISIBLE : View.GONE);
+
+            LinearLayout dotContainer = new LinearLayout(ctx);
+            dotContainer.setOrientation(LinearLayout.HORIZONTAL);
+            dotContainer.setGravity(Gravity.CENTER_VERTICAL);
+            dotContainer.setPadding(dp(4), 0, dp(4), 0);
+            hScroll.addView(dotContainer, new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            for (int i = 0; i < session.size(); i++) {
+                final String line = session.get(i);
+
+                if (i > 0) {
+                    View lineView = new View(ctx);
+                    int lw = dp(18);
+                    int lh = dp(2);
+                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(lw, lh);
+                    lp.gravity = Gravity.CENTER_VERTICAL;
+                    lineView.setLayoutParams(lp);
+                    lineView.setBackgroundColor(0x80FFFFFF);
+                    dotContainer.addView(lineView);
+                }
+
+                View dot = new View(ctx);
+                int size = dp(14);
+                LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(size, size);
+                dotLp.gravity = Gravity.CENTER_VERTICAL;
+                dot.setLayoutParams(dotLp);
+
+                int color = getStatusColor(line);
+                GradientDrawable drawable = new GradientDrawable();
+                drawable.setShape(GradientDrawable.OVAL);
+                drawable.setColor(color);
+                drawable.setStroke(dp(1), 0xFFFFFFFF);
+                dot.setBackground(drawable);
+
+                dot.setOnClickListener(v -> {
+                    new MaterialAlertDialogBuilder(ctx)
+                            .setTitle(getEventTitle(line))
+                            .setMessage(line)
+                            .setPositiveButton("Copy", (dialog, which) -> {
+                                ClipboardManager cm = (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
+                                if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("call event", line));
+                                Toast.makeText(ctx, "Copied to clipboard", Toast.LENGTH_SHORT).show();
+                            })
+                            .setNegativeButton("Close", null)
+                            .show();
+                });
+
+                dotContainer.addView(dot);
+            }
+
+            headerLayout.setClickable(true);
+            headerLayout.setFocusable(true);
+            headerLayout.setOnClickListener(v -> {
+                boolean expanded = hScroll.getVisibility() == View.VISIBLE;
+                if (expanded) {
+                    hScroll.setVisibility(View.GONE);
+                    expandIndicator.setText("▼");
+                    expandedSessions.remove(sessionKey);
+                } else {
+                    hScroll.setVisibility(View.VISIBLE);
+                    expandIndicator.setText("▲");
+                    expandedSessions.add(sessionKey);
+                }
+            });
+
+            rowWrapper.addView(hScroll);
+            callHistoryContainer.addView(rowWrapper);
+        }
+
+        callHistoryScroll.post(() -> callHistoryScroll.fullScroll(View.FOCUS_DOWN));
+    }
+
+    private boolean hasTerminalEvent(List<String> session) {
+        if (session.isEmpty()) return false;
+        String last = session.get(session.size() - 1).toLowerCase();
+        return last.contains("hangup")
+                || last.contains("ended")
+                || last.contains("error");
+    }
+
+    private String getEventTitle(String line) {
+        String lower = line.toLowerCase();
+        if (lower.contains("dial")) {
+            return "Dialing (Дозвон)";
+        } else if (lower.contains("ringing")) {
+            return "Ringing (Гудки)";
+        } else if (lower.contains("connected") || lower.contains("progress")) {
+            return "Call in progress (Разговор)";
+        } else if (lower.contains("transfer")) {
+            return "Transfer (Перевод)";
+        } else if (lower.contains("ended") || lower.contains("hangup") || lower.contains("error")) {
+            return "Call ended (Завершён)";
+        }
+        return "Call Event";
+    }
+
+    private boolean isCallEvent(String lowerLine) {
+        return lowerLine.contains("dial")
+                || lowerLine.contains("ringing")
+                || lowerLine.contains("connected")
+                || lowerLine.contains("hangup")
+                || lowerLine.contains("ended")
+                || lowerLine.contains("transfer")
+                || lowerLine.contains("error");
+    }
+
+    private int getStatusColor(String line) {
+        int color = 0xFF9E9E9E; // gray
+        String lower = line.toLowerCase();
+        if (lower.contains("dial")) {
+            color = 0xFFFF9800; // Orange for dial
+        } else if (lower.contains("ringing")) {
+            color = 0xFFFFD54F; // Yellow/Gold for ringing
+        } else if (lower.contains("connected") || lower.contains("progress")) {
+            color = 0xFF4CAF50; // Green for call connected
+        } else if (lower.contains("transfer")) {
+            color = 0xFF9C27B0; // Purple for transfer
+        } else if (lower.contains("ended") || lower.contains("error") || lower.contains("hangup") || lower.contains("registered=false")) {
+            color = 0xFFF44336; // Red for ended
+        }
+        return color;
     }
 }
