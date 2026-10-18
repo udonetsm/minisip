@@ -1576,8 +1576,6 @@ public final class SettingsFragment extends Fragment {
             callHistoryScroll.setVisibility(View.GONE);
             return;
         }
-        callHistoryScroll.setVisibility(View.VISIBLE);
-
         String[] allLines = logText.split("\n");
         List<String> validLines = new ArrayList<>();
         for (String l : allLines) {

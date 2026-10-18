@@ -1,0 +1,23 @@
+diff --git a/app/src/main/java/ru/minisip/app/SettingsFragment.java b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -92,7 +92,6 @@
+     private NestedScrollView callHistoryScroll;
+     private LinearLayout callHistoryContainer;
+     private final Set<String> expandedSessions = new HashSet<>();
+-    private boolean callHistoryUserOpened = false;
+     private SharedPreferences prefs;
+@@ -350,7 +349,6 @@
+         historyBtn = button(audioRow, "📄", true, v -> {
+             boolean show = callHistoryScroll.getVisibility() == View.GONE;
+             callHistoryScroll.setVisibility(show ? View.VISIBLE : View.GONE);
+-            callHistoryUserOpened = show;
+         });
+@@ -909,7 +907,6 @@
+         if (logText == null || logText.trim().isEmpty()) {
+             callHistoryScroll.setVisibility(View.GONE);
+             return;
+         }
+-        if (callHistoryUserOpened) callHistoryScroll.setVisibility(View.VISIBLE);
+ 
+         String[] allLines = logText.split("\n");
