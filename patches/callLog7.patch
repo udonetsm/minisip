@@ -1,0 +1,25 @@
+diff --git a/app/src/main/java/ru/minisip/app/SettingsFragment.java b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -1506,7 +1506,7 @@
+             up.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
+             up.setPadding(cp, dp(2), cp, dp(2));
+             up.setClickable(true);
+             up.setFocusable(true);
+-            up.setOnClickListener(v -> text.scrollTo(0, 0));
++            up.setOnClickListener(v -> scrollToTop());
+             head.addView(up);
+ 
+             TextView down = new TextView(ctx);
+@@ -1626,6 +1626,10 @@
+         private void scrollToBottom() {
+             int max = maxScroll();
+             if (max > 0) text.scrollTo(0, max);
+         }
++
++        private void scrollToTop() {
++            text.scrollTo(0, 0);
++        }
+     }
+ 
+     private void updateCallHistory(String logText) {

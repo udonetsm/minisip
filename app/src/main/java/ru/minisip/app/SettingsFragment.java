@@ -93,6 +93,7 @@ public final class SettingsFragment extends Fragment {
     };
     private NestedScrollView callHistoryScroll;
     private LinearLayout callHistoryContainer;
+    private LinearLayout callHistoryWrapper;
     private final Set<String> expandedSessions = new HashSet<>();
     private SharedPreferences prefs;
     private int page;                  // номер страницы; от него зависят и настройки, и право на подключение
@@ -270,8 +271,9 @@ public final class SettingsFragment extends Fragment {
         spkBtn.setLayoutParams(spkLp);
 
         historyBtn = button(audioRow, "📄", true, v -> {
-            boolean show = callHistoryScroll.getVisibility() == View.GONE;
-            callHistoryScroll.setVisibility(show ? View.VISIBLE : View.GONE);
+            boolean show = callHistoryWrapper.getVisibility() == View.GONE;
+            callHistoryWrapper.setVisibility(show ? View.VISIBLE : View.GONE);
+            if (show) callHistoryScroll.post(() -> callHistoryScroll.fullScroll(View.FOCUS_DOWN));
         });
         historyBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f);
         historyBtn.setPadding(0, dp(12), 0, dp(12));
@@ -312,10 +314,6 @@ public final class SettingsFragment extends Fragment {
 
         callHistoryScroll = new NestedScrollView(ctx);
         callHistoryScroll.setVerticalScrollBarEnabled(true);
-        LinearLayout.LayoutParams chsLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(200));
-        chsLp.topMargin = dp(8);
-        callHistoryScroll.setLayoutParams(chsLp);
 
         callHistoryContainer = new LinearLayout(ctx);
         callHistoryContainer.setOrientation(LinearLayout.VERTICAL);
@@ -328,25 +326,52 @@ public final class SettingsFragment extends Fragment {
         bg.setCornerRadius(dp(8));
         callHistoryContainer.setBackground(bg);
 
-        LinearLayout callHistoryPanel = new LinearLayout(ctx);
-        callHistoryPanel.setOrientation(LinearLayout.VERTICAL);
-        callHistoryPanel.addView(callHistoryContainer, new ViewGroup.LayoutParams(
+        callHistoryScroll.addView(callHistoryContainer, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout callHistoryFooter = new LinearLayout(ctx);
+        callHistoryFooter.setOrientation(LinearLayout.HORIZONTAL);
+        callHistoryFooter.setGravity(Gravity.CENTER_VERTICAL);
+        int fcp = dp(10);
+
+        TextView callHistUp = new TextView(ctx);
+        callHistUp.setText("\u25B2");
+        callHistUp.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
+        callHistUp.setPadding(fcp, dp(2), fcp, dp(2));
+        callHistUp.setClickable(true);
+        callHistUp.setFocusable(true);
+        callHistUp.setOnClickListener(v -> callHistoryScroll.fullScroll(View.FOCUS_UP));
+        callHistoryFooter.addView(callHistUp);
+
+        TextView callHistDown = new TextView(ctx);
+        callHistDown.setText("\u25BC");
+        callHistDown.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
+        callHistDown.setPadding(fcp, dp(2), fcp, dp(2));
+        callHistDown.setClickable(true);
+        callHistDown.setFocusable(true);
+        callHistDown.setOnClickListener(v -> callHistoryScroll.fullScroll(View.FOCUS_DOWN));
+        callHistoryFooter.addView(callHistDown);
+
+        View footerSpacer = new View(ctx);
+        callHistoryFooter.addView(footerSpacer, new LinearLayout.LayoutParams(0, 0, 1f));
 
         MaterialButton clearHistoryBtn = new MaterialButton(ctx);
         clearHistoryBtn.setText("\uD83D\uDDD1\uFE0F");
         clearHistoryBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
         clearHistoryBtn.setOnClickListener(v -> confirmClearCallHistory());
-        LinearLayout.LayoutParams clearHistoryLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        clearHistoryLp.gravity = Gravity.END;
-        clearHistoryLp.topMargin = dp(4);
-        callHistoryPanel.addView(clearHistoryBtn, clearHistoryLp);
+        callHistoryFooter.addView(clearHistoryBtn);
 
-        callHistoryScroll.addView(callHistoryPanel, new ViewGroup.LayoutParams(
+        callHistoryWrapper = new LinearLayout(ctx);
+        callHistoryWrapper.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams chwLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(240));
+        chwLp.topMargin = dp(8);
+        callHistoryWrapper.addView(callHistoryScroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        callHistoryWrapper.addView(callHistoryFooter, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        callBlock.container.addView(callHistoryScroll, chsLp);
-        callHistoryScroll.setVisibility(View.GONE);
+        callBlock.container.addView(callHistoryWrapper, chwLp);
+        callHistoryWrapper.setVisibility(View.GONE);
 
         // --- Блок 3: Настройка VPN ---
         Block vpnBlock = createBlock(2);
@@ -1476,6 +1501,15 @@ public final class SettingsFragment extends Fragment {
             head.setGravity(Gravity.END);
             int cp = dp(10);
 
+            TextView up = new TextView(ctx);
+            up.setText("\u25B2");
+            up.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
+            up.setPadding(cp, dp(2), cp, dp(2));
+            up.setClickable(true);
+            up.setFocusable(true);
+            up.setOnClickListener(v -> scrollToTop());
+            head.addView(up);
+
             TextView down = new TextView(ctx);
             down.setText("\u25BC");
             down.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
@@ -1593,13 +1627,17 @@ public final class SettingsFragment extends Fragment {
             int max = maxScroll();
             if (max > 0) text.scrollTo(0, max);
         }
+
+        private void scrollToTop() {
+            text.scrollTo(0, 0);
+        }
     }
 
     private void updateCallHistory(String logText) {
         if (callHistoryContainer == null || callHistoryScroll == null) return;
         callHistoryContainer.removeAllViews();
         if (logText == null || logText.trim().isEmpty()) {
-            callHistoryScroll.setVisibility(View.GONE);
+            callHistoryWrapper.setVisibility(View.GONE);
             return;
         }
         String[] allLines = logText.split("\n");
@@ -1612,7 +1650,7 @@ public final class SettingsFragment extends Fragment {
         }
 
         if (validLines.isEmpty()) {
-            callHistoryScroll.setVisibility(View.GONE);
+            callHistoryWrapper.setVisibility(View.GONE);
             return;
         }
 
@@ -1639,7 +1677,7 @@ public final class SettingsFragment extends Fragment {
         }
 
         if (sessions.isEmpty()) {
-            callHistoryScroll.setVisibility(View.GONE);
+            callHistoryWrapper.setVisibility(View.GONE);
             return;
         }
 

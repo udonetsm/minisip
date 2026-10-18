@@ -1,0 +1,19 @@
+diff --git a/app/src/main/java/ru/minisip/app/SettingsFragment.java b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -1501,6 +1501,15 @@
+             head.setGravity(Gravity.END);
+             int cp = dp(10);
+ 
++            TextView up = new TextView(ctx);
++            up.setText("\u25B2");
++            up.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
++            up.setPadding(cp, dp(2), cp, dp(2));
++            up.setClickable(true);
++            up.setFocusable(true);
++            up.setOnClickListener(v -> text.scrollTo(0, 0));
++            head.addView(up);
++
+             TextView down = new TextView(ctx);
+             down.setText("\u25BC");
+             down.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
