@@ -39,6 +39,7 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.TextView;
+import android.widget.Switch;
 import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
@@ -108,7 +109,7 @@ public final class SettingsFragment extends Fragment {
             new ActivityResultContracts.RequestPermission(), granted -> {
                 if (!granted && status != null) status.setText("Microphone permission required");
             });
-    private MaterialButton connect, disconnect, refersBtn, call, spkBtn, muteBtn, historyBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
+    private MaterialButton connect, disconnect, refersBtn, call, spkBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
     /**
      * Одна и та же ссылка нужна, чтобы в onPause снимать только свой колбэк.
      */
@@ -270,18 +271,6 @@ public final class SettingsFragment extends Fragment {
         spkLp.rightMargin = dp(4);
         spkBtn.setLayoutParams(spkLp);
 
-        historyBtn = button(audioRow, "📄", true, v -> {
-            boolean show = callHistoryWrapper.getVisibility() == View.GONE;
-            callHistoryWrapper.setVisibility(show ? View.VISIBLE : View.GONE);
-            if (show) callHistoryScroll.post(() -> callHistoryScroll.fullScroll(View.FOCUS_DOWN));
-        });
-        historyBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f);
-        historyBtn.setPadding(0, dp(12), 0, dp(12));
-        LinearLayout.LayoutParams historyLp = new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        historyLp.leftMargin = dp(4);
-        historyBtn.setLayoutParams(historyLp);
-
         LinearLayout callRow = new LinearLayout(ctx);
         callRow.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams crLp = new LinearLayout.LayoutParams(
@@ -314,6 +303,7 @@ public final class SettingsFragment extends Fragment {
 
         callHistoryScroll = new NestedScrollView(ctx);
         callHistoryScroll.setVerticalScrollBarEnabled(true);
+	callHistoryScroll.setFillViewport(true);
 
         callHistoryContainer = new LinearLayout(ctx);
         callHistoryContainer.setOrientation(LinearLayout.VERTICAL);
@@ -340,7 +330,7 @@ public final class SettingsFragment extends Fragment {
         callHistUp.setPadding(fcp, dp(2), fcp, dp(2));
         callHistUp.setClickable(true);
         callHistUp.setFocusable(true);
-        callHistUp.setOnClickListener(v -> callHistoryScroll.fullScroll(View.FOCUS_UP));
+        callHistUp.setOnClickListener(v -> callHistoryScrollToTop());
         callHistoryFooter.addView(callHistUp);
 
         TextView callHistDown = new TextView(ctx);
@@ -349,29 +339,51 @@ public final class SettingsFragment extends Fragment {
         callHistDown.setPadding(fcp, dp(2), fcp, dp(2));
         callHistDown.setClickable(true);
         callHistDown.setFocusable(true);
-        callHistDown.setOnClickListener(v -> callHistoryScroll.fullScroll(View.FOCUS_DOWN));
+        callHistDown.setOnClickListener(v -> callHistoryScrollToBottom());
         callHistoryFooter.addView(callHistDown);
 
         View footerSpacer = new View(ctx);
         callHistoryFooter.addView(footerSpacer, new LinearLayout.LayoutParams(0, 0, 1f));
+        TextView saveHistoryBtn = new TextView(ctx);
+        saveHistoryBtn.setText("\uD83D\uDCE5");
+        saveHistoryBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
+        saveHistoryBtn.setPadding(fcp, dp(2), fcp, dp(2));
+        saveHistoryBtn.setClickable(true);
+        saveHistoryBtn.setFocusable(true);
+        saveHistoryBtn.setOnClickListener(v -> saveLogText("calls", app.callLog().text()));
+        callHistoryFooter.addView(saveHistoryBtn);
 
-        MaterialButton clearHistoryBtn = new MaterialButton(ctx);
+        TextView clearHistoryBtn = new TextView(ctx);
         clearHistoryBtn.setText("\uD83D\uDDD1\uFE0F");
         clearHistoryBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
+        clearHistoryBtn.setPadding(fcp, dp(2), fcp, dp(2));
+        clearHistoryBtn.setClickable(true);
+        clearHistoryBtn.setFocusable(true);
         clearHistoryBtn.setOnClickListener(v -> confirmClearCallHistory());
         callHistoryFooter.addView(clearHistoryBtn);
 
         callHistoryWrapper = new LinearLayout(ctx);
         callHistoryWrapper.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams chwLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(240));
-        chwLp.topMargin = dp(8);
         callHistoryWrapper.addView(callHistoryScroll, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         callHistoryWrapper.addView(callHistoryFooter, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        callBlock.container.addView(callHistoryWrapper, chwLp);
-        callHistoryWrapper.setVisibility(View.GONE);
+
+        LinearLayout callHistoryBand = new LinearLayout(ctx);
+        callHistoryBand.setOrientation(LinearLayout.HORIZONTAL);
+        View chLeft = new View(ctx);
+        callHistoryBand.addView(chLeft, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.085f));
+        callHistoryBand.addView(callHistoryWrapper, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.83f));
+        View chRight = new View(ctx);
+        callHistoryBand.addView(chRight, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.085f));
+
+        LinearLayout.LayoutParams chwLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        chwLp.topMargin = dp(8);
+        callBlock.container.addView(callHistoryBand, chwLp);
+        ViewGroup.LayoutParams chLp = callHistoryScroll.getLayoutParams();
+        chLp.height = dp(44);
+        callHistoryScroll.setLayoutParams(chLp);
 
         // --- Блок 3: Настройка VPN ---
         Block vpnBlock = createBlock(2);
@@ -593,7 +605,7 @@ public final class SettingsFragment extends Fragment {
         super.onDestroyView();
         server = login = pass = number = vpnServer = vpnLogin = vpnPass = vpnKey = vpnCa = vpnHealthcheck = vpnPingInterval = null;
         status = vpnStatus = null;
-        connect = disconnect = refersBtn = call = spkBtn = muteBtn = historyBtn = vpnConnect = vpnDisconnect = vpnAppsBtn = vpnMainBtn = vpnAdvancedBtn = sipAdvancedBtn = deleteBtn = null;
+        connect = disconnect = refersBtn = call = spkBtn = muteBtn = vpnConnect = vpnDisconnect = vpnAppsBtn = vpnMainBtn = vpnAdvancedBtn = sipAdvancedBtn = deleteBtn = null;
         vpnMainSpoilerContainer = vpnAdvancedSpoilerContainer = sipSpoilerContainer = null;
         versionLabel = null;
         updateLog = null;
@@ -1121,13 +1133,6 @@ public final class SettingsFragment extends Fragment {
         spkSpan.setSpan(new RelativeSizeSpan(1.3f), 0, spkEmoji.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         spkBtn.setText(spkSpan);
 
-        if (historyBtn != null) {
-            historyBtn.setEnabled(!other);
-            String logEmoji = "📄";
-            SpannableString historySpan = new SpannableString(logEmoji);
-            historySpan.setSpan(new RelativeSizeSpan(1.3f), 0, logEmoji.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            historyBtn.setText(historySpan);
-        }
         connect.setEnabled(!other && idle && !reg && !conn);
         disconnect.setEnabled(reg || conn);
         // VPN: подключить можно только когда он не поднят и нет вызова; отключить — когда поднят или поднимается
@@ -1319,7 +1324,7 @@ public final class SettingsFragment extends Fragment {
         LinearLayout head = new LinearLayout(ctx);
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
-
+	
         TextView t = new TextView(ctx);
         t.setText(text);
         t.setTextAppearance(android.R.style.TextAppearance_Medium);
@@ -1418,7 +1423,10 @@ public final class SettingsFragment extends Fragment {
     }
 
     private void saveLog(String prefix, LogArea area) {
-        String text = area.text.getText().toString();
+        saveLogText(prefix, area.text.getText().toString());
+    }
+
+    private void saveLogText(String prefix, String text) {
         if (text.trim().isEmpty()) {
             Toast.makeText(requireContext(), "Log is empty", Toast.LENGTH_SHORT).show();
             return;
@@ -1426,7 +1434,7 @@ public final class SettingsFragment extends Fragment {
         if (Build.VERSION.SDK_INT <= 28
                 && requireContext().checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
                 != PackageManager.PERMISSION_GRANTED) {
-            pendingSave = () -> saveLog(prefix, area);
+            pendingSave = () -> saveLogText(prefix, text);
             storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE);
             return;
         }
@@ -1485,8 +1493,8 @@ public final class SettingsFragment extends Fragment {
      */
     private final class LogArea {
         final LinearLayout panel;
-        final EditText text;
-        final MaterialButton toggle;
+        EditText text;
+        final Switch toggle;
         volatile boolean enabled = false;
         Runnable onEnable;
         Runnable onClear;
@@ -1496,30 +1504,26 @@ public final class SettingsFragment extends Fragment {
             panel = new LinearLayout(ctx);
             panel.setOrientation(LinearLayout.VERTICAL);
             panel.setVisibility(View.GONE);
-            LinearLayout head = new LinearLayout(ctx);
+            
+	    LinearLayout head = new LinearLayout(ctx);
             head.setOrientation(LinearLayout.HORIZONTAL);
-            head.setGravity(Gravity.END);
-            int cp = dp(10);
+            head.setGravity(Gravity.CENTER_VERTICAL);
+            int cp = dp(6);
 
-            TextView up = new TextView(ctx);
-            up.setText("\u25B2");
-            up.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
-            up.setPadding(cp, dp(2), cp, dp(2));
-            up.setClickable(true);
-            up.setFocusable(true);
-            up.setOnClickListener(v -> scrollToTop());
-            head.addView(up);
+	    toggle = new Switch(ctx);
 
-            TextView down = new TextView(ctx);
-            down.setText("\u25BC");
-            down.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
-            down.setPadding(cp, dp(2), cp, dp(2));
-            down.setClickable(true);
-            down.setFocusable(true);
-            down.setOnClickListener(v -> scrollToBottom());
-            head.addView(down);
+            toggle.setPadding(cp, dp(2), cp, dp(2));
+            toggle.setOnCheckedChangeListener((v, checked) -> {
+                enabled = checked;
+                if (enabled && onEnable != null) onEnable.run();
+            });
+            head.addView(toggle);
 
-            TextView close = new TextView(ctx);
+	    View spacer = new View(ctx);
+            head.addView(spacer, new LinearLayout.LayoutParams(0, 0, 1f));
+
+            TextView close = new TextView(ctx); 
+
             close.setText("\u2715");
             close.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
             close.setPadding(cp, dp(2), cp, dp(2));
@@ -1527,7 +1531,14 @@ public final class SettingsFragment extends Fragment {
             close.setFocusable(true);
             close.setOnClickListener(v -> panel.setVisibility(View.GONE));
             head.addView(close);
-            panel.addView(head);
+            LinearLayout headBand = new LinearLayout(ctx);
+            headBand.setOrientation(LinearLayout.HORIZONTAL);
+            View hLeft = new View(ctx);
+            headBand.addView(hLeft, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.085f));
+            headBand.addView(head, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.83f));
+            View hRight = new View(ctx);
+            headBand.addView(hRight, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.085f));
+            panel.addView(headBand);
             text = new EditText(ctx);
             text.setKeyListener(null);
             text.setTextIsSelectable(true);
@@ -1535,6 +1546,8 @@ public final class SettingsFragment extends Fragment {
             text.setTextAppearance(android.R.style.TextAppearance_Small);
             text.setHint("Log is empty");
             text.setPadding(dp(8), dp(8), dp(8), dp(8));
+            text.setMinHeight(dp(44));
+            text.setMaxHeight(dp(300));
             text.setMovementMethod(new ScrollingMovementMethod());
             text.setVerticalScrollBarEnabled(true);
             text.setFocusable(true);
@@ -1561,39 +1574,89 @@ public final class SettingsFragment extends Fragment {
             LinearLayout band = new LinearLayout(ctx);
             band.setOrientation(LinearLayout.HORIZONTAL);
             View left = new View(ctx);
-            band.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.15f));
-            band.addView(text, new LinearLayout.LayoutParams(0, dp(300), 0.70f));
+            band.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.085f));
+            band.addView(text, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.83f));
             View right = new View(ctx);
-            band.addView(right, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.15f));
-            panel.addView(band, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, dp(300)));
-            LinearLayout row = new LinearLayout(ctx);
-            row.setOrientation(LinearLayout.VERTICAL);
-            MaterialButton clear = smallButton(ctx, "Clear");
-            MaterialButton copy = smallButton(ctx, "Copy");
-            MaterialButton save = smallButton(ctx, "Save");
-            toggle = smallButton(ctx, "Enable");
-            clear.setOnClickListener(v -> {
-                text.setText("");
-                if (onClear != null) onClear.run();
-            });
-            copy.setOnClickListener(v -> {
-                ClipboardManager cm = (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
-                if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("log", text.getText()));
-            });
+            band.addView(right, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.085f));
+            
+	    LinearLayout.LayoutParams bandLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            bandLp.topMargin = dp(8);
+            panel.addView(band, bandLp);
+
+            LinearLayout footer = new LinearLayout(ctx);
+            footer.setOrientation(LinearLayout.HORIZONTAL);
+            footer.setGravity(Gravity.CENTER_VERTICAL);
+
+            TextView up = new TextView(ctx);
+            up.setText("\u25B2");
+            up.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
+            up.setPadding(cp, dp(2), cp, dp(2));
+            up.setClickable(true);
+            up.setFocusable(true);
+            up.setOnClickListener(v -> scrollToTop());
+            footer.addView(up);
+
+            TextView down = new TextView(ctx);
+            down.setText("\u25BC");
+            down.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
+            down.setPadding(cp, dp(2), cp, dp(2));
+            down.setClickable(true);
+            down.setFocusable(true);
+            down.setOnClickListener(v -> scrollToBottom());
+            footer.addView(down);
+
+            View footerSpacer = new View(ctx);
+            footer.addView(footerSpacer, new LinearLayout.LayoutParams(0, 0, 1f));
+
+            TextView save = new TextView(ctx);
+            save.setText("\uD83D\uDCE5");
+            save.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
+            save.setPadding(cp, dp(2), cp, dp(2));
+            save.setClickable(true);
+            save.setFocusable(true);
             save.setOnClickListener(v -> {
-                if (onSave != null) onSave.run();
+                new MaterialAlertDialogBuilder(ctx)
+                        .setTitle("Save log")
+                        .setItems(new String[]{"Copy to clipboard", "Save to file"}, (d, which) -> {
+                            if (which == 0) {
+                                ClipboardManager cm = (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
+                                if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("log", text.getText()));
+                            } else {
+                                if (onSave != null) onSave.run();
+                            }
+                        })
+                        .setNegativeButton("Cancel", null)
+                        .show();
             });
-            toggle.setOnClickListener(v -> {
-                enabled = !enabled;
-                toggle.setText(enabled ? "Disable" : "Enable");
-                if (enabled && onEnable != null) onEnable.run();
+            footer.addView(save);
+
+            TextView clear = new TextView(ctx);
+            clear.setText("\uD83D\uDDD1\uFE0F");
+            clear.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
+            clear.setPadding(cp, dp(2), cp, dp(2));
+            clear.setClickable(true);
+            clear.setFocusable(true);
+            clear.setOnClickListener(v -> {
+                MainActivity.showCustomConfirmDialog(ctx,
+                        "Clear log",
+                        "Delete all log records?",
+                        () -> {
+                            text.setText("");
+                            if (onClear != null) onClear.run();
+                        },
+                        null);
             });
-            row.addView(clear);
-            row.addView(copy);
-            row.addView(save);
-            row.addView(toggle);
-            panel.addView(row);
+            footer.addView(clear);
+
+            LinearLayout footerBand = new LinearLayout(ctx);
+            footerBand.setOrientation(LinearLayout.HORIZONTAL);
+            View fLeft = new View(ctx);
+            footerBand.addView(fLeft, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.085f));
+            footerBand.addView(footer, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.83f));
+            View fRight = new View(ctx);
+            footerBand.addView(fRight, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.085f));
+            panel.addView(footerBand);
         }
 
         void setText(String s) {
@@ -1601,7 +1664,7 @@ public final class SettingsFragment extends Fragment {
                 if (!enabled) return;
                 boolean near = isNearBottom();
                 text.setText(s);
-                if (near) scrollToBottom();
+                if (near) text.post(this::scrollToBottom);
             });
         }
 
@@ -1633,12 +1696,62 @@ public final class SettingsFragment extends Fragment {
         }
     }
 
+    private boolean callHistoryNearBottom() {
+        if (callHistoryScroll == null) return true;
+        View child = callHistoryScroll.getChildAt(0);
+        if (child == null) return true;
+        int view = callHistoryScroll.getHeight() - callHistoryScroll.getPaddingTop()
+                - callHistoryScroll.getPaddingBottom();
+        if (view <= 0) return true;
+        int content = child.getHeight();
+        return callHistoryScroll.getScrollY() + view >= content - dp(8);
+    }
+
+    private int callHistoryMaxScroll() {
+        if (callHistoryScroll == null) return 0;
+        View child = callHistoryScroll.getChildAt(0);
+        if (child == null) return 0;
+        int view = callHistoryScroll.getHeight() - callHistoryScroll.getPaddingTop()
+                - callHistoryScroll.getPaddingBottom();
+        return Math.max(0, child.getHeight() - view);
+    }
+
+    private void callHistoryScrollToBottom() {
+        int max = callHistoryMaxScroll();
+        if (max > 0) callHistoryScroll.smoothScrollTo(0, max);
+    }
+
+    private void callHistoryScrollToTop() {
+        callHistoryScroll.smoothScrollTo(0, 0);
+    }
+    
+    private void resizeCallHistory() {
+        if (callHistoryScroll == null || callHistoryContainer == null) return;
+        callHistoryScroll.post(() -> {
+            if (callHistoryScroll == null || callHistoryContainer == null) return;
+            int w = callHistoryScroll.getWidth();
+            callHistoryContainer.measure(
+                    View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.AT_MOST),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+            int h = callHistoryContainer.getMeasuredHeight();
+            int min = dp(44);
+            int max = dp(300);
+            int target = Math.max(min, Math.min(max, h));
+            ViewGroup.LayoutParams lp = callHistoryScroll.getLayoutParams();
+            if (lp.height != target) {
+                lp.height = target;
+                callHistoryScroll.setLayoutParams(lp);
+            }
+        });
+    }
+
     private void updateCallHistory(String logText) {
         if (callHistoryContainer == null || callHistoryScroll == null) return;
+        boolean wasNear = callHistoryNearBottom();
         callHistoryContainer.removeAllViews();
         if (logText == null || logText.trim().isEmpty()) {
-            callHistoryWrapper.setVisibility(View.GONE);
-            return;
+            resizeCallHistory();
+	    return;
         }
         String[] allLines = logText.split("\n");
         List<String> validLines = new ArrayList<>();
@@ -1650,8 +1763,8 @@ public final class SettingsFragment extends Fragment {
         }
 
         if (validLines.isEmpty()) {
-            callHistoryWrapper.setVisibility(View.GONE);
-            return;
+            resizeCallHistory();
+	    return;
         }
 
         // Group into sessions: a new "dial" starts a session only if the previous
@@ -1677,8 +1790,8 @@ public final class SettingsFragment extends Fragment {
         }
 
         if (sessions.isEmpty()) {
-            callHistoryWrapper.setVisibility(View.GONE);
-            return;
+            resizeCallHistory();
+	    return;
         }
 
         Context ctx = requireContext();
@@ -1745,18 +1858,20 @@ public final class SettingsFragment extends Fragment {
             LinearLayout stackContainer = new LinearLayout(ctx);
             stackContainer.setOrientation(LinearLayout.HORIZONTAL);
             stackContainer.setGravity(Gravity.CENTER_VERTICAL);
-            for (int j = 0; j < session.size(); j++) {
+            int[] stackColors = {0xFFF44336, 0xFFFFD54F, 0xFF4CAF50};
+            for (int j = 0; j < stackColors.length; j++) {
                 View sDot = new View(ctx);
                 int sSize = dp(10);
                 LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(sSize, sSize);
                 if (j > 0) {
-                    sLp.leftMargin = dp(3);
+                    sLp.leftMargin = -dp(4);
                 }
                 sDot.setLayoutParams(sLp);
 
                 GradientDrawable sd = new GradientDrawable();
                 sd.setShape(GradientDrawable.OVAL);
-                sd.setColor(getStatusColor(session.get(j)));
+                sd.setColor(stackColors[j]);
+                sd.setStroke(dp(1), 0xFFFFFFFF);
                 sDot.setBackground(sd);
 
                 stackContainer.addView(sDot);
@@ -1856,7 +1971,8 @@ public final class SettingsFragment extends Fragment {
             callHistoryContainer.addView(rowWrapper);
         }
 
-        callHistoryScroll.post(() -> callHistoryScroll.fullScroll(View.FOCUS_DOWN));
+        if (wasNear) callHistoryScroll.post(this::callHistoryScrollToBottom);
+	resizeCallHistory();
     }
 
     private boolean hasTerminalEvent(List<String> session) {
