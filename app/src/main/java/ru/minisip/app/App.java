@@ -3,6 +3,7 @@ package ru.minisip.app;
 import android.app.Activity;
 import android.app.Application;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.os.Handler;
@@ -125,6 +126,9 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         vpnLog = LogBuffer.create(500);
         vpn.setLogSink(vpnLog);
         callLog = LogBuffer.create(500);
+        SharedPreferences callLogPrefs = getSharedPreferences("minisip", MODE_PRIVATE);
+        callLog.load(callLogPrefs.getString("callLog", ""));
+        callLog.setPersist(() -> callLogPrefs.edit().putString("callLog", callLog.text()).apply());
         sipLog = LogBuffer.create(500);
         sip.setLogSink(sipLog);
         updateLog = LogBuffer.create(500);

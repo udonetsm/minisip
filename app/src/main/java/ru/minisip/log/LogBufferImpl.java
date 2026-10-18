@@ -15,6 +15,7 @@ final class LogBufferImpl implements LogBuffer {
     private final SimpleDateFormat time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US);
     private volatile boolean enabled = true;
     private volatile Runnable listener;
+    private volatile Runnable persist;
 
     LogBufferImpl(int maxLines) {
         this.max = Math.max(1, maxLines);
@@ -36,6 +37,7 @@ final class LogBufferImpl implements LogBuffer {
             lines.addLast(formatted);
         }
         notifyChanged();
+        notifyPersist();
     }
 
     @Override
@@ -54,6 +56,7 @@ final class LogBufferImpl implements LogBuffer {
             lines.clear();
         }
         notifyChanged();
+        notifyPersist();
     }
 
     @Override
@@ -71,8 +74,31 @@ final class LogBufferImpl implements LogBuffer {
         listener = onChange;
     }
 
+    @Override
+    public void load(String saved) {
+        if (saved == null || saved.isEmpty()) return;
+        synchronized (this) {
+            lines.clear();
+            String[] arr = saved.split("\n", -1);
+            int from = Math.max(0, arr.length - max);
+            for (int i = from; i < arr.length; i++) {
+                if (!arr[i].isEmpty()) lines.addLast(arr[i]);
+            }
+        }
+    }
+
+    @Override
+    public void setPersist(Runnable p) {
+        persist = p;
+    }
+
     private void notifyChanged() {
         Runnable r = listener;
+        if (r != null) r.run();
+    }
+
+    private void notifyPersist() {
+        Runnable r = persist;
         if (r != null) r.run();
     }
 }

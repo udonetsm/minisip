@@ -31,4 +31,17 @@ public interface LogBuffer extends LogSink {
      * Зовётся после каждой записи и после clear(); null снимает слушателя.
      */
     void setListener(Runnable onChange);
+
+    /**
+     * Засевает буфер сохранённым ранее текстом (например, из SharedPreferences).
+     * Строки берутся как есть, без перештамповки времени; лишние старые
+     * вытесняются до maxLines.
+     */
+    void load(String saved);
+
+    /**
+     * Колбэк persistence: зовётся после каждой записи и после clear().
+     * Сюда кладут сохранение text() во внешнее хранилище (prefs/файл). null снимает колбэк.
+     */
+    void setPersist(Runnable persist);
 }

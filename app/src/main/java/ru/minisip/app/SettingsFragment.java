@@ -328,7 +328,22 @@ public final class SettingsFragment extends Fragment {
         bg.setCornerRadius(dp(8));
         callHistoryContainer.setBackground(bg);
 
-        callHistoryScroll.addView(callHistoryContainer, new ViewGroup.LayoutParams(
+        LinearLayout callHistoryPanel = new LinearLayout(ctx);
+        callHistoryPanel.setOrientation(LinearLayout.VERTICAL);
+        callHistoryPanel.addView(callHistoryContainer, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        MaterialButton clearHistoryBtn = new MaterialButton(ctx);
+        clearHistoryBtn.setText("\uD83D\uDDD1\uFE0F");
+        clearHistoryBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
+        clearHistoryBtn.setOnClickListener(v -> confirmClearCallHistory());
+        LinearLayout.LayoutParams clearHistoryLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        clearHistoryLp.gravity = Gravity.END;
+        clearHistoryLp.topMargin = dp(4);
+        callHistoryPanel.addView(clearHistoryBtn, clearHistoryLp);
+
+        callHistoryScroll.addView(callHistoryPanel, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         callBlock.container.addView(callHistoryScroll, chsLp);
         callHistoryScroll.setVisibility(View.GONE);
@@ -1010,6 +1025,17 @@ public final class SettingsFragment extends Fragment {
         });
         rebuild[0].run();
         d.show();
+    }
+
+    private void confirmClearCallHistory() {
+        MainActivity.showCustomConfirmDialog(requireContext(),
+                "Clear call history",
+                "Delete all call records?",
+                () -> {
+                    app.callLog().clear();
+                    updateCallHistory("");
+                },
+                null);
     }
 
     private void render() {
