@@ -1845,6 +1845,13 @@ public final class SettingsFragment extends Fragment {
                 }
             });
 
+            final String dialNumber = phoneNumber;
+            headerLayout.setOnLongClickListener(v -> {
+                number.setText(dialNumber);
+                Toast.makeText(ctx, "Number inserted", Toast.LENGTH_SHORT).show();
+                return true;
+            });
+
             rowWrapper.addView(hScroll);
             callHistoryContainer.addView(rowWrapper);
         }

@@ -1,0 +1,25 @@
+diff --git a/app/src/main/java/ru/minisip/app/SettingsFragment.java b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -1826,14 +1826,20 @@ private void updateCallHistory(String logText) {
+                 if (expanded) {
+                     hScroll.setVisibility(View.GONE);
+                     expandIndicator.setText("▼");
+                     expandedSessions.remove(sessionKey);
+                 } else {
+                     hScroll.setVisibility(View.VISIBLE);
+                     expandIndicator.setText("▲");
+                     expandedSessions.add(sessionKey);
+                 }
+             });
+ 
++            final String dialNumber = phoneNumber;
++            headerLayout.setOnLongClickListener(v -> {
++                number.setText(dialNumber);
++                Toast.makeText(ctx, "Number inserted", Toast.LENGTH_SHORT).show();
++                return true;
++            });
++
+             rowWrapper.addView(hScroll);
+             callHistoryContainer.addView(rowWrapper);
+         }
