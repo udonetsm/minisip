@@ -2,166 +2,144 @@
 
 ---
 
-## 1. Introduction & Overview
+## 1. Introduction & Core Architecture
 
-**MiniSIP** is a compact, high-performance Android application that integrates a **SIP/VoIP telephony client** with an **encrypted tunneling client (IKEv2/IPsec VPN)**.
+**MiniSIP** is a high-performance Android application that integrates a **SIP/VoIP telephony client** with a **built-in encrypted tunneling client (IKEv2/IPsec VPN)**.
 
-Designed for privacy, high reliability, and resource efficiency:
-- **Secure Voice Calls**: Connects to corporate or public PBX servers (Asterisk, FreePBX, Kamailio, 3CX, Yate, etc.) via the SIP protocol.
-- **Built-in VPN (IKEv2/IPsec)**: Leverages Android's native `VpnService` API without requiring root privileges. Encrypts all device traffic or selected app traffic.
-- **Zero Third-Party Dependencies**: The entire SIP and IPsec stack is implemented natively in Java using standard Android APIs.
-- **Background Persistence**: Employs foreground services to prevent OS process termination during lock-screen mode or Android Doze mode.
-
----
-
-## 2. System Permissions & First-Time Setup
-
-Upon first launch or feature activation, MiniSIP requests the following Android permissions:
-
-1. **Audio Recording (`RECORD_AUDIO`)**: Required to capture microphone audio during phone calls.
-2. **Notifications (`POST_NOTIFICATIONS`)** *(Android 13+)*: Required to display active call status and VPN connectivity in the system notification shade.
-3. **Battery Optimization Exclusion (`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`)**: MiniSIP prompts you to disable battery optimization. This is essential to prevent Android from killing background SIP sockets and VPN keepalive timers.
-4. **VPN Connection Consent**: Tapping `VPN Connect` for the first time triggers Android's standard VPN dialog asking for confirmation. Tap "OK" or "Trust".
-5. **App Installation (`REQUEST_INSTALL_PACKAGES`)**: Required for seamless auto-updating via GitHub Releases APK packages.
+Engineered for mobile networks and resource efficiency:
+- **SIP Voice Calls**: Connects to any standard PBX (Asterisk, FreePBX, Kamailio, 3CX, Yate, etc.) following RFC 3261 standards.
+- **Native IKEv2/IPsec VPN**: Pure Java implementation of IKEv2 and ESP protocols running via Android's `VpnService` without requiring Root privileges.
+- **Background Reliability**: Utilizes foreground services (`CallService` and `TunService`) to prevent OS process termination during lock-screen mode or Android Doze Mode.
 
 ---
 
-## 3. UI Architecture & Profile Card Management
+## 2. System Permissions & Initial Setup
 
-MiniSIP uses a **card-based interface** with horizontal swiping (`ViewPager2`). Each card represents an independent configuration profile containing its own SIP and VPN settings.
+Upon initial launch and feature activation, MiniSIP requests the following permissions:
+
+1. **Audio Recording (`RECORD_AUDIO`)**: Essential for capturing microphone input during active calls.
+2. **Notifications (`POST_NOTIFICATIONS`)** *(Android 13+)*: Required for foreground service persistence and active status notifications.
+3. **Battery Optimization Exclusion (`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`)**: Disabling battery optimization ensures the Android OS does not kill background SIP sockets or VPN keepalive timers.
+4. **VPN Consent**: Tapping `VPN connect` triggers Android's standard `VpnService` permission dialog to create the virtual `tun0` network interface.
+5. **Install Unknown Packages (`REQUEST_INSTALL_PACKAGES`)**: Allows the app to auto-update via GitHub Releases using the integrated `UpdateBar`.
+
+---
+
+## 3. Profile Card Management (ViewPager2)
+
+MiniSIP organizes settings into horizontal profile cards. Each card maintains an independent configuration file.
 
 ### 3.1 Creating a New Profile Card
-1. Fill in the mandatory fields of the current card: **Server** and **Login** in the SIP block.
-2. Swipe the screen to the left (navigate right to the next page).
-3. The app displays a confirmation dialog: *"Create New Card. Are you sure you want to create another settings card?"*.
-4. Tap **Yes** — a new blank configuration card will be created and appended to the pager.
+1. Fill in the mandatory fields of the active card: **Server** and **Login** in the SIP section.
+2. Swipe left (navigate right to the next page).
+3. Confirm the dialog: *"Create New Card. Are you sure you want to create another settings card?"*.
+4. Tap **Yes** — a new settings page with its own configuration file (`cfg1`, `cfg2`, etc.) will be created.
 
 ### 3.2 Reordering Cards (Drag & Drop)
-1. Touch and hold the card header block.
-2. Drag the card up or down to change its display order.
-3. Release the header — the new order is saved automatically.
+1. Touch and hold the header of any card block (SIP, Call, VPN) until the card turns semi-transparent (`alpha = 0.2`).
+2. Drag the block up or down.
+3. Release to apply — the custom order is stored under the `blockOrder` key in preferences.
 
 ### 3.3 Deleting a Profile Card
-1. Swipe or tap the delete action on the target card.
-2. Confirm deletion in the modal dialog.
-3. *Note*: If only one card remains, it cannot be deleted.
+1. Scroll to the very bottom of the page and pull downward for 1 second.
+2. The red **Delete Page 🗑** button appears.
+3. Tap the button and confirm deletion. Subsequent profile cards shift left, clearing old preference files (`PageStore.deletePage`).
 
 ---
 
-## 4. Step-by-Step SIP Telephony (VoIP) Guide
+## 4. In-Depth SIP Telephony Guide
 
-### 4.1 Configuring SIP Account Settings
+### 4.1 Configuring SIP Server Settings
+In the **SIP server settings** block, enter:
+- **Server**: PBX IP address or domain (e.g., `192.168.1.100` or `sip.company.com:5060`). Custom ports specified after a colon are parsed automatically.
+- **Login**: Your extension or SIP username (e.g., `101`).
+- **Password**: Your SIP account password.
+- **SIP settings ▼ button**: Toggles advanced SIP parameters.
 
-In the **SIP Server** block, configure:
-- **Server**: IP address or domain name of your PBX (e.g., `192.168.1.100` or `sip.company.com`).
-- **Port**: Network port of the SIP server. Default is `5060` (UDP).
-- **Login**: Your SIP extension or username (e.g., `101`).
-- **Pass**: Your SIP account password.
-- **Number**: Default target destination number for quick dialing.
-
-### 4.2 Connecting & Registration Status
-- Tap the **Connect** button.
-- The status indicator reports the current state:
+### 4.2 Registration & Status
+- **Connect**: Sends a SIP `REGISTER` request.
+- **Disconnect**: Unregisters the SIP account (`REGISTER (Expires: 0)`).
+- Status Indicators:
   - 🔴 **Disconnected**: Offline.
-  - 🟡 **Connecting...**: Sending `REGISTER` request and performing authentication.
-  - 🟢 **Connected (Registered)**: Successfully registered with PBX. Ready to make/receive calls.
+  - 🟡 **Connecting...**: Performing Digest Authentication (401/407 Challenge).
+  - 🟢 **Connected (Registered)**: Successfully registered with PBX.
 
-### 4.3 Making & Answering Calls
+### 4.3 In-Call Controls & Options
+- **Number**: Main dial field formatted with a large font (35sp).
+- **Call 📞 / Hangup 🚫**: Initiates or terminates calls. State transitions to `Calling...`, then `Talk`.
+- **Mute (🤫 / 👄)**: Toggles microphone input. Active mute highlights the button with a red border.
+- **Spk (📢 / 👂)**: Switches audio output between the loud speakerphone and the earpiece.
+- **Refers (↪️)**: Call transfer directory.
+  - Maintains a list of saved transfer contacts (Login + Name).
+  - Tapping `↪️` next to a contact performs an instant **Blind Transfer** via RFC 3515 `REFER`.
 
-#### Outgoing Call:
-1. Enter the destination extension/number in the **Number** field.
-2. Tap the blue **Call** button.
-3. Status changes to `Calling...`, playing ringback tone. Once answered, audio streaming starts and status changes to `Talk`.
-
-#### Incoming Call:
-1. When a call arrives, the device screen wakes up automatically (even if locked) displaying the incoming call dialog.
-2. Tap **Answer** to accept or **Decline** to reject.
-
-### 4.4 In-Call Controls
-- **Spk (Speakerphone)**: Toggles audio output between the loud speakerphone and the earpiece.
-- **Mute (Microphone)**: Mutes your microphone input so the remote party cannot hear you.
-- **Refers (Call Transfer)**:
-  1. Tap **Refers** during an active call.
-  2. Enter the target transfer destination extension.
-  3. Choose transfer type (blind/attended) and tap **Send REFER**. The call is transferred, releasing your line.
-- **Hangup**: Tap the red **Hangup** button to end the active call.
-
-### 4.5 Call History Management
-- Tap **History** to open the call log panel.
-- Each call session is shown in a collapsible card displaying:
-  - Call direction (incoming/outgoing).
-  - Remote party number/extension.
-  - Timestamp and call duration.
-  - Call outcome status (success, busy, declined, error).
-- Tap **Clear History** at the bottom to erase the log.
+### 4.4 Interactive Visual Call History
+- Tap **History 📄** to expand the call log.
+- Sessions are grouped chronologically.
+- Each call features a color-coded event sequence:
+  - 🟠 **Orange**: Dialing.
+  - 🟡 **Yellow**: Ringing.
+  - 🟢 **Green**: Connected (Call in progress).
+  - 🟣 **Purple**: Transfer.
+  - 🔴 **Red**: Ended (Hangup / Error).
+- **Quick Dialing**: Long-pressing any call history session header automatically populates the destination number into the **Number** field!
+- Tapping event dots displays detailed event info with a copy option.
 
 ---
 
-## 5. Step-by-Step Built-in VPN Guide (IKEv2/IPsec)
+## 5. Built-in IKEv2/IPsec VPN Guide
 
-### 5.1 Configuring VPN Settings
+### 5.1 Main & Advanced VPN Parameters
+In the **VPN settings (IKEv2)** section:
+- **VPN settings ▼**:
+  - **VPN server**: VPN gateway address.
+  - **VPN login**: User login (EAP / MS-CHAPv2).
+  - **VPN password**: User password.
+  - **Apps using VPN**: Split tunneling configuration.
+- **Advanced VPN settings ▼**:
+  - **VPN pre-shared key**: Pre-Shared Key (PSK) for key-based authentication.
+  - **VPN CA certificate (PEM)**: PEM-encoded Root CA Certificate.
+  - **Healthcheck address**: Host address for ICMP/HTTP probes. Domain names trigger background DNS resolution before connection.
+  - **Ping interval (sec)**: Probe frequency in seconds (5 to 9 seconds, or 0 for default 5s).
 
-In the **VPN Connection** block, enter:
-- **VPN Server**: Gateway IP address or domain name (e.g., `vpn.company.com`).
-- **VPN Login**: VPN username (EAP / MS-CHAPv2).
-- **VPN Pass**: VPN user password.
-- **VPN Key (PSK)**: Pre-Shared Key (if required by your gateway).
-- **VPN CA**: PEM-encoded Root CA Certificate string (if using self-signed gateway certificates).
+### 5.2 Strict Mode (Kill-Switch)
+- Located in the `⋮` menu of the VPN header.
+- Enforcing Strict mode blocks all non-VPN network traffic during reconnections, preventing leaks. During active SIP calls, Strict mode is enabled automatically.
 
-### 5.2 Advanced VPN Settings
-- **Healthcheck URL**: HTTP URL used to verify tunnel connectivity (e.g., `http://10.0.0.1/ping`).
-- **Ping Interval**: Interval in seconds between healthcheck probes (default is `10`).
-
-### 5.3 Split Tunneling (`Apps` Button)
-Route specific app traffic through the VPN while keeping other traffic on direct connection:
-1. Tap the **Apps** button.
-2. Check the applications that should route traffic through the VPN.
-3. Tap **Save**. All unselected apps will bypass the VPN tunnel.
-
-### 5.4 VPN Connection & Monitoring
-- Tap **VPN Connect**.
-- Confirm Android's system VPN prompt on first use.
-- Live status indicators:
-  - 🔴 **VPN: disconnected**: Inactive.
-  - 🟡 **VPN: connecting...**: Negotiating IKE_SA_INIT and IKE_AUTH phases.
-  - 🟢 **VPN: connected (tun0)**: Active tunnel. Shows interface name (`tun0`), packet loss counter (`Loss`), and reconnect count (`Reconnects`).
+### 5.3 Split Tunneling (Apps using VPN)
+1. Tap **Apps using VPN**.
+2. Select the applications that should route traffic through the VPN.
+3. Tap **OK**. All unselected apps will use direct network connectivity.
 
 ---
 
-## 6. Real-Time Logging & Diagnostics
+## 6. Advanced Gestures, Logging & Updates
 
-MiniSIP features real-time circular log consoles:
-1. **SIP Log**: Displays raw SIP message traffic (`REGISTER`, `INVITE`, `200 OK`, `401 Unauthorized`, etc.).
-2. **VPN Log**: Records IKEv2 handshakes, key derivation, ESP decryption, and NetWatch events.
-3. **Call Log**: Tracks user actions and audio media state transitions.
-4. **Update Log**: Logs GitHub release update checks and download status.
+### 6.1 Update Channels & Gesture Shortcuts
+- **Long Press Version Label vX.Y.Z (2 seconds)**: Opens the Update Channel selector (**Stable** or **Pre-release**) with an instant **Check** button.
+- **`⋮` Menu on Version Label**: Displays the update engine log (`updateLog`).
+- **UpdateBar**: Displays a top notification bar with a download progress bar and an install trigger when new GitHub releases are found.
 
-*Log Console Options*:
-- **Auto-scroll**: Automatically scrolls to new entries.
-- **Save Log**: Exports the log buffer to a text file.
-- **Clear Log**: Flushes the active log buffer.
-
----
-
-## 7. Automatic Application Updates
-
-1. MiniSIP checks GitHub Releases for new APK versions.
-2. When an update is detected, the **UpdateBar** appears at the top displaying the release tag (e.g., `v1.2.4`).
-3. Tap the download button to start downloading the APK.
-4. Once downloaded, Android's package installer launches automatically.
+### 6.2 Log Area Controls
+Each block contains an independent log console (**SIP Log**, **VPN Log**, **Call Log**, **Update Log**):
+- **Enable / Disable**: Toggles real-time log output.
+- **▲ / ▼**: Scrolls to top or bottom.
+- **Copy**: Copies log text to clipboard.
+- **Save**: Exports log text to an external file.
+- **Clear**: Flushes the active log buffer.
 
 ---
 
-## 8. Frequently Asked Questions & Troubleshooting
+## 7. Frequently Asked Questions & Troubleshooting
 
 ### ❓ One-Way Audio Issues
-- **Cause**: NAT traversal restriction on the SIP server or ISP RTP port blocking.
-- **Solution**: Enable **VPN Connect**. Tunneling hides SIP and RTP inside IPsec UDP encapsulation, resolving NAT issues.
+- **Cause**: ISP RTP port blocking or NAT restrictions.
+- **Solution**: Enable **VPN connect**. Encapsulating SIP and RTP traffic inside IPsec ESP packets resolves NAT traversal issues completely.
 
 ### ❓ SIP Registration Error 401 / 407
 - **Cause**: Incorrect Login or Password.
-- **Solution**: Recheck your credentials in the SIP Server block.
+- **Solution**: Verify credentials in the SIP server settings block.
 
-### ❓ VPN Reconnects Frequently
-- **Cause**: Unstable mobile network or short DPD timeout.
-- **Solution**: Increase **Ping Interval** in Advanced VPN to `20`-`30` seconds.
+### ❓ Frequent VPN Disconnections
+- **Cause**: Unstable mobile signal or short DPD timeouts.
+- **Solution**: Increase **Ping interval** in Advanced VPN settings to `9` seconds.
