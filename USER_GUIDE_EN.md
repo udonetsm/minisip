@@ -42,7 +42,7 @@ MiniSIP organizes settings into horizontal profile cards. Each card maintains an
 
 ### 3.3 Deleting a Profile Card
 1. Scroll to the very bottom of the page and pull downward for 1 second.
-2. The red **Delete Page** button appears (featuring icon ![Delete](docs/icons/ic_delete.svg)).
+2. The red **Delete Page** button appears (using vector icon `ic_delete`).
 3. Tap the button and confirm deletion. Subsequent profile cards shift left, clearing old preference files (`PageStore.deletePage`).
 
 ---
@@ -66,20 +66,27 @@ In the **SIP server settings** block, enter:
 
 ### 4.3 In-Call Controls & Options
 - **Number**: Main dial field formatted with a large font.
-- **Call / Hangup**: Initiates or terminates calls using ![Call](docs/icons/ic_call.svg) and ![Hangup](docs/icons/ic_call_end.svg). State transitions to `Calling...`, then `Talk`.
-- **Mute**: Toggles microphone input using ![Mic](docs/icons/ic_mic.svg) and ![Mute](docs/icons/ic_mic_off.svg). Active mute highlights the button with a red border.
-- **Spk**: Switches audio output between the loud speakerphone and the earpiece using ![Speaker](docs/icons/ic_volume_up.svg).
+- **Call / Hangup**: Initiates or terminates calls using vector drawables `ic_call` and `ic_call_end`. State transitions to `Calling...`, then `Talk`.
+- **Mute**: Toggles microphone input using `ic_mic` and `ic_mic_off`. Active mute highlights the button with a red border.
+- **Spk**: Switches audio output between the loud speakerphone and the earpiece using `ic_volume_up`.
 - **Refers**: Call transfer directory.
   - Maintains a list of saved transfer contacts (Login + Name).
-  - Tapping the transfer action (![Transfer](docs/icons/ic_transfer.svg)) next to a contact performs an instant **Blind Transfer** via RFC 3515 `REFER`.
-  - Tapping the delete action (![Close](docs/icons/ic_close.svg)) removes the contact.
+  - Tapping the transfer action (`ic_transfer`) next to a contact performs an instant **Blind Transfer** via RFC 3515 `REFER`.
+  - Tapping the delete action (`ic_close`) removes the contact.
 
-### 4.4 Interactive Visual Call History
-- Tap **History** to expand the call log.
-- Sessions are grouped chronologically.
-- Each call features status indicators and expandable details (toggled via ![Expand](docs/icons/ic_expand_more.svg) / ![Collapse](docs/icons/ic_expand_less.svg)).
-- **Quick Dialing**: Long-pressing any call history session header automatically populates the destination number into the **Number** field.
-- Session cards feature action buttons for copying (![Copy](docs/icons/ic_copy.svg)) and saving (![Save](docs/icons/ic_save.svg)).
+### 4.4 Interactive Visual Call History & Status Chains in the Dialer
+MiniSIP features an advanced chronological call history log grouped into distinct call sessions with color-coded status chains:
+- **Session Grouping Logic**: A new `dial` event initiates a new session only if the previous call session has already finished with a terminal event (`hangup`, `ended`, or `error`). Otherwise, consecutive events (`dial` -> `ringing` -> `connected` -> `hangup`) of a single call remain chained together in one continuous session.
+- **Color-Coded Status Dots**: Each phase of a call is represented by a distinct color-coded status indicator dot:
+  - **Orange (`#FF9800`)**: Dialing (`dial`)
+  - **Yellow/Gold (`#FFD54F`)**: Ringing (`ringing`)
+  - **Green (`#4CAF50`)**: Call Connected / In Progress (`connected`)
+  - **Purple (`#9C27B0`)**: Call Transfer (`transfer`)
+  - **Red (`#F44336`)**: Call Ended / Error / Hangup (`ended`, `error`)
+- **Compact Stack Preview**: Each session header displays a stacked preview of status dots summarizing the call's progression.
+- **Expandable Timeline**: Tapping the session header expands or collapses using vector indicators (![Expand](docs/icons/ic_expand_more.svg) / ![Collapse](docs/icons/ic_expand_less.svg)) to show a detailed horizontal timeline of all status events. Tapping any individual event dot opens a dialog displaying full event details with a **Copy** option.
+- **Quick Dialing**: Long-pressing any call history session header automatically copies and inserts the destination phone number into the main **Number** dial field.
+- **Session Copy & Save**: Use the copy button (![Copy](docs/icons/ic_copy.svg)) to copy the entire call session summary to the clipboard.
 
 ---
 
