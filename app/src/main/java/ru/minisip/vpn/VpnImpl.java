@@ -184,7 +184,12 @@ final class VpnImpl implements Vpn {
         reconnects = 0;
         migs = heals = silences = kept = 0;
         updateWake();
-        ctx.startService(new Intent(ctx, TunService.class));
+        Intent svc = new Intent(ctx, TunService.class);
+        try {
+            ctx.startService(svc);
+        } catch (IllegalStateException e) {
+            ctx.startForegroundService(svc);
+        }
     }
 
     /**

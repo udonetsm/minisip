@@ -69,5 +69,32 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Quick Settings tile: toggles the app-wide VPN without opening the UI. -->
+        <activity
+            android:name=".app.TileProxyActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Translucent"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:noHistory="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".app.VpnTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_vpn_tile"
+            android:label="MiniVPN"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.tile"
+                android:resource="@xml/vpn_tile" />
+        </service>
     </application>
 </manifest>

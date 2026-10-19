@@ -32,12 +32,64 @@ final class PageStore {
     }
 
     /**
+     * Returns true if VPN server, login and password (or pre-shared key) are
+     * configured for the specified page.
+     */
+    static boolean vpnConfigured(Context c, int page) {
+        SharedPreferences p = prefs(c, page);
+        String host = p.getString("vpnServer", "").trim();
+        String login = p.getString("vpnLogin", "").trim();
+        String pass = p.getString("vpnPass", "");
+        String key = p.getString("vpnKey", "");
+        return !host.isEmpty() && !login.isEmpty() && (!pass.isEmpty() || !key.isEmpty());
+    }
+
+    /**
+     * Returns indices of all pages with a VPN profile configured, in page order.
+     */
+    static List<Integer> configuredVpnPages(Context c) {
+        List<Integer> out = new ArrayList<>();
+        int n = count(c);
+        for (int i = 0; i < n; i++) {
+            if (vpnConfigured(c, i)) out.add(i);
+        }
+        return out;
+    }
+
+    /**
+     * Returns index of the first page with VPN profile configured, or -1 if none.
+     */
+    static int firstConfiguredVpnPage(Context c) {
+        int n = count(c);
+        // Configured pages plus a few placeholder slots that may hold VPN-only config
+        for (int i = 0; i < n + 5; i++) {
+            if (vpnConfigured(c, i)) return i;
+        }
+        return -1;
+    }
+
+    /**
+     * Index of the settings page used by the Quick Settings tile; -1 if unset.
+     */
+    static int vpnPage(Context c) {
+        return c.getSharedPreferences("vpn", Context.MODE_PRIVATE).getInt("page", -1);
+    }
+
+    /**
+     * Persists the settings page used by the Quick Settings tile.
+     */
+    static void setVpnPage(Context c, int page) {
+        c.getSharedPreferences("vpn", Context.MODE_PRIVATE).edit().putInt("page", page).apply();
+    }
+
+    /**
      * Returns true if server host and login are configured for the specified page.
      */
     static boolean configured(Context c, int page) {
         SharedPreferences p = prefs(c, page);
         return !p.getString("server", "").trim().isEmpty() && !p.getString("login", "").trim().isEmpty();
     }
+ 
 
     /**
      * Reads blind transfer contacts list for specified page. Format: "login\tname" separated by '\n'.

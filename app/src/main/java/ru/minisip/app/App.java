@@ -2,12 +2,16 @@ package ru.minisip.app;
 
 import android.app.Activity;
 import android.app.Application;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
 import android.net.Network;
+import android.net.VpnService;
 import android.os.Handler;
+import android.content.Context;
 import android.os.Looper;
+import android.service.quicksettings.TileService;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -226,6 +230,56 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     }
 
     /**
+     * Toggles VPN from the Quick Settings tile without opening any activity.
+     * Uses App.lastPage (falls back to page 0 on a fresh install). Requires granted
+     * VPN consent and a configured profile on that page. Returns a user-facing message
+     * on failure, or null on success (the tile then reflects state via changed()).
+     */
+    String toggleVpnFromTile(Context ctx) {
+        if (vpnUp || vpnConnecting) {
+            if (lastPage < 0) return "VPN: nothing to disconnect";
+            vpnDisconnect(lastPage);
+            return null;
+        }
+        if (state != IDLE) return "MiniSIP: call in progress";
+        int page = lastPage >= 0 ? lastPage : PageStore.vpnPage(ctx);
+        if (page < 0 || !PageStore.vpnConfigured(ctx, page)) {
+            page = PageStore.firstConfiguredVpnPage(ctx);
+        }
+        if (page < 0) page = 0;
+        return connectVpnPage(ctx, page);
+    }
+
+    /**
+     * Connects the VPN profile on the specified page. Returns a user-facing
+     * message on failure, or null on success.
+     */
+    String connectVpnPage(Context ctx, int page) {
+        if (vpnUp || vpnConnecting) return "VPN: already connected";
+        if (state != IDLE) return "MiniSIP: call in progress";
+        if (page < 0 || !PageStore.vpnConfigured(ctx, page)) return "VPN: page not configured";
+        if (!allowed(page)) return "MiniSIP: busy on another page";
+        if (VpnService.prepare(ctx) != null) return "Open MiniSIP once to grant VPN permission";
+        SharedPreferences p = PageStore.prefs(ctx, page);
+        String host = p.getString("vpnServer", "").trim();
+        String login = p.getString("vpnLogin", "").trim();
+        String pass = p.getString("vpnPass", "");
+        String key = p.getString("vpnKey", "");
+        String ca = p.getString("vpnCa", "");
+        String apps = p.getString("vpnApps", "");
+        String hc = p.getString("vpnHealthcheck", "").trim();
+        int pingSec;
+        try {
+            pingSec = Integer.parseInt(p.getString("vpnPingInterval", "").trim());
+        } catch (NumberFormatException e) {
+            pingSec = 5;
+        }
+        if (pingSec < 5 || pingSec > 9) pingSec = 5;
+        vpnConnect(page, host, login, pass, key, ca, apps, hc, pingSec);
+        return null;
+    }
+
+    /**
      * True if VPN permission is already granted; false if system dialog is shown.
      */
     boolean vpnConsent(Activity a, int requestCode) {
@@ -240,6 +294,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         changed();
         manualStrict = PageStore.prefs(this, page).getBoolean("vpnStrict", false);
         vpn.setStrict(manualStrict);
+        PageStore.setVpnPage(this, page);
         vpn.connect(host, login, password, psk, ca, apps, healthcheckIp, pingIntervalSec);
     }
 
@@ -497,6 +552,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         for (Runnable r : changeListeners) {
             r.run();
         }
+        TileService.requestListeningState(this, new ComponentName(this, VpnTileService.class));
     }
 
 

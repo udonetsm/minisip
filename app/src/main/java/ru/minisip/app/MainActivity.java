@@ -1,11 +1,14 @@
 package ru.minisip.app;
 
 import android.Manifest;
+import android.app.StatusBarManager;
 import android.content.ActivityNotFoundException;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Typeface;
+import android.graphics.drawable.Icon;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -29,6 +32,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 import java.io.File;
 
+import ru.minisip.R;
 import ru.minisip.update.Update;
 
 /**
@@ -189,6 +193,9 @@ public final class MainActivity extends AppCompatActivity {
             } else {
                 requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 1);
             }
+            if (Build.VERSION.SDK_INT >= 33) {
+                offerTileOnce();
+            }
         }
     }
 
@@ -215,6 +222,26 @@ public final class MainActivity extends AppCompatActivity {
             pager.setCurrentItem(next, false);
             pager.setUserInputEnabled(pages.getItemCount() > 1);
         });
+    }
+
+    /**
+     * On Android 13+ asks the system to offer adding the MiniSIP VPN tile to Quick Settings.
+     * Uses the system-managed dialog; shows only once per install.
+     */
+    private void offerTileOnce() {
+        SharedPreferences sp = getSharedPreferences("app", MODE_PRIVATE);
+        if (sp.getBoolean("tileOffered", false)) return;
+        StatusBarManager sbm = getSystemService(StatusBarManager.class);
+        if (sbm == null) return;
+        try {
+            sbm.requestAddTileService(
+                    new ComponentName(this, VpnTileService.class),
+                    "MiniSIP VPN",
+                    Icon.createWithResource(this, R.drawable.ic_vpn_tile),
+                    getMainExecutor(),
+                    (result) -> sp.edit().putBoolean("tileOffered", true).apply());
+        } catch (RuntimeException ignored) {
+        }
     }
 
     @Override
