@@ -1,7 +1,7 @@
 package ru.minisip.sip;
 
 /**
- * Минимальный SDP: один аудио-поток, только G.711.
+ * SDP (RFC 4566) builder and parser for single audio G.711 stream.
  */
 final class Sdp {
 
@@ -9,7 +9,7 @@ final class Sdp {
     }
 
     /**
-     * pts — предлагаемые типы по порядку предпочтения: 8 = PCMA, 0 = PCMU.
+     * Constructs SDP session description offering PCMA (8) and PCMU (0).
      */
     static String make(String ip, int port, int... pts) {
         StringBuilder fmts = new StringBuilder();
@@ -31,8 +31,7 @@ final class Sdp {
     }
 
     /**
-     * Разбор: {ip, порт, тип}. Тип — первый из предложенных, который мы умеем (8 или 0).
-     * null — нет аудио, нет адреса или нет общего кодека.
+     * Parses SDP body to extract {ip, port, payloadType}. Returns null if no valid audio stream.
      */
     static String[] parse(String sdp) {
         String sessionIp = null;

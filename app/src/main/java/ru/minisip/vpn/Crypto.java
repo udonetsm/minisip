@@ -20,7 +20,7 @@ final class Crypto {
 
     static final SecureRandom RND = new SecureRandom();
 
-    // ---------- байты ----------
+    // ---------- Bytes ----------
     static final int DH_GROUP = 14;
     static final int DH_BYTES = 256;
     private static final BigInteger P = new BigInteger(
@@ -47,7 +47,7 @@ final class Crypto {
         b[o + 1] = (byte) v;
     }
 
-    // ---------- Диффи-Хеллман: группа 14 (RFC 3526, MODP 2048) ----------
+    // ---------- Diffie-Hellman Group 14 (RFC 3526, MODP 2048) ----------
 
     static void put32(byte[] b, int o, long v) {
         put16(b, o, (int) (v >> 16));
@@ -106,12 +106,12 @@ final class Crypto {
     private static byte[] fixed(BigInteger v, int n) {
         byte[] b = v.toByteArray();
         byte[] r = new byte[n];
-        int skip = b.length > n ? b.length - n : 0;   // знаковый нулевой байт
+        int skip = b.length > n ? b.length - n : 0;   // leading zero sign byte
         System.arraycopy(b, skip, r, n - (b.length - skip), b.length - skip);
         return r;
     }
 
-    // ---------- набор алгоритмов ----------
+    // ---------- Suite Cryptographic Algorithms ----------
 
     static byte[] hmac(String alg, byte[] key, byte[]... data) {
         try {
@@ -215,12 +215,10 @@ final class Crypto {
         }
     }
 
-    // ---------- шифрование в одну сторону (и для IKE, и для ESP) ----------
+    // ---------- One-way Cipher Direction (IKE and ESP) ----------
 
     /**
-     * Запечатывает и открывает «голову | IV | шифртекст | ICV».
-     * Голова (заголовок IKE+SK или SPI+номер ESP) защищена, но не зашифрована:
-     * у CBC она входит в HMAC, у GCM — в AAD. Выравнивание открытого текста делает вызывающий.
+     * Encrypts and decrypts head | IV | ciphertext | ICV payload.
      */
     static final class Box {
         private final Suite s;
@@ -237,7 +235,7 @@ final class Crypto {
         }
 
         /**
-         * Длина добавки к открытому тексту: IV + ICV.
+         * Overhead length added to plaintext: IV + ICV.
          */
         int overhead() {
             return s.ivLen() + s.icvLen();
@@ -245,7 +243,7 @@ final class Crypto {
 
         private synchronized byte[] nextIv() {
             if (!s.aead()) return random(16);
-            byte[] iv = new byte[8];            // GCM: IV не должен повторяться, берём счётчик
+            byte[] iv = new byte[8];            // GCM: 8-byte counter IV
             put32(iv, 0, counter >>> 32);
             put32(iv, 4, counter++);
             return iv;
@@ -258,7 +256,7 @@ final class Crypto {
                 if (s.aead()) {
                     c.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(128, cat(salt, iv)));
                     c.updateAAD(head);
-                    return cat(head, iv, c.doFinal(plain));          // тег GCM идёт в конце = ICV
+                    return cat(head, iv, c.doFinal(plain));          // GCM tag appended at end = ICV
                 }
                 c.init(Cipher.ENCRYPT_MODE, key, new IvParameterSpec(iv));
                 byte[] body = cat(head, iv, c.doFinal(plain));
@@ -269,7 +267,7 @@ final class Crypto {
         }
 
         /**
-         * Проверяет ICV и расшифровывает; null, если сообщение подделано или повреждено.
+         * Verifies ICV and decrypts ciphertext; returns null on tag or MAC mismatch.
          */
         byte[] open(byte[] msg, int headLen) {
             int ivLen = s.ivLen(), icv = s.icvLen();
@@ -289,7 +287,7 @@ final class Crypto {
                 c.init(Cipher.DECRYPT_MODE, key, new IvParameterSpec(msg, headLen, ivLen));
                 return c.doFinal(msg, headLen + ivLen, ctLen);
             } catch (GeneralSecurityException e) {
-                return null;                                          // неверный тег GCM и т.п.
+                return null;                                          // invalid GCM ICV tag
             }
         }
     }

@@ -8,13 +8,7 @@ import android.hardware.SensorManager;
 import android.os.PowerManager;
 
 /**
- * Как это устроено:
- * - PROXIMITY_SCREEN_OFF_WAKE_LOCK: система сама гасит экран, пока датчик закрыт, и
- * зажигает, когда открыт (механизм штатной звонилки);
- * - слушатель датчика: на событии «открыт» принудительно будит экран, если он погашен
- * (например, кнопкой питания) — так датчик всегда главный, а кнопка питания лишь
- * дополнительно переключает экран вручную;
- * - кнопку питания мы не перехватываем: она работает штатно.
+ * Proximity sensor and CPU wake lock manager implementation.
  */
 final class ScreenImpl implements Screen, SensorEventListener {
 
@@ -40,7 +34,7 @@ final class ScreenImpl implements Screen, SensorEventListener {
         cpuLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "minisip:cpu");
         cpuLock.setReferenceCounted(false);
 
-        // единственный способ включить экран из сервиса/без Activity
+        // wake lock configuration to wake screen from service without Activity
         wakeLock = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK
                 | PowerManager.ACQUIRE_CAUSES_WAKEUP, "minisip:wake");
         wakeLock.setReferenceCounted(false);
@@ -50,7 +44,7 @@ final class ScreenImpl implements Screen, SensorEventListener {
     public synchronized void start() {
         if (active) return;
         active = true;
-        cpuLock.acquire(4 * 60 * 60 * 1000L);          // страховка: не дольше 4 часов
+        cpuLock.acquire(4 * 60 * 60 * 1000L);          // safety timeout: maximum 4 hours
         if (proxLock != null) proxLock.acquire(4 * 60 * 60 * 1000L);
         if (prox != null) sm.registerListener(this, prox, SensorManager.SENSOR_DELAY_NORMAL);
     }
@@ -61,7 +55,7 @@ final class ScreenImpl implements Screen, SensorEventListener {
         active = false;
         if (prox != null) sm.unregisterListener(this);
         if (proxLock != null && proxLock.isHeld()) {
-            // экран не зажигать, пока телефон ещё у уха
+            // do not turn screen on while phone is near ear
             proxLock.release(PowerManager.RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY);
         }
         if (wakeLock.isHeld()) wakeLock.release();
@@ -71,8 +65,8 @@ final class ScreenImpl implements Screen, SensorEventListener {
     @Override
     public void onSensorChanged(SensorEvent e) {
         boolean near = e.values[0] < Math.min(e.sensor.getMaximumRange(), 5f);
-        if (near) return;                                // гасит система через proxLock
-        if (!pm.isInteractive()) wakeLock.acquire(3000); // «открыт» -> зажечь погашенный экран
+        if (near) return;                                // system dims screen via proxLock
+        if (!pm.isInteractive()) wakeLock.acquire(3000); // proximity far: wake display if screen was turned off
     }
 
     @Override

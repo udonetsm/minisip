@@ -21,8 +21,7 @@ import java.io.IOException;
 import ru.minisip.log.LogSink;
 
 /**
- * Реализация проверки и установки обновлений. Проверка и скачивание — в фоновом потоке,
- * колбэки — в главном. Шаги 3–5 README добавляют check/download/install.
+ * Implementation of Update manager. Network operations run on background threads.
  */
 final class UpdateImpl implements Update {
 
@@ -32,9 +31,9 @@ final class UpdateImpl implements Update {
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile LogSink sink;
     private volatile String channel;
-    private volatile Listener persistent;  // постоянный слушатель (полоса в MainActivity)
-    private volatile String assetUrl;      // browser_download_url APK из последнего успешного check()
-    private volatile String assetName;     // tag_name для отображения в прогрессе
+    private volatile Listener persistent;  // persistent listener (UpdateBar in MainActivity)
+    private volatile String assetUrl;      // browser_download_url for APK from last successful check()
+    private volatile String assetName;     // tag_name for progress display
 
     UpdateImpl(Context ctx) {
         this.ctx = ctx.getApplicationContext();
@@ -44,7 +43,7 @@ final class UpdateImpl implements Update {
     }
 
     /**
-     * stable-канал отдаёт объект, prerelease — массив; берём первый non-draft. Пусто → Code 404.
+     * Parses release JSON from GitHub API. Throws Code 404 if no valid release found.
      */
     private static JSONObject parse(String body, boolean stable) throws Http.Code {
         try {
@@ -64,7 +63,7 @@ final class UpdateImpl implements Update {
     }
 
     /**
-     * Первый asset с расширением .apk. null — релиз без APK.
+     * Selects first .apk asset URL from release JSON. Returns null if missing.
      */
     private static String pickAsset(JSONObject rel) {
         JSONArray a = rel.optJSONArray("assets");
@@ -91,7 +90,7 @@ final class UpdateImpl implements Update {
     }
 
     /**
-     * Событие уходит и постоянному слушателю (полоса), и локальному из check/download.
+     * Emits event callbacks to both persistent and local listeners on the main thread.
      */
     private void emit(Runnable toPersistent, Runnable toLocal) {
         Listener p = persistent;
@@ -102,7 +101,7 @@ final class UpdateImpl implements Update {
     }
 
     /**
-     * Одна точка журнала: logcat и панель лога. Секреты сюда не передавать.
+     * Single debug log entry point for Logcat and LogArea.
      */
     private void log(String m) {
         Log.i(TAG, m);
@@ -133,7 +132,7 @@ final class UpdateImpl implements Update {
     }
 
     /**
-     * GET выбранного канала, парсинг, сравнение с lastUpdateTime. Под hasUpdate=true — download().
+     * Background thread logic for update checking and optional auto-download.
      */
     private void checkIn(String ch, Listener l) {
         boolean stable = UpdateConfig.CH_STABLE.equals(ch);
@@ -231,7 +230,7 @@ final class UpdateImpl implements Update {
     }
 
     /**
-     * Скачивание APK в apkFile(). Прогресс — в onProgress, финал — в onDownloaded.
+     * Background thread logic for downloading APK to cache directory.
      */
     private void downloadIn(String url, String tag, Listener l) {
         log("download: " + tag + " " + url);
@@ -269,7 +268,7 @@ final class UpdateImpl implements Update {
             return;
         }
         PackageManager pm = ctx.getPackageManager();
-        if (!pm.canRequestPackageInstalls()) {          // Android 8+: разрешение на установку из этого источника
+        if (!pm.canRequestPackageInstalls()) {          // Android 8+: request install permission
             log("install: request REQUEST_INSTALL_PACKAGES");
             Intent i = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                     Uri.parse("package:" + ctx.getPackageName()));
@@ -287,7 +286,7 @@ final class UpdateImpl implements Update {
     }
 
     /**
-     * При старте приложения: удаляем APK, оставшийся от прошлой установки/скачивания.
+     * Deletes lingering APK files from previous updates on startup.
      */
     private void cleanUpdates() {
         File dir = new File(ctx.getExternalCacheDir(), "updates");
@@ -300,7 +299,7 @@ final class UpdateImpl implements Update {
     }
 
     /**
-     * Файл APK в кэше. Создаётся по требованию на шаге 4.
+     * Returns target APK file location in cache directory.
      */
     @SuppressWarnings("unused")
     File apkFile() {

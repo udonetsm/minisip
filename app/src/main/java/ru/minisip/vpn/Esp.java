@@ -3,22 +3,21 @@ package ru.minisip.vpn;
 import java.util.Arrays;
 
 /**
- * ESP в туннельном режиме для IPv4 (RFC 4303): оборачивает и разворачивает IP-пакеты.
- * Номера пакетов 32-битные (без ESN). Исходящее зовёт один поток, входящее — другой.
+ * ESP in tunnel mode for IPv4 (RFC 4303): wraps and unwraps IP packets.
  */
 final class Esp {
 
-    private static final int HEAD = 8;        // SPI + номер
-    private static final int IPV4 = 4;        // Next Header для IPv4-в-ESP
+    private static final int HEAD = 8;        // SPI + sequence number
+    private static final int IPV4 = 4;        // Next Header for IPv4-in-ESP
 
     private final Crypto.Box out, in;
     private final long spiOut, spiIn;
     private final int block;
-    // диагностика: сколько входящих отброшено и почему
+    // inbound packet drop diagnostics
     volatile int dropSpi, dropReplay, dropIcv, dropFmt;
-    private long seq;                         // последний отправленный номер
-    private long top;                         // наибольший принятый номер
-    private long window;                      // бит i = принят номер (top - i)
+    private long seq;                         // last transmitted sequence number
+    private long top;                         // highest received sequence number
+    private long window;                      // bit i = received packet (top - i)
 
     Esp(Crypto.Suite s, Crypto.Box out, Crypto.Box in, long spiOut, long spiIn) {
         this.out = out;
@@ -33,28 +32,27 @@ final class Esp {
     }
 
     /**
-     * Наш исходящий SPI (он же SPI_R старого SA — нужен для INFORMATIONAL DELETE).
+     * Our outbound SPI (same as SPI_R of old SA, needed for INFORMATIONAL DELETE).
      */
     long spiOut() {
         return spiOut;
     }
 
     /**
-     * Наш входящий SPI (для логов и DELETE).
+     * Our inbound SPI (for logs and DELETE).
      */
     long spiIn() {
         return spiIn;
     }
 
     /**
-     * IP-пакет b[0..n) -> готовый пакет ESP (его кладут в UDP как есть).
-     * synchronized: исходящее теперь зовут два потока (tun -> сокет и ping из таймеров), а номер общий.
+     * Wraps IP packet b[0..n) into ESP packet.
      */
     synchronized byte[] wrap(byte[] b, int n) {
         int pad = (block - (n + 2) % block) % block;
         byte[] plain = new byte[n + pad + 2];
         System.arraycopy(b, 0, plain, 0, n);
-        for (int i = 0; i < pad; i++) plain[n + i] = (byte) (i + 1);   // 1, 2, 3... по RFC 4303
+        for (int i = 0; i < pad; i++) plain[n + i] = (byte) (i + 1);   // 1, 2, 3... per RFC 4303
         plain[n + pad] = (byte) pad;
         plain[n + pad + 1] = IPV4;
         byte[] head = new byte[HEAD];
@@ -64,7 +62,7 @@ final class Esp {
     }
 
     /**
-     * Пакет ESP -> IP-пакет. null: чужой SPI, повтор, подделка, не IPv4 или мусор.
+     * Unwraps ESP packet into IP packet. Returns null if invalid SPI, replay, or authentication error.
      */
     byte[] unwrap(byte[] p, int n) {
         if (n < HEAD + out.overhead()) {
@@ -79,13 +77,13 @@ final class Esp {
         if (replayed(s)) {
             dropReplay++;
             return null;
-        }   // дёшево отбрасываем до расшифровки
+        }   // drop replayed packet before decryption
         byte[] plain = in.open(Arrays.copyOf(p, n), HEAD);
         if (plain == null || plain.length < 2) {
             dropIcv++;
             return null;
         }
-        accept(s);                                    // номер засчитываем только после проверки ICV
+        accept(s);                                    // accept sequence number only after ICV verification
         int pad = plain[plain.length - 2] & 0xff;
         if (plain[plain.length - 1] != IPV4 || pad + 2 > plain.length) {
             dropFmt++;

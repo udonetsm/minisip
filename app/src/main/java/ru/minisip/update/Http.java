@@ -10,8 +10,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 /**
- * HTTP-клиент для GitHub Releases. GET строки (JSON) и download-with-progress.
- * HttpURLConnection, org.json — только SDK.
+ * HTTP client for GitHub Releases JSON API and file downloads.
  */
 final class Http {
 
@@ -19,7 +18,7 @@ final class Http {
     }
 
     /**
-     * GET строки. На любой ответ != 200 бросает Code.
+     * Executes HTTP GET request. Throws Code exception if status is not 200.
      */
     static String get(String url) throws IOException {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
@@ -47,7 +46,7 @@ final class Http {
     }
 
     /**
-     * GET в файл. Следует редиректам. На ответ != 200 бросает Code.
+     * Downloads file to destination with progress updates.
      */
     static void download(String url, File dst, Progress p) throws IOException {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
@@ -87,14 +86,14 @@ final class Http {
     }
 
     /**
-     * Прогресс скачивания, 0..100. percent=-1 — длина неизвестна.
+     * Download progress listener callback (0..100).
      */
     interface Progress {
         void onProgress(int percent);
     }
 
     /**
-     * Ответ не 200: код сохраняем, чтобы вызывающий отличил 404 (пустой канал) от прочих.
+     * HTTP status code exception container.
      */
     static final class Code extends IOException {
         final int code;

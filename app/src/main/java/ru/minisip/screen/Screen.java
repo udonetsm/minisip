@@ -3,9 +3,7 @@ package ru.minisip.screen;
 import android.content.Context;
 
 /**
- * Экран во время разговора: датчик приближения гасит и зажигает его,
- * кнопка питания работает как обычно и просто дублирует управление.
- * Ни от каких наших пакетов не зависит.
+ * Manages screen state and proximity sensor during calls.
  */
 public interface Screen {
 
@@ -14,12 +12,12 @@ public interface Screen {
     }
 
     /**
-     * Начало дозвона: включить датчик приближения и удерживать CPU.
+     * Enables proximity sensor and acquires partial CPU wake lock on call start.
      */
     void start();
 
     /**
-     * Конец вызова: отпустить датчик и все блокировки.
+     * Releases proximity sensor and wake locks on call end.
      */
     void stop();
 }

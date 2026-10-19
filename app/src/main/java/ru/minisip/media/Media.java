@@ -5,8 +5,7 @@ import android.content.Context;
 import ru.minisip.net.Udp;
 
 /**
- * Голос: RTP + G.711 + микрофон/динамик.
- * Зависит только от интерфейса net.Udp. Наружу — встроенные типы.
+ * Media engine combining RTP streaming, G.711 codec, and Audio path.
  */
 public interface Media {
 
@@ -15,29 +14,28 @@ public interface Media {
     }
 
     /**
-     * Занимает локальный RTP-порт. Возвращает порт или -1.
+     * Allocates local RTP UDP port. Returns port number or -1 on failure.
      */
     int open();
 
     /**
-     * Запускает микрофон, динамик и обмен RTP. payload: 0 = PCMU, 8 = PCMA.
+     * Starts microphone, speaker, and RTP processing for specified payload type.
      */
     boolean start(String host, int port, int payload);
 
     /**
-     * Останавливает всё и освобождает порт. Можно звать в любом состоянии.
+     * Stops RTP processing and audio hardware, releasing allocated socket.
      */
     void stop();
 
     /**
-     * Куда идёт звук разговора: true — громкая связь (нижний динамик), false — разговорный (в ухо).
-     * Можно менять и во время вызова; выбор действует и на следующие вызовы.
+     * Configures audio output route: true for speakerphone, false for earpiece.
      */
     default void setSpeaker(boolean on) {
     }
 
     /**
-     * Заглушить микрофон: true — заглушить, false — включить обратно.
+     * Sets microphone mute state: true to mute, false to unmute.
      */
     default void setMute(boolean mute) {
     }

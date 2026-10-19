@@ -12,7 +12,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * HTTP Digest (RFC 2617 / 3261) только с MD5.
+ * HTTP Digest Authentication (RFC 2617 / RFC 3261) MD5 calculation helper.
  */
 final class Digest {
 
@@ -23,7 +23,7 @@ final class Digest {
     }
 
     /**
-     * Значение заголовка Authorization по вызову сервера. null — схема не поддерживается.
+     * Calculates Authorization header value for server challenge. Returns null if scheme unsupported.
      */
     static String answer(String challenge, String user, String pass, String method, String uri) {
         byte[] b = new byte[8];

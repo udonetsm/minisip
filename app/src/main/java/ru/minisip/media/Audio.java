@@ -1,13 +1,13 @@
 package ru.minisip.media;
 
 /**
- * Источник и приёмник PCM 8 кГц, 16 бит, моно. Реализация — AndroidAudio (в тестах подменяется).
+ * Audio PCM source and sink (8 kHz, 16-bit mono). Implemented by AndroidAudio.
  */
 interface Audio {
     boolean start();
 
     /**
-     * Блокирующее чтение ровно buf.length сэмплов. -1 — ошибка/остановка.
+     * Blocking read for PCM samples. Returns sample count or -1 on error.
      */
     int read(short[] buf);
 
@@ -16,13 +16,13 @@ interface Audio {
     void stop();
 
     /**
-     * Вывод звука: true — громкая связь, false — разговорный динамик. Допустимо и во время разговора.
+     * Audio route selection: true for speakerphone, false for earpiece.
      */
     default void setSpeaker(boolean on) {
     }
 
     /**
-     * Отключение микрофона: true — звук заглушен (тишина), false — микрофон включен.
+     * Microphone mute selection: true to mute, false to unmute.
      */
     default void setMute(boolean mute) {
     }

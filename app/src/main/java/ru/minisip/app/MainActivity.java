@@ -32,18 +32,13 @@ import java.io.File;
 import ru.minisip.update.Update;
 
 /**
- * Пустая главная активити: на ней лежит лента страниц-фрагментов (SettingsFragment).
- * Сами страницы чуть меньше экрана, по краям видна активити под ними.
- * <p>
- * Страниц столько, сколько создано. Листать нельзя, пока страница одна. Если на последней странице
- * настроена АТС (сервер и логин), справа появляется ещё одна: стоит на неё перелистнуть, и она
- * создаётся. Так же и дальше: новая страница создаёт следующую, только когда в ней самой настроена АТС.
- * Интерфейс собран в коде: ни одного xml-ресурса.
+ * Main activity hosting a ViewPager2 of SettingsFragment cards.
+ * Cards are constructed programmatically without XML layout files.
  */
 public final class MainActivity extends AppCompatActivity {
 
     static final int REQ_VPN = 2;
-    private static final int PAGER_ID = 0x4d530001;       // постоянный id: по нему ViewPager2 сохраняет страницу
+    private static final int PAGER_ID = 0x4d530001;       // persistent ID used by ViewPager2 to restore active page
 
     private ViewPager2 pager;
     private Pages pages;
@@ -70,12 +65,12 @@ public final class MainActivity extends AppCompatActivity {
         super.onDestroy();
     }
     /**
-     * tag последнего релиза — только для отображения в строке прогресса.
+     * Release tag of the last checked release for update progress bar.
      */
     private String lastUpdateTag = "";
 
     /**
-     * Диалог с кнопками Yes и No (No — синяя, Yes — тусклая и на 20% прозрачная).
+     * Custom confirmation dialog displaying styled action buttons.
      */
     static void showCustomConfirmDialog(Context ctx, String title, String message,
                                         Runnable onYes, Runnable onNo) {
@@ -97,14 +92,14 @@ public final class MainActivity extends AppCompatActivity {
 
         Button noBtn = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
         if (noBtn != null) {
-            noBtn.setTextColor(0xFF2196F3); // Синяя кнопка No
+            noBtn.setTextColor(0xFF2196F3); // Blue No button
             noBtn.setTypeface(null, Typeface.BOLD);
         }
 
         Button yesBtn = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
         if (yesBtn != null) {
-            yesBtn.setTextColor(0xFF888888); // Тусклая кнопка Yes
-            yesBtn.setAlpha(0.80f);          // На 20% прозрачная
+            yesBtn.setTextColor(0xFF888888); // Muted Yes button
+            yesBtn.setAlpha(0.80f);          // 20% translucent
         }
     }
 
@@ -120,7 +115,7 @@ public final class MainActivity extends AppCompatActivity {
         pager.setId(PAGER_ID);
         pages = new Pages(this);
         pager.setAdapter(pages);
-        pager.setUserInputEnabled(pages.getItemCount() > 1);   // одна страница — листать нечего
+        pager.setUserInputEnabled(pages.getItemCount() > 1);   // single page — user input disabled
         pager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
             private boolean isAsking = false;
 
@@ -151,7 +146,7 @@ public final class MainActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
 
-        // Полоса обновления: одна на приложение, внизу поверх ViewPager2, ужимает его снизу.
+        // Update bar overlay anchored to bottom of ViewPager2
         updateBar = new UpdateBar(this);
         FrameLayout.LayoutParams barLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -167,7 +162,7 @@ public final class MainActivity extends AppCompatActivity {
                     lastUpdateTag = r.tag == null ? "" : r.tag;
                     updateBar.showProgress(0, lastUpdateTag);
                 }
-                // noStable и «последняя версия» обрабатывает SettingsFragment (шаг 7)
+                // noStable and latest version notifications handled by SettingsFragment
             }
 
             @Override
@@ -198,10 +193,10 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Настройки или число страниц изменились: пересчитать, сколько страниц можно листать.
+     * Settings or card count changed: recalculate ViewPager2 page scrolling.
      */
     void pagesChanged() {
-        // не сразу: изменение могло прийти посреди расчёта экрана, а RecyclerView этого не любит
+        // posted asynchronously to prevent layout re-entrancy issues in RecyclerView
         pager.post(() -> {
             pages.refresh();
             pager.setUserInputEnabled(pages.getItemCount() > 1);
@@ -209,7 +204,7 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Вызывается из SettingsFragment при подтверждённом удалении страницы.
+     * Called from SettingsFragment upon confirmed page deletion.
      */
     void pageDeleted(int pageToDelete) {
         PageStore.deletePage(this, pageToDelete);
@@ -237,20 +232,20 @@ public final class MainActivity extends AppCompatActivity {
 
     private void requestIgnoreBatteryOptimizations() {
         PowerManager pm = getSystemService(PowerManager.class);
-        if (pm.isIgnoringBatteryOptimizations(getPackageName())) return;   // уже разрешено
+        if (pm.isIgnoringBatteryOptimizations(getPackageName())) return;   // already granted
 
         try {
             Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
                     Uri.parse("package:" + getPackageName()));
-            startActivity(i);                    // системный диалог «Разрешить / Запретить»
+            startActivity(i);                    // system optimization prompt dialog
         } catch (ActivityNotFoundException e) {
-            // запасной вариант: общий список настроек оптимизации батареи
+            // fallback: general battery optimization settings screen
             startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
         }
     }
 
     /**
-     * Ответ на системный запрос согласия на VPN: отдаём его странице, с которой запрос ушёл.
+     * Forwards VPN system consent activity result to current SettingsFragment page.
      */
     @Override
     @SuppressWarnings("deprecation")
@@ -258,7 +253,7 @@ public final class MainActivity extends AppCompatActivity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != REQ_VPN) return;
         boolean ok = resultCode == RESULT_OK;
-        // ViewPager2 кладёт страницу с тегом "f" + номер позиции; нажать кнопку можно только на текущей
+        // ViewPager2 tags fragment as "f" + position; current item receives result
         Fragment f = getSupportFragmentManager().findFragmentByTag("f" + pager.getCurrentItem());
         if (f instanceof SettingsFragment) {
             ((SettingsFragment) f).onVpnConsent(ok);
@@ -268,7 +263,7 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Лента страниц: созданные плюс, если в последней настроена АТС, одна пустая справа.
+     * Page adapter backing ViewPager2 settings cards.
      */
     private static final class Pages extends FragmentStateAdapter {
         private final FragmentActivity host;

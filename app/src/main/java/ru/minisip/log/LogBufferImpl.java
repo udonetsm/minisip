@@ -6,7 +6,7 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * Реализация LogBuffer: ArrayDeque под замком, строки с меткой времени.
+ * Thread-safe implementation of LogBuffer backed by ArrayDeque and synchronized locks.
  */
 final class LogBufferImpl implements LogBuffer {
 

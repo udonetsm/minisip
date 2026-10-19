@@ -17,10 +17,8 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * Сохраняет текстовый лог в Documents/minisip/.
- * Android 10+: MediaStore (без разрешений).
- * Android 9 и ниже: File API (нужно WRITE_EXTERNAL_STORAGE).
- * save() возвращает имя файла либо строку "error: ...".
+ * Saves text logs to Documents/MiniSIP/logs directory using MediaStore API on Android 10+
+ * or File API on legacy Android versions.
  */
 public final class LogFile {
 

@@ -3,45 +3,41 @@ package ru.minisip.net;
 import android.content.Context;
 
 /**
- * UDP-сокет. Наружу — только встроенные типы и вложенный интерфейс-колбэк.
- * Ни от кого из наших пакетов не зависит.
+ * UDP socket interface providing asynchronous packet listening and network interface binding.
  */
 public interface Udp {
 
     /**
-     * Без Android: привязка к интерфейсу недоступна (bind(x != null) делает open() неудачным).
+     * Creates standard UDP socket instance without Android network binding support.
      */
     static Udp create() {
         return new UdpImpl((s, iface) -> false);
     }
 
     /**
-     * С привязкой к сети через ConnectivityManager.
+     * Creates UDP socket instance with Android ConnectivityManager network binding support.
      */
     static Udp create(Context ctx) {
         return new UdpImpl(new AndroidBinder(ctx));
     }
 
     /**
-     * Открывает сокет (0 = любой порт) и запускает приём. Возвращает порт или -1.
+     * Opens UDP socket and starts asynchronous receiver thread. Returns allocated local port or -1.
      */
     int open(int port, Listener l);
 
     /**
-     * Отправка датаграммы. false — не удалось (нет сети, не резолвится имя).
+     * Transmits UDP datagram packet to remote host and port.
      */
     boolean send(byte[] data, String host, int port);
 
     /**
-     * Локальный IP, с которого мы достучимся до host:port. null — нет маршрута.
+     * Returns local IP address used to reach target host and port, or null if unreachable.
      */
     String localIp(String host, int port);
 
     /**
-     * Привязывает сокеты к сети сетевого интерфейса iface (например "tun0"): весь их трафик
-     * идёт только через него. null — вернуться к основному стеку системы без вмешательства.
-     * Действует на сокеты, открытые после вызова (в том числе внутри localIp). Если интерфейс
-     * не найден, open() вернёт -1, а localIp() — null: мимо туннеля мы не отправляем.
+     * Binds sockets to specified network interface (e.g. "tun0") for traffic isolation.
      */
     void bind(String iface);
 

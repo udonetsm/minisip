@@ -126,7 +126,7 @@ final class Mschap {
         return sb.toString();
     }
 
-    // ---------- RFC 3079 и EAP-MSCHAPv2 ----------
+    // ---------- RFC 3079 and EAP-MSCHAPv2 ----------
 
     static byte[] masterKey(String password, byte[] ntResp) {
         return Arrays.copyOf(Crypto.sha1(md4(ntHash(password)), ntResp, MPPE_MASTER), 16);

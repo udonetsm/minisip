@@ -42,7 +42,7 @@ MiniSIP organizes settings into horizontal profile cards. Each card maintains an
 
 ### 3.3 Deleting a Profile Card
 1. Scroll to the very bottom of the page and pull downward for 1 second.
-2. The red **Delete Page 🗑** button appears.
+2. The red **Delete Page** button appears (featuring icon ![Delete](docs/icons/ic_delete.svg)).
 3. Tap the button and confirm deletion. Subsequent profile cards shift left, clearing old preference files (`PageStore.deletePage`).
 
 ---
@@ -54,36 +54,32 @@ In the **SIP server settings** block, enter:
 - **Server**: PBX IP address or domain (e.g., `192.168.1.100` or `sip.company.com:5060`). Custom ports specified after a colon are parsed automatically.
 - **Login**: Your extension or SIP username (e.g., `101`).
 - **Password**: Your SIP account password.
-- **SIP settings ▼ button**: Toggles advanced SIP parameters.
+- **SIP settings button**: Toggles advanced SIP parameters using expand/collapse vector indicators (![Expand](docs/icons/ic_expand_more.svg) / ![Collapse](docs/icons/ic_expand_less.svg)).
 
 ### 4.2 Registration & Status
 - **Connect**: Sends a SIP `REGISTER` request.
 - **Disconnect**: Unregisters the SIP account (`REGISTER (Expires: 0)`).
 - Status Indicators:
-  - 🔴 **Disconnected**: Offline.
-  - 🟡 **Connecting...**: Performing Digest Authentication (401/407 Challenge).
-  - 🟢 **Connected (Registered)**: Successfully registered with PBX.
+  - **Disconnected**: Offline state.
+  - **Connecting...**: Performing Digest Authentication (401/407 Challenge).
+  - **Connected (Registered)**: Successfully registered with PBX.
 
 ### 4.3 In-Call Controls & Options
-- **Number**: Main dial field formatted with a large font (35sp).
-- **Call 📞 / Hangup 🚫**: Initiates or terminates calls. State transitions to `Calling...`, then `Talk`.
-- **Mute (🤫 / 👄)**: Toggles microphone input. Active mute highlights the button with a red border.
-- **Spk (📢 / 👂)**: Switches audio output between the loud speakerphone and the earpiece.
-- **Refers (↪️)**: Call transfer directory.
+- **Number**: Main dial field formatted with a large font.
+- **Call / Hangup**: Initiates or terminates calls using ![Call](docs/icons/ic_call.svg) and ![Hangup](docs/icons/ic_call_end.svg). State transitions to `Calling...`, then `Talk`.
+- **Mute**: Toggles microphone input using ![Mic](docs/icons/ic_mic.svg) and ![Mute](docs/icons/ic_mic_off.svg). Active mute highlights the button with a red border.
+- **Spk**: Switches audio output between the loud speakerphone and the earpiece using ![Speaker](docs/icons/ic_volume_up.svg).
+- **Refers**: Call transfer directory.
   - Maintains a list of saved transfer contacts (Login + Name).
-  - Tapping `↪️` next to a contact performs an instant **Blind Transfer** via RFC 3515 `REFER`.
+  - Tapping the transfer action (![Transfer](docs/icons/ic_transfer.svg)) next to a contact performs an instant **Blind Transfer** via RFC 3515 `REFER`.
+  - Tapping the delete action (![Close](docs/icons/ic_close.svg)) removes the contact.
 
 ### 4.4 Interactive Visual Call History
-- Tap **History 📄** to expand the call log.
+- Tap **History** to expand the call log.
 - Sessions are grouped chronologically.
-- Each call features a color-coded event sequence:
-  - 🟠 **Orange**: Dialing.
-  - 🟡 **Yellow**: Ringing.
-  - 🟢 **Green**: Connected (Call in progress).
-  - 🟣 **Purple**: Transfer.
-  - 🔴 **Red**: Ended (Hangup / Error).
-- **Quick Dialing**: Long-pressing any call history session header automatically populates the destination number into the **Number** field!
-- Tapping event dots displays detailed event info with a copy option.
+- Each call features status indicators and expandable details (toggled via ![Expand](docs/icons/ic_expand_more.svg) / ![Collapse](docs/icons/ic_expand_less.svg)).
+- **Quick Dialing**: Long-pressing any call history session header automatically populates the destination number into the **Number** field.
+- Session cards feature action buttons for copying (![Copy](docs/icons/ic_copy.svg)) and saving (![Save](docs/icons/ic_save.svg)).
 
 ---
 
@@ -91,19 +87,19 @@ In the **SIP server settings** block, enter:
 
 ### 5.1 Main & Advanced VPN Parameters
 In the **VPN settings (IKEv2)** section:
-- **VPN settings ▼**:
+- **VPN settings**:
   - **VPN server**: VPN gateway address.
   - **VPN login**: User login (EAP / MS-CHAPv2).
   - **VPN password**: User password.
   - **Apps using VPN**: Split tunneling configuration.
-- **Advanced VPN settings ▼**:
+- **Advanced VPN settings**:
   - **VPN pre-shared key**: Pre-Shared Key (PSK) for key-based authentication.
   - **VPN CA certificate (PEM)**: PEM-encoded Root CA Certificate.
   - **Healthcheck address**: Host address for ICMP/HTTP probes. Domain names trigger background DNS resolution before connection.
   - **Ping interval (sec)**: Probe frequency in seconds (5 to 9 seconds, or 0 for default 5s).
 
 ### 5.2 Strict Mode (Kill-Switch)
-- Located in the `⋮` menu of the VPN header.
+- Located in the overflow menu (`⋮`) of the VPN header.
 - Enforcing Strict mode blocks all non-VPN network traffic during reconnections, preventing leaks. During active SIP calls, Strict mode is enabled automatically.
 
 ### 5.3 Split Tunneling (Apps using VPN)
@@ -117,16 +113,15 @@ In the **VPN settings (IKEv2)** section:
 
 ### 6.1 Update Channels & Gesture Shortcuts
 - **Long Press Version Label vX.Y.Z (2 seconds)**: Opens the Update Channel selector (**Stable** or **Pre-release**) with an instant **Check** button.
-- **`⋮` Menu on Version Label**: Displays the update engine log (`updateLog`).
+- **Overflow Menu (`⋮`) on Version Label**: Displays the update engine log (`updateLog`).
 - **UpdateBar**: Displays a top notification bar with a download progress bar and an install trigger when new GitHub releases are found.
 
 ### 6.2 Log Area Controls
 Each block contains an independent log console (**SIP Log**, **VPN Log**, **Call Log**, **Update Log**):
 - **Enable / Disable**: Toggles real-time log output.
-- **▲ / ▼**: Scrolls to top or bottom.
-- **Copy**: Copies log text to clipboard.
-- **Save**: Exports log text to an external file.
-- **Clear**: Flushes the active log buffer.
+- **Scroll Up / Down**: Vector arrow buttons (![Collapse](docs/icons/ic_expand_less.svg) / ![Expand](docs/icons/ic_expand_more.svg)).
+- **Save**: Exports log text to an external file via dialog (![Save](docs/icons/ic_save.svg)).
+- **Clear**: Flushes the active log buffer (![Delete](docs/icons/ic_delete.svg)).
 
 ---
 

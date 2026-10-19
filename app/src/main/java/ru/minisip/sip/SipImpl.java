@@ -17,9 +17,7 @@ import ru.minisip.media.Media;
 import ru.minisip.net.Udp;
 
 /**
- * SIP поверх UDP. Вся логика крутится в одном потоке "sip" — блокировок нет.
- * Упрощения: все in-dialog запросы уходят на сервер регистрации (или на адрес, откуда пришёл
- * входящий INVITE); авторизация только Digest-MD5; без STUN/ICE.
+ * Single-threaded SIP client implementation executing on dedicated "sip" thread.
  */
 final class SipImpl implements Sip {
 
@@ -38,16 +36,16 @@ final class SipImpl implements Sip {
     };
     private volatile LogSink sink = s -> {
     };
-    // настройки и сокет
+    // socket and server configuration
     private String host, user, pass, ip;
     private int port, lport;
-    // регистрация
+    // registration
     private String regId, regTag;
     private int regCseq;
     private boolean regAuth;
     private Tx regTx;
     private ScheduledFuture<?> regTimer;
-    // вызов (не больше одного) и фоновые транзакции (BYE, CANCEL)
+    // call state and background transactions (BYE, CANCEL)
     private Call call;
 
     SipImpl(Udp udp, Media media) {
@@ -77,7 +75,7 @@ final class SipImpl implements Sip {
         return p.length > 2 ? p[2] : "";
     }
 
-    // ================= публичный API =================
+    // ================= Public API =================
 
     private static String msg(String first, String body, List<String> hs) {
         StringBuilder b = new StringBuilder(first).append("\r\n");
@@ -88,7 +86,7 @@ final class SipImpl implements Sip {
     }
 
     /**
-     * Список заголовков без null-элементов.
+     * Header list builder omitting null items.
      */
     private static List<String> hdrs(String... a) {
         List<String> l = new ArrayList<>();
@@ -97,13 +95,13 @@ final class SipImpl implements Sip {
     }
 
     /**
-     * Исключение в обработчике (кривой пакет, ошибка в UI-колбэке) не должно ронять приложение.
+     * Guard wrapper suppressing uncaught runtime exceptions.
      */
     private static void guard(Runnable r) {
         try {
             r.run();
         } catch (RuntimeException e) {
-            // пакет отбрасывается
+            // packet discarded
         }
     }
 
@@ -127,13 +125,13 @@ final class SipImpl implements Sip {
     }
 
     /**
-     * Единая точка отладочного лога: logcat не пишем, только sink. Пароль и Authorization не логируем.
+     * Single debug log entry point. Passwords and credentials omitted.
      */
     private void log(String m) {
         sink.log(m);
     }
 
-    // ================= регистрация =================
+    // ================= Registration =================
 
     @Override
     public void register(String h, int p, String u, String pw) {
@@ -254,7 +252,7 @@ final class SipImpl implements Sip {
         doRegister();
     }
 
-    // ================= ответы на наши запросы =================
+    // ================= Responses =================
 
     private void cancelReg() {
         if (regTx != null) regTx.stop();
@@ -311,7 +309,7 @@ final class SipImpl implements Sip {
         }
     }
 
-    // ================= запросы от сервера =================
+    // ================= Server Requests =================
 
     private void regFail(String why, boolean retry) {
         log("register failed: " + why);
@@ -319,7 +317,7 @@ final class SipImpl implements Sip {
         if (retry) regTimer = ex.schedule(() -> guard(this::startReg), 20, TimeUnit.SECONDS);
     }
 
-    // ================= построение сообщений =================
+    // ================= Message Construction =================
 
     private void onPacket(byte[] d, String h, int p) {
         post(() -> {
@@ -366,7 +364,7 @@ final class SipImpl implements Sip {
             }
             return;
         }
-        if (k.state == CONNECTED) {              // повтор 200 OK — повторяем ACK
+        if (k.state == CONNECTED) {              // retransmitted 200 OK — retransmit ACK
             if (c < 300) send(ack2xx(k), k.dh, k.dp);
             return;
         }
@@ -411,7 +409,7 @@ final class SipImpl implements Sip {
     }
 
     /**
-     * Ответ на вызов, которого у нас уже нет (отменили, гонка CANCEL/200): добиваем без состояния.
+     * Handles response for ended call (canceled or race condition).
      */
     private void stray(Msg m) {
         int c = m.status();
@@ -506,7 +504,7 @@ final class SipImpl implements Sip {
     }
 
     /**
-     * REFER в рамках диалога: Refer-To как sip-URI, CSeq из k.referCseq.
+     * REFER request in dialog context.
      */
     private String refer(Call k, String target) {
         List<String> l = hdrs("Via: " + via(branch()), "Max-Forwards: 70");
@@ -518,7 +516,7 @@ final class SipImpl implements Sip {
     }
 
     /**
-     * 202 Accepted — приняли к исполнению; ждём NOTIFY refer.
+     * 202 Accepted response handler.
      */
     private void onReferResp(Msg m) {
         Call k = call;
@@ -541,7 +539,7 @@ final class SipImpl implements Sip {
     }
 
     /**
-     * Финальный NOTIFY refer (или таймаут): BYE и onEnded.
+     * Final NOTIFY refer handler.
      */
     private void onReferFinal(Call k, int code, String reason) {
         if (k.referCseq == 0) return;
@@ -560,7 +558,7 @@ final class SipImpl implements Sip {
     }
 
     /**
-     * ACK на финальный не-2xx ответ собирается из самого ответа.
+     * ACK for non-2xx failure responses.
      */
     private String ackFail(Msg r) {
         return msg("ACK " + Msg.uri(r.get("to")) + " SIP/2.0", "", hdrs(
@@ -592,7 +590,7 @@ final class SipImpl implements Sip {
         return "<sip:" + user + "@" + ip + ":" + lport + ";transport=udp>";
     }
 
-    // ================= служебное =================
+    // ================= Internal Utilities =================
 
     private String authHeader(Msg m, String method, String uri) {
         boolean proxy = m.status() == 407;
@@ -634,7 +632,7 @@ final class SipImpl implements Sip {
         String id, ltag, branch, uri, from, to, target, auth;
         int cseq, rtp;
         List<String> route = new ArrayList<>();
-        String dh;          // куда слать запросы внутри диалога
+        String dh;          // in-dialog target host
         int dp;
         boolean ringing;
         Tx tx;
@@ -643,7 +641,7 @@ final class SipImpl implements Sip {
     }
 
     /**
-     * Повторная отправка по таймерам SIP: 0.5, 1, 2, 4, 4... секунд, всего 32 с.
+     * Retransmission transaction handler with exponential backoff timers (0.5s..4s).
      */
     private final class Tx {
         final byte[] data;

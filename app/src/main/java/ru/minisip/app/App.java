@@ -21,15 +21,15 @@ import ru.minisip.update.Update;
 import ru.minisip.vpn.Vpn;
 
 /**
- * Корень композиции: единственное место, где собираются реализации.
- * Все пакеты общаются только через интерфейсы Udp, Media, Sip, Screen, Vpn.
+ * Composition root: the single place where component implementations are assembled.
+ * All packages communicate exclusively via Udp, Media, Sip, Screen, and Vpn interfaces.
  */
 public final class App extends Application implements Sip.Listener, Vpn.Listener {
 
     static final int IDLE = 0, CALLING = 1, TALK = 2;
 
     private final Handler main = new Handler(Looper.getMainLooper());
-    // состояние для UI; трогать только из главного потока
+    // UI state; modify only on the main thread
     int state = IDLE;
     boolean registered = false;
     boolean connecting = false;
@@ -54,40 +54,40 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         return state != IDLE;
     }
     /**
-     * Страница настроек, которая последней управляла подключением. SIP-стек и VPN у приложения один,
-     * поэтому пока что-то активно (VPN, регистрация, вызов), им владеет одна страница, остальные
-     * ничего не видят и ничего включить не могут. Состояние выше принадлежит этой странице.
+     * Settings page that last managed the connection. SIP stack and VPN are shared app-wide,
+     * so while an operation is active (VPN, registration, call), it is owned by one page while
+     * other pages are blocked. The state variables above belong to this active page.
      */
     int lastPage = -1;
     private Sip sip;
     private Media media;
     private Screen screen;
     private Vpn vpn;
-    private Udp sipUdp, rtpUdp;            // сокеты SIP и RTP: их привязываем к VPN
-    private LogBuffer vpnLog;              // лог VPN: один на приложение, живёт в памяти
-    private LogBuffer callLog;             // лог звонка: события Sip.Listener и команды пользователя
-    private LogBuffer sipLog;              // лог SIP: регистрация, вызов, ответы сервера
-    private Update update;                 // проверка и установка обновлений с GitHub Releases
-    private LogBuffer updateLog;           // лог обновлений: один на приложение
-    private boolean manualStrict;          // тумблер «Always strict»: persistent override
+    private Udp sipUdp, rtpUdp;            // SIP and RTP sockets: bound to VPN interface
+    private LogBuffer vpnLog;              // VPN log: single instance per app, held in memory
+    private LogBuffer callLog;             // Call log: Sip.Listener events and user actions
+    private LogBuffer sipLog;              // SIP log: registration, calls, server responses
+    private Update update;                 // Update checker and installer from GitHub Releases
+    private LogBuffer updateLog;           // Update log: single instance per app
+    private boolean manualStrict;          // "Always strict" toggle: persistent override
     private String sipHost, sipUser, sipPass;
     private int sipPort;
     private short vpnLossCount = 0;
-    private int vpnLossTotal = 0;           // знаменатель Loss: фиксируется в момент очередной потери, а не растёт сам
+    private int vpnLossTotal = 0;           // Loss denominator: fixed at the time of loss event
     private short vpnReconnectCount = 0;
     /**
-     * SIP работал, когда VPN оборвался: после возврата (или окончательного отключения) переоткрыть.
+     * SIP was active when VPN dropped: reopen upon return (or final disconnect).
      */
     private boolean sipResume;
     private volatile String vpnReason = "";
     /**
-     * Пока VPN поднят, раз в 2 с обновляет строку статуса: heal/mig/silence приходят без колбэков.
+     * While VPN is connected, periodically updates the status string every 2 seconds.
      */
     private final Runnable statusTick = new Runnable() {
         @Override
         public void run() {
             if (!vpnUp) return;
-            // vpnUp остаётся true и во время переподключения: статус должен соответствовать состоянию
+            // vpnUp remains true during reconnection to reflect connection state
             vpnStatus = vpnAttempts == 0 ? "🟢 VPN: connected (" + vpnIface + ")" + counters() : reconStatus();
             changed();
             main.postDelayed(this, 2000);
@@ -99,14 +99,14 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     }
 
     /**
-     * Что-то включено: вызов, регистрация на АТС или VPN (в том числе когда они поднимаются).
+     * True if a call, PBX registration, or VPN session is currently active or connecting.
      */
     boolean busy() {
         return state != IDLE || registered || connecting || vpnUp || vpnConnecting;
     }
 
     /**
-     * Страница может управлять подключением: ничего не занято либо оно уже её.
+     * True if the specified settings page is allowed to control the connection.
      */
     boolean allowed(int page) {
         return !busy() || lastPage == page;
@@ -134,7 +134,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         updateLog = LogBuffer.create(500);
         update = Update.create(this);
         update.setLogSink(updateLog);
-        try {                                // смена основной сети системы: SIP-сокет надо переоткрыть
+        try {                                // system default network changed: reopen SIP socket
             getSystemService(ConnectivityManager.class).registerDefaultNetworkCallback(
                     new ConnectivityManager.NetworkCallback() {
                         @Override
@@ -147,55 +147,51 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     }
 
     /**
-     * Кольцевой лог VPN: страница настроек читает его для панели "Log".
+     * Ring buffer log for VPN displayed on the settings page.
      */
     LogBuffer vpnLog() {
         return vpnLog;
     }
 
     /**
-     * Кольцевой лог блока «Звонок»: страница настроек читает его для панели "Log".
+     * Ring buffer log for Call events displayed on the settings page.
      */
     LogBuffer callLog() {
         return callLog;
     }
 
     /**
-     * Кольцевой лог блока «SIP сервер»: страница настроек читает его для панели "Log".
+     * Ring buffer log for SIP server signaling displayed on the settings page.
      */
     LogBuffer sipLog() {
         return sipLog;
     }
 
-    // ---------- команды из UI (главный поток) ----------
+    // ---------- UI commands (main thread) ----------
 
     /**
-     * Кольцевой лог проверки и установки обновлений: страница настроек читает его для панели "Log".
+     * Ring buffer log for update checks and installations.
      */
     LogBuffer updateLog() {
         return updateLog;
     }
 
     /**
-     * Проверка и установка APK-обновлений с GitHub Releases. Один на приложение.
+     * Update manager for GitHub Releases checks and installation.
      */
     Update update() {
         return update;
     }
 
-    // ---------- VPN (главный поток) ----------
+    // ---------- VPN (main thread) ----------
 
     /**
-     * Появилась новая основная сеть. Пока локального VPN нет, SIP идёт стеком системы, а его сокет
-     * и адрес в Via/Contact остались от старой сети: сам SipImpl заметит это лишь через ~2 минуты
-     * (таймаут обновления регистрации + повтор). Поэтому сразу открываем сокет заново. Звонок через
-     * сменившуюся сеть не спасти. Когда VPN поднят или поднимается, ничего не делаем: туннель
-     * сам следит за связью, а onUp перерегистрирует SIP.
+     * Handles default network switches. Reopens SIP socket immediately.
      */
     private void onNetwork() {
         if (sipHost == null || vpnUp || vpnConnecting) return;
         if (state != IDLE) sip.hangup();
-        sipResume = true;                    // даже если регистрация уже упала сама
+        sipResume = true;                    // even if registration failed independently
         reregister();
         changed();
     }
@@ -203,7 +199,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     void connect(int page, String host, int port, String user, String pass) {
         if (!allowed(page)) return;
         lastPage = page;
-        if (!vpnUp) {                        // нет локального VPN: гарантированно системный стек
+        if (!vpnUp) {                        // no local VPN: strictly system network stack
             sipUdp.bind(null);
             rtpUdp.bind(null);
         }
@@ -230,7 +226,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     }
 
     /**
-     * true — согласие на VPN уже есть; false — показан системный диалог, результат в Activity.
+     * True if VPN permission is already granted; false if system dialog is shown.
      */
     boolean vpnConsent(Activity a, int requestCode) {
         return vpn.consent(a, requestCode);
@@ -275,7 +271,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     }
 
     /**
-     * Режим watchdog: true — PBX (жёсткий), false — обычный VPN (мягкий). Применяется сразу.
+     * Watchdog mode: true — PBX (strict), false — standard VPN (soft). Applied immediately.
      */
     void setVpnStrict(boolean on) {
         manualStrict = on;
@@ -303,7 +299,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     }
 
     /**
-     * SIP-регистрацию надо переоткрыть, чтобы она шла тем же путём, что и вызов.
+     * Reopens SIP registration to align with current network route.
      */
     private void reregister() {
         if (sipHost == null || !(registered || connecting || sipResume)) return;
@@ -320,12 +316,12 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
             vpnIface = iface;
             vpnConnecting = false;
             vpnUp = true;
-            vpnAttempts = 0;                 // сброс счетчика попыток в 0 при успешном реконнекте
+            vpnAttempts = 0;                 // reset attempt counter to 0 on successful reconnect
             String cnt = counters();
             vpnStatus = "🟢 VPN: connected (" + iface + ")" + cnt;
             main.removeCallbacks(statusTick);
             main.postDelayed(statusTick, 2000);
-            sipUdp.bind(iface);              // SIP и RTP идут строго через туннель
+            sipUdp.bind(iface);              // SIP and RTP routed strictly through tunnel
             rtpUdp.bind(iface);
             reregister();
             changed();
@@ -333,7 +329,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     }
 
     /**
-     * Loss | Recon и счётчики событий без реконнекта (Mig | Heal | Silence | Kept).
+     * Loss | Recon and event statistics without reconnection (Mig | Heal | Silence | Kept).
      */
     private String counters() {
         int lost = vpnLossCount, total = Math.max(lost, vpnLossTotal);
@@ -344,7 +340,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     }
 
     /**
-     * Статус во время переподключения; «нет сети» отдельно, чтобы не выглядело как попытка подключиться.
+     * Formats status during reconnection; handles "no network" state separately.
      */
     private String reconStatus() {
         String att = vpnAttempts > 99 ? ">99" : String.valueOf(vpnAttempts);
@@ -356,18 +352,18 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     public void onReconnecting(String reason, int attempt) {
         main.post(() -> {
             if (!vpnUp) return;
-            boolean newCycle = vpnAttempts == 0;          // новый цикл переподключения, а не очередная попытка
+            boolean newCycle = vpnAttempts == 0;          // new reconnection cycle
             vpnAttempts = attempt;
             if (newCycle) {
                 vpnReconnectCount = (short) Math.min(vpnReconnectCount + 1, 32767);
             }
             vpnReason = reason == null ? "" : reason;
             vpnStatus = reconStatus();
-            sipUdp.bind(null);               // локальный VPN сейчас не работает: SIP и RTP идут стеком системы
+            sipUdp.bind(null);               // local VPN is down: route SIP and RTP via system stack
             rtpUdp.bind(null);
             if (sipHost != null && (registered || connecting)) {
-                reregister();                // регистрация сразу уходит системным стеком
-                sipResume = true;            // а когда VPN вернётся, onUp переоткроет её уже через туннель
+                reregister();                // send registration via system stack
+                sipResume = true;            // reopen via tunnel when VPN recovers
             }
             changed();
         });
@@ -376,7 +372,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     @Override
     public void onDown(String reason) {
         main.post(() -> {
-            vpnAttempts = 0;                 // сброс счетчика в 0 при отключении от VPN
+            vpnAttempts = 0;                 // reset counter to 0 on VPN disconnect
             boolean isManual = reason != null && (reason.toLowerCase().contains("disconnected") || reason.toLowerCase().contains("user"));
             if (isManual) {
                 vpnLossCount = 0;
@@ -413,10 +409,10 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
             vpnConnecting = false;
             vpnUp = false;
             vpnStatus = "🔴 VPN: disconnected (" + reason + ")";
-            sipUdp.bind(null);               // обратно на основной стек системы
+            sipUdp.bind(null);               // back to primary system stack
             rtpUdp.bind(null);
             if (was) {
-                if (state != IDLE) sip.hangup();   // вызов через упавший туннель не спасти
+                if (state != IDLE) sip.hangup();   // call over dropped tunnel cannot be preserved
                 reregister();
             }
             changed();
@@ -437,14 +433,14 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     }
 
     /**
-     * Куда идёт звук разговора: true — громкая связь, false — в ухо.
+     * Sets audio output route: true for speakerphone, false for earpiece.
      */
     void setSpeaker(boolean on) {
         media.setSpeaker(on);
     }
 
     /**
-     * Отключение микрофона: true — заглушить, false — включить обратно.
+     * Sets microphone mute state: true to mute, false to unmute.
      */
     void setMute(boolean mute) {
         media.setMute(mute);
@@ -461,7 +457,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     }
 
     /**
-     * Blind transfer активного вызова на target (логин или sip-URI).
+     * Blind transfers active call to target (username or SIP URI).
      */
     void transfer(int page, String target) {
         if (state != TALK || lastPage != page) return;
@@ -472,7 +468,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     }
 
     /**
-     * Старт вызова: сервис (чтобы микрофон жил при погашенном экране) + датчик приближения.
+     * Initiates call state: starts foreground service and proximity sensor.
      */
     private void begin(int newState, String text) {
         state = newState;
@@ -516,7 +512,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     public void onPingLoss(int lostCount) {
         main.post(() -> {
             vpnLossCount = (short) Math.min(lostCount, 32767);
-            // знаменатель обновляем только вместе с числителем; сброс (0) обнуляет и его
+            // update denominator together with numerator; reset (0) clears both
             vpnLossTotal = lostCount == 0 ? 0 : vpn.pingEvaluated();
             String cnt = counters();
             if (vpnAttempts > 0) {
@@ -529,7 +525,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         });
     }
 
-    // ---------- события SIP (поток "sip" -> главный поток) ----------
+    // ---------- SIP events ("sip" thread -> main thread) ----------
 
     @Override
     public void onRegistered(boolean ok, String info) {

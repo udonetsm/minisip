@@ -8,8 +8,11 @@ import static ru.minisip.vpn.Crypto.u32;
 
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -20,84 +23,83 @@ import java.util.List;
  */
 final class Ike {
     static final int N_MOBIKE_SUPPORTED = 16396, N_UPDATE_SA_ADDRESSES = 16400;
-    // типы payload
+    // payload types
     static final int SA = 33, KE = 34, IDI = 35, IDR = 36, CERT = 37, AUTH = 39, NONCE = 40,
             NOTIFY = 41, DELETE = 42, TSI = 44, TSR = 45, SK = 46, CP = 47, EAP = 48;
-    // типы обменов
+    // exchange types
     static final int INIT = 34, AUTHEX = 35, CHILD = 36, INFO = 37;
     // notify
     static final int N_NO_PROPOSAL = 14, N_INVALID_KE = 17, N_AUTH_FAILED = 24, N_NO_ADDITIONAL_SAS = 35,
             N_INTERNAL_ADDRESS = 36, N_TS_UNACCEPTABLE = 38, N_NAT_SRC = 16388, N_NAT_DST = 16389,
             N_COOKIE = 16390, N_SIG_HASHES = 16431, N_REKEY_SA = 16393;
     private static final int F_INITIATOR = 0x08, F_RESPONSE = 0x20;
-    // transform-типы
+    // transform types
     private static final int T_ENCR = 1, T_PRF = 2, T_INTEG = 3, T_DH = 4, T_ESN = 5;
     private final byte[] identity, psk;
     private final String password, host;
-    private final List<java.security.cert.X509Certificate> ownRoots;   // свои корни из настроек или null
-    private final boolean eap;                  // нет общего ключа — вход по логину и паролю (EAP-MSCHAPv2)
+    private final List<X509Certificate> ownRoots;   // CA certificates from settings or null
+    private final boolean eap;                  // pre-shared key absent — EAP-MSCHAPv2 authentication
     private final String caError;
     private final int idType;
-    // ---------- что узнали в ходе обмена (читает Tunnel) ----------
-    String error;          // причина последней неудачи, по-человечески
-    String ip;             // адрес клиента внутри туннеля
-    String dns = "";       // DNS-серверы через пробел
-    String routes = "";    // сети через туннель, «a.b.c.d/n» через пробел
+    // ---------- Negotiation Results (Read by Tunnel) ----------
+    String error;          // human-readable error description
+    String ip;             // client IP address inside tunnel
+    String dns = "";       // space-separated DNS servers
+    String routes = "";    // space-separated subnets routed through tunnel ("a.b.c.d/n")
     Esp esp;
-    long spiOut;           // SPI, с которым шлём мы; сервер его же присылает в Delete
+    long spiOut;           // outbound SPI sent by us
     boolean mobike;
-    // состояние входа
-    byte[] next;                                // следующий запрос IKE_AUTH; null — вход завершён
-    int curId;                                  // номер последнего нашего запроса IKE_AUTH
+    // authentication state
+    byte[] next;                                // next IKE_AUTH request payload; null when done
+    int curId;                                  // sequence ID of last IKE_AUTH request
     /**
-     * SPI старого (заменяемого) IKE SA — нужны для DELETE.
+     * Old IKE SA SPIs — required for DELETE.
      */
     byte[] oldSpiI, oldSpiR;
     /**
-     * Мы — исходящий инициатор текущего IKE SA (флаг I, RFC 7296 §3.1). После IKE rekey им становится
-     * тот, кто начал обмен.
+     * True if initiator of current IKE SA (flag I, RFC 7296 §3.1).
      */
     private boolean origInit = true;
-    private int nextId = 1;                     // 0 занят под IKE_SA_INIT, AUTH = 1, дальше DPD и Delete
+    private int nextId = 1;                     // 0 reserved for IKE_SA_INIT, 1 for AUTH, then DPD/Delete
     private byte[] spiI, spiR = new byte[8], ni, nr, cookie, msg1, msg2, skD, skPi, skPr;
     private BigInteger dhX;
     private byte[] kePub;
     private Crypto.Suite suite;
     private Crypto.Box boxOut, boxIn;
     private long spiIn;
-    private int peerNext;                       // следующий ожидаемый номер запроса от сервера
-    private int stage;                          // 0: ждём ответ с сертификатом; 1: идёт EAP; 2: ждём итог
+    private int peerNext;                       // next expected request sequence ID from peer
+    private int stage;                          // 0: waiting for cert response; 1: EAP in progress; 2: final AUTH
     private byte[] myId, idr, msk, authCh, peerCh, ntResp;
     private int mschapId;
-    private int ackFloor = 1;                   // меньше этого номера все наши запросы сервер подтвердил
+    private int ackFloor = 1;                   // all request sequence IDs below this floor are acknowledged
     /**
-     * Номер нашего CREATE_CHILD_SA; -1 — rekey не идёт.
+     * Sequence number of local CREATE_CHILD_SA; -1 if no rekey in progress.
      */
     private int childRekeyId = -1;
     /**
-     * Наш новый входящий SPI (SPI_I), уходит в SA-предложение.
+     * Local new inbound SPI (SPI_I) included in SA proposal.
      */
     private byte[] childRekeySpiI;
     /**
-     * Новый исходящий SPI от сервера (SPI_R), из ответа.
+     * Remote new outbound SPI (SPI_R) received in response.
      */
     private byte[] childRekeySpiR;
-    private byte[] childRekeyNi;                // наш nonce
-    private byte[] childRekeyNr;                // nonce сервера
-    private DhGroup childRekeyDh;               // наша DH-пара (PFS)
-    private boolean childPfs;                   // false: rekey без DH (дефолт strongSwan)
-    private int childDhGroup = DhGroup.MODP3072;  // группа в KE (первая из предложения)
+    private byte[] childRekeyNi;                // local nonce
+    private byte[] childRekeyNr;                // remote nonce
+    private DhGroup childRekeyDh;               // local DH key pair (PFS)
+    private boolean childPfs;                   // false: rekey without DH
+    private int childDhGroup = DhGroup.MODP3072;  // KE group
 
     // =====================================================================
-    // Сборка и разбор payload'ов
+    // Payload Construction & Parsing
     // =====================================================================
-    private byte[] childRekeyKe;                // наш KEi
+    private byte[] childRekeyKe;                // local KEi
     /**
-     * Номер нашего CREATE_CHILD_SA для IKE rekey; -1 — не идёт.
+     * Sequence number of local CREATE_CHILD_SA for IKE rekey; -1 if no rekey in progress.
      */
     private int ikeRekeyId = -1;
-    private byte[] ikeRekeySpiI;       // наш новый 8-байтный SPI (в SA-предложении)
-    private byte[] ikeRekeySpiR;       // SPI сервера (из ответа)
+    private byte[] ikeRekeySpiI;       // local 8-byte SPI
+    private byte[] ikeRekeySpiR;       // remote 8-byte SPI
     private byte[] ikeRekeyNi, ikeRekeyNr;
     private BigInteger ikeRekeyX;
     private byte[] ikeRekeyKe;
@@ -112,7 +114,7 @@ final class Ike {
         this.password = password;
         this.host = host;
         this.eap = psk.isEmpty();
-        List<java.security.cert.X509Certificate> roots = ca.trim().isEmpty() ? null : Certs.parsePem(ca);
+        List<X509Certificate> roots = ca.trim().isEmpty() ? null : Certs.parsePem(ca);
         this.ownRoots = roots;
         this.caError = !ca.trim().isEmpty() && roots == null ? "cannot read the CA certificate (PEM expected)" : null;
         this.idType = identity.contains("@") ? 3 : identity.matches("\\d+\\.\\d+\\.\\d+\\.\\d+") ? 1 : 2;
@@ -639,11 +641,11 @@ final class Ike {
         Pl pi = find(r, IDR), pa = find(r, AUTH);
         if (pi == null || pa == null || pa.body.length < 5) return "incomplete IKE_AUTH reply";
         idr = pi.body;
-        List<java.security.cert.X509Certificate> chain = new ArrayList<>();
+        List<X509Certificate> chain = new ArrayList<>();
         for (Pl p : r.pl) {
             if (p.type != CERT || p.body.length < 2 || p.body[0] != 4)
                 continue;   // 4 = X.509, подпись
-            java.security.cert.X509Certificate c = Certs.parseDer(Arrays.copyOfRange(p.body, 1, p.body.length));
+            X509Certificate c = Certs.parseDer(Arrays.copyOfRange(p.body, 1, p.body.length));
             if (c != null) chain.add(c);
         }
         if (chain.isEmpty())
@@ -670,7 +672,7 @@ final class Ike {
         if (code == 3) {                                           // EAP Success: ключ есть, шлём итоговый AUTH
             if (msk == null) return "server finished EAP before the password was checked";
             stage = 2;
-            next = send(java.util.Collections.singletonList(authPayload(msk)));
+            next = send(Collections.singletonList(authPayload(msk)));
             return null;
         }
         if (code != 1 || len < 5) return "unexpected EAP message";
@@ -684,7 +686,7 @@ final class Ike {
         } else {
             return "server wants an unsupported EAP method (" + type + "); only MS-CHAPv2 is supported";
         }
-        next = send(java.util.Collections.singletonList(new Pl(EAP, reply)));
+        next = send(Collections.singletonList(new Pl(EAP, reply)));
         return null;
     }
 
@@ -765,7 +767,7 @@ final class Ike {
             return "incomplete IKE_AUTH reply";
         if ((auth[0] & 0xff) != 2) return "server uses a certificate, enter a login and password";
         byte[] want = authValue(secret, msg2, ni, skPr, id);
-        if (!java.security.MessageDigest.isEqual(want, Arrays.copyOfRange(auth, 4, auth.length))) {
+        if (!MessageDigest.isEqual(want, Arrays.copyOfRange(auth, 4, auth.length))) {
             return eap ? "server failed authentication (key mismatch)" : "server failed authentication (wrong pre-shared key?)";
         }
         if (!sa.suite.supported(false) || sa.spi.length != 4 || (sa.esn > 0) || sa.dh > 0) {

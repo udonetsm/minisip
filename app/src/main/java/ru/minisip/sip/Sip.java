@@ -5,9 +5,7 @@ import ru.minisip.media.Media;
 import ru.minisip.net.Udp;
 
 /**
- * SIP-клиент поверх UDP: регистрация, исходящие и входящие вызовы.
- * Зависит только от интерфейсов net.Udp и media.Media. Наружу — встроенные типы.
- * Колбэки вызываются из внутреннего потока "sip".
+ * SIP client interface over UDP supporting registration, outgoing, and incoming calls.
  */
 public interface Sip {
 
@@ -18,32 +16,30 @@ public interface Sip {
     void setListener(Listener l);
 
     /**
-     * Куда писать отладочный лог; по умолчанию — никуда.
+     * Sets debug log sink interface. Default is no-op.
      */
     default void setLogSink(LogSink sink) {
     }
 
     /**
-     * Открывает сокет и регистрируется на сервере; обновляет регистрацию сама.
+     * Opens UDP socket and registers with SIP server, scheduling auto-renewal.
      */
     void register(String host, int port, String user, String password);
 
     /**
-     * Отменяет регистрацию и закрывает сокет.
+     * Unregisters from server and closes socket.
      */
     void unregister();
 
     void call(String number);
 
     /**
-     * Blind transfer: REFER на target в рамках активного диалога.
-     * target — логин (тогда domain берётся из текущей регистрации) или полный sip-URI.
-     * Результат перевода приходит через {@link Listener#onEnded(String)}.
+     * Initiates blind call transfer (REFER) to specified target.
      */
     void transfer(String target);
 
     /**
-     * Отмена / отбой — по состоянию вызова.
+     * Cancels or terminates call according to active state.
      */
     void hangup();
 
@@ -58,7 +54,7 @@ public interface Sip {
         }
 
         /**
-         * Вызов закончился по любой причине (в том числе неудачный дозвон).
+         * Invoked when call terminates for any reason.
          */
         default void onEnded(String reason) {
         }

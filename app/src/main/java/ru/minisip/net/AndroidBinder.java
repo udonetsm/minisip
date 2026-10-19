@@ -9,9 +9,7 @@ import java.io.IOException;
 import java.net.DatagramSocket;
 
 /**
- * Network.bindSocket: сокет уходит строго в сеть нужного интерфейса, даже если системный маршрут
- * по умолчанию другой. Сеть VPN появляется в ConnectivityManager не мгновенно после establish(),
- * поэтому ищем её до ~2 секунд (зовут из рабочих потоков, не из главного).
+ * Binds sockets directly to a specified network interface using ConnectivityManager.
  */
 final class AndroidBinder implements Binder {
 
@@ -24,8 +22,8 @@ final class AndroidBinder implements Binder {
     @Override
     @SuppressWarnings("deprecation")
     public boolean bind(DatagramSocket s, String iface) throws IOException {
-        // Если приложение входит в список VPN, туннель уже его сеть по умолчанию: привязка не нужна,
-        // а явный bindSocket система может отклонить (EPERM).
+        // If app is included in VPN allowed apps, tunnel is already default network: explicit bind
+        // is unnecessary and explicit bindSocket may be rejected by system (EPERM).
         Network act = cm.getActiveNetwork();
         LinkProperties alp = act == null ? null : cm.getLinkProperties(act);
         String def = alp == null ? "none" : String.valueOf(alp.getInterfaceName());

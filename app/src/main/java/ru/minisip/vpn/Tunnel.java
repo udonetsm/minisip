@@ -1,5 +1,7 @@
 package ru.minisip.vpn;
 
+import android.util.Log;
+
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -71,42 +73,40 @@ final class Tunnel {
     private final Tun tun;
     private final Vpn.Listener ev;
     private final AtomicBoolean closed = new AtomicBoolean();
-    private final java.util.concurrent.atomic.AtomicBoolean probing = new java.util.concurrent.atomic.AtomicBoolean();
+    private final AtomicBoolean probing = new AtomicBoolean();
     private final Object migLock = new Object();
     /**
      * Отдельный поток NAT-keepalive: не зависит от online, DPD, watchdog и остального в timers().
      */
     private final Object keepLock = new Object();
-    // настраиваемое для проверок
+    // configurable thresholds
     int ikePort = 500, natPort = 4500;
     int rto = 4000, tries = 5;
-    int keepMs = 10000, dpdMs = 15000, deadMs = 30000;   // keepMs короче таймаута UDP-NAT оператора
+    int keepMs = 10000, dpdMs = 15000, deadMs = 30000;   // keepMs shorter than carrier UDP-NAT timeout
     /**
-     * Время жизни Child SA: 1 ч (strongSwan default, RFC 7296 §2.8.2).
+     * Child SA lifetime: 1 hr (strongSwan default, RFC 7296 §2.8.2).
      */
     int childLifetimeMs = 3_600_000;
     /**
-     * Время жизни IKE SA: 3 ч (strongSwan default, RFC 7296 §2.8).
+     * IKE SA lifetime: 3 hr (strongSwan default, RFC 7296 §2.8).
      */
     int ikeLifetimeMs = 3 * 3_600_000;
     /**
-     * Необязательный ping через туннель: адрес (null — выключено). pingLoss промахов подряд — сначала
-     * лечение (MOBIKE-refresh, а без MOBIKE — keepalive и DPD на том же сокете), не помогло — реконнект
-     * через onReconnecting.
+     * Healthcheck ICMP/HTTP probe address.
      */
     String pingHost;
-    volatile int pingEval;             // сколько ping уже оценено (ответ или промах): знаменатель для Loss «потеряно/всего»
-    int pingMs = 2000, pingLoss = 5;   // подряд без ответа -> MOBIKE, не вышло -> реконнект
+    volatile int pingEval;             // evaluated ping attempts count
+    int pingMs = 2000, pingLoss = 5;   // consecutive ping losses before recovery/reconnect
     /**
-     * true — обрыв поднятого туннеля сообщается через onReconnecting, решает владелец (VpnImpl).
+     * Supervised mode flag: notify VpnImpl on reconnect.
      */
     boolean supervised;
     /**
-     * Причина неудачи до подъёма сетевая (имеет смысл повторить), а не из-за настроек/пароля.
+     * Retryable failure flag.
      */
     volatile boolean retryable;
     /**
-     * true — АТС подключена: жёсткий watchdog. false — обычный VPN: watchdog только запускает DPD.
+     * Strict PBX watchdog mode.
      */
     volatile boolean strict;
     volatile Log log;
@@ -120,27 +120,26 @@ final class Tunnel {
     private volatile boolean kick;
     private volatile long lastRx;
     /**
-     * Время последнего ESP от сервера (IKE сюда не входит): только он доказывает живой ESP-путь.
+     * Timestamp of last received ESP packet from server.
      */
     private volatile long lastEspRx;
     /**
-     * Время последнего IKE-сообщения от сервера. probePath сверяет его, чтобы не рвать туннель,
-     * когда старая SA ещё отвечает по IKE: ESP-тишина при этом может быть просто отсутствием трафика.
+     * Timestamp of last received IKE message from server.
      */
     private volatile long lastIkeRx;
     /**
-     * Сколько раз подряд путь признан мёртвым без единого ESP в ответ. Сбрасывается от ESP.
+     * Consecutively evaluated dead path count.
      */
     private volatile int healTries;
     private volatile long healSince, lastHealAct, lastProbe;
-    private volatile String[] probeArgs;                       // identity, psk, password, ca, host: для пробного INIT
+    private volatile String[] probeArgs;                       // probe arguments
     private volatile int pongs;
     private volatile byte[] dpdReq;
     /**
-     * Повторить неподтверждённый DPD сразу, с тем же номером (сбрасывать его нельзя: образуется дыра в ID).
+     * Immediate DPD retransmission flag.
      */
     private volatile boolean dpdNow;
-    // фактическое состояние DPD (для подписи на кнопке): ответы на наши запросы и запросы сервера
+    // DPD state flags
     private volatile long dpdSentAt;
     private volatile int dpdOk, srvDpd;
     private volatile int dpdId = -1;
@@ -305,9 +304,9 @@ final class Tunnel {
                 }
             }
         } catch (InterruptedException e) {
-            // закрыли снаружи
+            // closed from outside
         } catch (RuntimeException e) {
-            // keepalive не должен умирать молча: перезапускаем цикл
+            // keepalive loop error recovery
             if (!closed.get()) {
                 kp = daemon(this::keepLoop, "vpn-keep");
             }
@@ -315,7 +314,7 @@ final class Tunnel {
     }
 
     /**
-     * Окончательное закрытие по просьбе пользователя или системы. Из любого потока.
+     * Final disconnect requested by user or system.
      */
     void stop(String reason) {
         finish(reason);
@@ -334,7 +333,7 @@ final class Tunnel {
         finish(reason);
     }
 
-    // ================= рукопожатие =================
+    // ================= Handshake =================
 
     private void run(String host, String identity, String psk, String password, String ca, String apps) {
         try {
@@ -561,8 +560,7 @@ final class Tunnel {
                         }
                     }
                 } catch (IOException | RuntimeException e) {
-                    // Один плохой пакет (чужой формат, больше MTU, сбой tun.write) — не повод рвать туннель:
-                    // если tun действительно умер, это увидит txLoop (read вернёт ошибку).
+                    // Malformed packet or tun.write error
                     if (closed.get()) return;
                     rxBad++;
                     lastRxErr = String.valueOf(e);
@@ -597,7 +595,7 @@ final class Tunnel {
         }
     }
 
-    // ================= рабочий режим =================
+    // ================= Active Mode =================
 
     /**
      * Сообщение IKE от сервера: ответ на наш DPD/MOBIKE, его DPD, удаление, попытка перегенерации.

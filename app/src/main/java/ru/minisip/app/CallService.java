@@ -10,7 +10,7 @@ import android.os.Build;
 import android.os.IBinder;
 
 /**
- * Держит процесс «передним» на время вызова, чтобы микрофон работал при погашенном экране.
+ * Keeps the process in the foreground during an active call so the microphone remains functional when screen is off.
  */
 public final class CallService extends Service {
 

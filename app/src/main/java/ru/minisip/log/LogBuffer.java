@@ -1,8 +1,8 @@
 package ru.minisip.log;
 
 /**
- * Кольцевой буфер лога в памяти. При переполнении старые строки вытесняются.
- * Слушатель зовётся из потока, записавшего строку: UI должен сам переключиться на главный.
+ * In-memory ring buffer log. Oldest lines are evicted when capacity is reached.
+ * Listener callbacks execute on the calling thread; callers must post to main thread for UI updates.
  */
 public interface LogBuffer extends LogSink {
 
@@ -13,35 +13,32 @@ public interface LogBuffer extends LogSink {
     boolean isEnabled();
 
     /**
-     * Включает или выключает запись. Выключенный буфер строки отбрасывает, накопленное не трогает.
+     * Enables or disables logging. When disabled, new log entries are discarded.
      */
     void setEnabled(boolean on);
 
     /**
-     * Удаляет все накопленные строки.
+     * Clears all buffered log lines.
      */
     void clear();
 
     /**
-     * Весь лог одним текстом, по строке на запись.
+     * Returns complete log text with newline separators.
      */
     String text();
 
     /**
-     * Зовётся после каждой записи и после clear(); null снимает слушателя.
+     * Invoked after log additions and clear(); null removes listener.
      */
     void setListener(Runnable onChange);
 
     /**
-     * Засевает буфер сохранённым ранее текстом (например, из SharedPreferences).
-     * Строки берутся как есть, без перештамповки времени; лишние старые
-     * вытесняются до maxLines.
+     * Populates buffer with stored log string, evicting oldest lines to match maxLines capacity.
      */
     void load(String saved);
 
     /**
-     * Колбэк persistence: зовётся после каждой записи и после clear().
-     * Сюда кладут сохранение text() во внешнее хранилище (prefs/файл). null снимает колбэк.
+     * Persistence callback invoked after log additions or clear().
      */
     void setPersist(Runnable persist);
 }

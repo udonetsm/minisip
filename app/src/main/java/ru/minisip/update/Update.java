@@ -7,8 +7,7 @@ import java.io.File;
 import ru.minisip.log.LogSink;
 
 /**
- * Проверка и установка APK-обновлений из GitHub Releases. Один экземпляр на приложение.
- * Проверка и скачивание идут в фоновом потоке, колбэки — в главном.
+ * Update manager interface for GitHub Releases update checks and installations.
  */
 public interface Update {
 
@@ -17,65 +16,65 @@ public interface Update {
     }
 
     /**
-     * "stable" или "prerelease". Сохраняется в prefs.
+     * Sets update channel ("stable" or "prerelease"). Saved in preferences.
      */
     void setChannel(String channel);
 
     String channel();
 
     /**
-     * Постоянный слушатель (полоса обновления в MainActivity). null снимает.
+     * Sets persistent update listener.
      */
     void setListener(Listener l);
 
     /**
-     * GET к выбранному каналу. При hasUpdate=true сам зовёт download().
+     * Checks selected update channel for new releases. Auto-downloads if update is available.
      */
     void check(Listener l);
 
     /**
-     * Скачать APK последнего релиза в кэш с прогрессом.
+     * Downloads latest release APK to cache directory with progress.
      */
     void download(Listener l);
 
     /**
-     * Запустить системный установщик APK, скачанного последним download().
+     * Launches system APK installer for downloaded release file.
      */
     void install();
 
     /**
-     * Куда писать журнал событий (null — никуда). Строки без секретов.
+     * Sets log sink for update events.
      */
     void setLogSink(LogSink s);
 
     interface Listener {
         /**
-         * Проверка завершена. hasUpdate=true → сейчас же начнётся download().
+         * Update check completed.
          */
         default void onChecked(Result r) {
         }
 
         /**
-         * Прогресс скачивания, 0..100.
+         * Download progress percentage (0..100).
          */
         default void onProgress(int percent) {
         }
 
         /**
-         * APK скачан; установка — по команде install().
+         * APK download completed.
          */
         default void onDownloaded(File apk) {
         }
 
         /**
-         * Любая ошибка проверки или скачивания: reason — готовый текст для UI.
+         * Error handler with displayable error message.
          */
         default void onError(String reason) {
         }
     }
 
     /**
-     * Итог проверки канала. tag — только для отображения.
+     * Release check result model.
      */
     final class Result {
         public boolean hasUpdate;
@@ -83,7 +82,7 @@ public interface Update {
         public String tag;
         public String changelog;
         /**
-         * Стабильный канал пуст (404): предложить пользователю пре-релизы.
+         * Stable channel empty (404): offer pre-release option.
          */
         public boolean noStable;
     }

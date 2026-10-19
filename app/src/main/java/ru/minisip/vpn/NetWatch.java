@@ -162,10 +162,8 @@ final class NetWatch {
 
     @SuppressWarnings("deprecation")
     private String key() {
-        // Берём ту сеть, которую система реально использует как default (getActiveNetwork),
-        // а не «самую лучшую по рейтингу». Иначе валидированный LTE «перекрывает» Wi-Fi без
-        // интернета: сеть формально та же, сетевые колбэки молчат, а трафик идёт по мёртвому
-        // default-маршруту. Если активная сеть — наша VPN или её нет, падаем на перебор.
+        // Select the active default network currently used by the system (getActiveNetwork).
+        // Fall back to scanning available networks if active network is missing or is local VPN.
         Network best = cm.getActiveNetwork();
         NetworkCapabilities nc = best == null ? null : cm.getNetworkCapabilities(best);
         if (nc == null

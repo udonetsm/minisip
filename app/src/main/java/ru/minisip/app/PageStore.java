@@ -8,8 +8,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Страницы настроек: сколько их и настроена ли каждая. У каждой страницы свой файл настроек,
- * страницы друг друга не видят. Первая читает прежний файл "cfg", так что старые настройки не теряются.
+ * Preference storage for settings pages: manages active profile count and configuration state.
+ * Profile 0 reads "cfg" for backwards compatibility, while subsequent profiles read "cfg1", "cfg2", etc.
  */
 final class PageStore {
 
@@ -21,7 +21,7 @@ final class PageStore {
     }
 
     /**
-     * Сколько страниц уже создано (не меньше одной).
+     * Returns total created pages (minimum 1).
      */
     static int count(Context c) {
         return Math.max(1, c.getSharedPreferences("pages", Context.MODE_PRIVATE).getInt("count", 1));
@@ -32,7 +32,7 @@ final class PageStore {
     }
 
     /**
-     * АТС страницы настроена: указаны сервер и логин (минимум, без которого к АТС не подключиться).
+     * Returns true if server host and login are configured for the specified page.
      */
     static boolean configured(Context c, int page) {
         SharedPreferences p = prefs(c, page);
@@ -40,7 +40,7 @@ final class PageStore {
     }
 
     /**
-     * Список контактов перевода страницы. Хранение: строки "login\tname", разделённые '\n'.
+     * Reads blind transfer contacts list for specified page. Format: "login\tname" separated by '\n'.
      */
     static List<Refer> refers(Context c, int page) {
         List<Refer> out = new ArrayList<>();
@@ -63,7 +63,7 @@ final class PageStore {
     }
 
     /**
-     * Удаляет указанную страницу, сдвигая последующие страницы назад.
+     * Deletes specified profile page and left-shifts all subsequent SharedPreferences files.
      */
     static void deletePage(Context c, int pageToDelete) {
         int n = count(c);
@@ -90,7 +90,7 @@ final class PageStore {
     }
 
     /**
-     * Один контакт перевода. login обязателен, name — то, что видно в списке.
+     * Transfer contact entry with mandatory login and optional display name.
      */
     static final class Refer {
         final String login;
@@ -102,7 +102,7 @@ final class PageStore {
         }
 
         /**
-         * Подпись строки в UI: name, иначе login.
+         * Returns display label: name if present, otherwise login.
          */
         String label() {
             return name.isEmpty() ? login : name;

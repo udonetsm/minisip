@@ -1,7 +1,7 @@
 package ru.minisip.media;
 
 /**
- * G.711 A-law (PT 8) и µ-law (PT 0). Классические алгоритмы, без таблиц на 64 КБ.
+ * G.711 A-law (PT 8) and u-law (PT 0) companding codec implementation.
  */
 final class G711 {
 

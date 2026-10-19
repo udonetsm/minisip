@@ -11,7 +11,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Разобранное SIP-сообщение. Имена заголовков — в нижнем регистре, компактные формы раскрыты.
+ * Parsed SIP message representation with normalized lower-case headers and expanded compact forms.
  */
 final class Msg {
 
@@ -39,7 +39,7 @@ final class Msg {
     }
 
     /**
-     * null — если это не SIP (например, keep-alive CRLF).
+     * Parses raw UDP byte payload into Msg object. Returns null if not valid SIP/2.0.
      */
     static Msg parse(byte[] data) {
         String s = new String(data, StandardCharsets.UTF_8);
@@ -74,7 +74,7 @@ final class Msg {
     }
 
     /**
-     * Делит "a, b" по запятым, не трогая запятые внутри <> и кавычек.
+     * Splits comma-separated header value strings avoiding quoted text or angle brackets.
      */
     private static List<String> split(String v) {
         List<String> out = new ArrayList<>();
@@ -97,7 +97,7 @@ final class Msg {
     }
 
     /**
-     * Значение параметра ";name=value" из заголовка (tag, expires, ...).
+     * Extracts parameter value (e.g. tag, expires) from header parameter string.
      */
     static String param(String hdr, String name) {
         if (hdr == null) return null;
@@ -107,7 +107,7 @@ final class Msg {
     }
 
     /**
-     * URI из значения вида  "Имя" <sip:user@host;lr>;tag=x  или  sip:user@host.
+     * Extracts URI string from Name-Addr or URI header value.
      */
     static String uri(String nameAddr) {
         if (nameAddr == null) return null;
@@ -120,7 +120,7 @@ final class Msg {
     }
 
     /**
-     * Пользовательская часть URI (для показа номера звонящего).
+     * Extracts user portion from SIP URI for caller ID display.
      */
     static String user(String nameAddr) {
         String u = uri(nameAddr);
@@ -132,7 +132,7 @@ final class Msg {
     }
 
     /**
-     * Имя события из заголовка Event: "refer" из "refer;id=123". Пустая строка, если null.
+     * Extracts event name from Event header value.
      */
     static String eventName(String hdr) {
         if (hdr == null) return "";
@@ -194,7 +194,7 @@ final class Msg {
     }
 
     /**
-     * Ключ транзакции для сопоставления ответов: Call-ID|CSeq|метод.
+     * Returns transaction key for response matching: Call-ID|CSeq|Method.
      */
     String key() {
         return get("call-id") + "|" + cseq() + "|" + cseqMethod();

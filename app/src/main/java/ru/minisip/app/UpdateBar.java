@@ -9,10 +9,7 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 
 /**
- * Полоса внизу экрана: прогресс скачивания APK либо кнопка «Установить».
- * Одна на приложение, живёт в MainActivity. Видна только при активном обновлении;
- * пока видна — ужимает ViewPager2 снизу (padding + clipToPadding=false), чтобы контент
- * страниц не заходил под полосу.
+ * Bottom progress bar layout displaying APK download progress or "Install" button.
  */
 final class UpdateBar extends LinearLayout {
 
@@ -26,7 +23,7 @@ final class UpdateBar extends LinearLayout {
         super(ctx);
         setOrientation(HORIZONTAL);
         setGravity(Gravity.CENTER_VERTICAL);
-        setBackgroundColor(0xF0222222);                 // плотный тёмный фон
+        setBackgroundColor(0xF0222222);                 // dark background
         int pad = dp(12);
         setPadding(pad, pad, pad, pad);
         setVisibility(GONE);
@@ -45,7 +42,7 @@ final class UpdateBar extends LinearLayout {
     }
 
     /**
-     * Кого ужимать снизу, когда полоса видна (обычно ViewPager2).
+     * Sets target view (usually ViewPager2) to apply bottom padding inset when bar is visible.
      */
     void attachInset(View v) {
         insetTarget = v;
@@ -61,7 +58,7 @@ final class UpdateBar extends LinearLayout {
     }
 
     /**
-     * Прогресс скачивания. percent=-1 — длина неизвестна. tag — строка релиза (может быть пустой).
+     * Shows download progress bar with percentage and optional release tag.
      */
     void showProgress(int percent, String tag) {
         progress.setVisibility(VISIBLE);
@@ -76,7 +73,7 @@ final class UpdateBar extends LinearLayout {
     }
 
     /**
-     * Скачано: на той же полосе — кликабельная надпись «Install» на всю ширину.
+     * Displays clickable "Install" text overlay when APK download completes.
      */
     void showInstall(OnClickListener onInstall) {
         progress.setVisibility(GONE);
@@ -89,8 +86,7 @@ final class UpdateBar extends LinearLayout {
     }
 
     /**
-     * fullWidth=true — «Install» на всю ширину полосы (progress скрыт, label занимает всё),
-     * fullWidth=false — текст прогресса справа от ProgressBar, ширина по содержимому.
+     * Configures label layout parameters: fullWidth for Install button, wrap_content for download progress.
      */
     private void configureLabel(boolean fullWidth) {
         LayoutParams lp = (LayoutParams) label.getLayoutParams();

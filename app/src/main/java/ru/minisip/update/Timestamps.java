@@ -6,7 +6,7 @@ import java.util.Locale;
 import java.util.TimeZone;
 
 /**
- * ISO 8601 из GitHub → миллисекунды UTC. Ошибка парсинга → 0.
+ * ISO 8601 timestamp parser for UTC milliseconds. Returns 0 on parse error.
  */
 final class Timestamps {
     private Timestamps() {

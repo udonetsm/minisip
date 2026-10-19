@@ -1,7 +1,7 @@
 package ru.minisip.update;
 
 /**
- * Константы пакета: URL каналов, ключ prefs, HTTP-параметры.
+ * Configuration constants for update checking and installation.
  */
 final class UpdateConfig {
     static final String STABLE = "https://api.github.com/repos/udonetsm/minisip/releases/latest";
@@ -13,7 +13,7 @@ final class UpdateConfig {
     static final String USER_AGENT = "MiniSIP-Updater";
     static final int TIMEOUT_MS = 15000;
     /**
-     * Совпадает с android:authorities FileProvider в манифесте: "${applicationId}.fileprovider".
+     * FileProvider authority suffix matching AndroidManifest configuration.
      */
     static final String AUTHORITY_SUFFIX = ".fileprovider";
 

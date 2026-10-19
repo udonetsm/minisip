@@ -54,11 +54,11 @@ final class DhGroup {
             + "08E24FA074E5AB3143DB5BFCE0FD108E4B82D120A93AD2CAFFFFFFFFFFFFFFFF", 16);
 
     final int id;
-    private final BigInteger p;         // простое для MODP; null для ECP
-    private final int bytes;            // длина KE-данных
-    private BigInteger x;               // MODP: закрытая часть
-    private PrivateKey ecPriv;          // ECP: закрытый ключ
-    private ECParameterSpec ecSpec;     // ECP: параметры кривой
+    private final BigInteger p;         // prime for MODP; null for ECP
+    private final int bytes;            // length of KE data
+    private BigInteger x;               // MODP: private key
+    private PrivateKey ecPriv;          // ECP: private key
+    private ECParameterSpec ecSpec;     // ECP: curve spec
     private byte[] pub;
 
     private DhGroup(int id, BigInteger p, int bytes) {
@@ -161,7 +161,7 @@ final class DhGroup {
     private static byte[] fixed(BigInteger v, int n) {
         byte[] b = v.toByteArray();
         byte[] r = new byte[n];
-        int skip = b.length > n ? b.length - n : 0;   // знаковый нулевой байт
+        int skip = b.length > n ? b.length - n : 0;   // leading zero sign byte
         System.arraycopy(b, skip, r, n - (b.length - skip), b.length - skip);
         return r;
     }

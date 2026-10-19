@@ -8,7 +8,7 @@ import java.util.concurrent.TimeUnit;
 import ru.minisip.net.Udp;
 
 /**
- * RTP-поток 20 мс на пакет: 160 сэмплов 8 кГц = 160 байт G.711 + 12 байт заголовка.
+ * RTP audio media processing engine (20 ms frame, 160 PCM samples per packet).
  */
 final class MediaImpl implements Media, Udp.Listener {
 
@@ -107,7 +107,7 @@ final class MediaImpl implements Media, Udp.Listener {
         udp.close();
     }
 
-    // ---- микрофон -> сеть ----
+    // ---- microphone -> network ----
     private void captureLoop() {
         short[] pcm = new short[FRAME];
         byte[] pkt = new byte[12 + FRAME];
@@ -131,29 +131,29 @@ final class MediaImpl implements Media, Udp.Listener {
         }
     }
 
-    // ---- сеть -> очередь ----
+    // ---- network -> queue ----
     @Override
     public void onPacket(byte[] d, String host, int port) {
         if (!run || d.length < 13) return;
-        if ((d[0] & 0xC0) != 0x80) return;              // версия 2
-        if ((d[1] & 0x7F) != pt) return;                // чужие типы (telephone-event и т.п.)
+        if ((d[0] & 0xC0) != 0x80) return;              // RTP version 2
+        if ((d[1] & 0x7F) != pt) return;                // payload type filter
         int off = 12 + (d[0] & 0x0F) * 4;
-        if ((d[0] & 0x10) != 0) {                       // расширение
+        if ((d[0] & 0x10) != 0) {                       // header extension
             if (d.length < off + 4) return;
             off += 4 + (((d[off + 2] & 0xFF) << 8) | (d[off + 3] & 0xFF)) * 4;
         }
         int end = d.length;
-        if ((d[0] & 0x20) != 0) end -= d[d.length - 1] & 0xFF;   // padding
+        if ((d[0] & 0x20) != 0) end -= d[d.length - 1] & 0xFF;   // padding removal
         int n = end - off;
         if (n <= 0) return;
         short[] pcm = new short[n];
         for (int i = 0; i < n; i++) pcm[i] = G711.decode(pt, d[off + i]);
         while (!playQ.offer(pcm)) playQ.poll();
-        rhost = host;                                   // symmetric RTP: отвечаем туда, откуда пришло
+        rhost = host;                                   // symmetric RTP: update target host/port
         rport = port;
     }
 
-    // ---- очередь -> динамик ----
+    // ---- queue -> speaker ----
     private void playbackLoop() {
         while (run) {
             try {

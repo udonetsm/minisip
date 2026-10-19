@@ -8,6 +8,8 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.res.ColorStateList;
+import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
@@ -70,8 +72,8 @@ import ru.minisip.log.LogFile;
 import ru.minisip.update.Update;
 
 /**
- * Одна страница настроек: SIP-аккаунт, звонок и VPN. Страниц может быть сколько угодно,
- * их листает MainActivity. Интерфейс собран в коде (xml-ресурсов нет), виджеты — Material 3.
+ * Settings card fragment handling SIP account, call controls, and VPN configuration.
+ * Programmatically constructs Material 3 UI widgets without XML layout resources.
  */
 public final class SettingsFragment extends Fragment {
 
@@ -79,14 +81,14 @@ public final class SettingsFragment extends Fragment {
     private final Handler gestureHandler = new Handler(Looper.getMainLooper());
     private App app;
     /**
-     * Мост LogBuffer -> поле панели: буфер зовёт из своего потока, поле обновляем через post.
+     * Bridges LogBuffer updates to the VPN log area on the main thread.
      */
     private final Runnable vpnLogUpdate = () -> {
         LogArea a = this.vpnLog;
         if (a != null && app != null) a.setText(app.vpnLog().text());
     };
     /**
-     * Мост LogBuffer -> поле панели для блока «Звонок».
+     * Bridges LogBuffer updates to call history display.
      */
     private final Runnable callLogUpdate = () -> {
         if (app != null) {
@@ -98,8 +100,8 @@ public final class SettingsFragment extends Fragment {
     private LinearLayout callHistoryWrapper;
     private final Set<String> expandedSessions = new HashSet<>();
     private SharedPreferences prefs;
-    private int page;                  // номер страницы; от него зависят и настройки, и право на подключение
-    private boolean loading;           // поля заполняются из настроек: изменения не сохранять заново
+    private int page;                  // page index; determines preferences file and connection permission
+    private boolean loading;           // fields being populated from preferences: suppress auto-save
     private Runnable revealDeleteRunnable;
     private float touchDownY;
     private MaterialButton deleteBtn;
@@ -112,25 +114,25 @@ public final class SettingsFragment extends Fragment {
             });
     private MaterialButton connect, disconnect, refersBtn, call, spkBtn, muteBtn, vpnConnect, vpnDisconnect, vpnAppsBtn, vpnMainBtn, vpnAdvancedBtn, sipAdvancedBtn;
     /**
-     * Одна и та же ссылка нужна, чтобы в onPause снимать только свой колбэк.
+     * Retained runnable reference to unregister callback in onPause.
      */
     private final Runnable renderer = this::render;
     private LinearLayout vpnMainSpoilerContainer, vpnAdvancedSpoilerContainer, sipSpoilerContainer;
     private LogArea sipLog, vpnLog;
     /**
-     * Мост LogBuffer -> поле панели для блока «SIP сервер».
+     * Bridges LogBuffer updates to the SIP log area.
      */
     private final Runnable sipLogUpdate = () -> {
         LogArea a = sipLog;
         if (a != null && app != null) a.setText(app.sipLog().text());
     };
     /**
-     * Строка версии внизу страницы: long-press 2 с открывает диалог канала обновлений.
+     * Version label view; long press opens update channel dialog.
      */
     private TextView versionLabel;
     private LogArea updateLog;
     /**
-     * Отложенный показ диалога канала: срабатывает через 2 с удержания на строке версии.
+     * Runnable posted on long press to trigger update channel dialog.
      */
     private final Runnable clearNumberRunnable = () -> {
         if (number != null) number.setText("");
@@ -138,11 +140,11 @@ public final class SettingsFragment extends Fragment {
     private final Runnable channelDialogRunnable = () -> {
         if (isAdded()) showChannelDialog();
     };
-    /*Отложенное сохранение на Android ≤ 9, пока пользователь не выдаст разрешение.
+    /* Pending log save runnable waiting for storage permission on Android <= 9.
      */
     private Runnable pendingSave;
     /**
-     * Разрешение на внешнее хранилище для Android ≤ 9; после выдачи продолжаем отложенное сохранение.
+     * Storage permission launcher for log persistence on Android <= 9.
      */
     private final ActivityResultLauncher<String> storagePermission = registerForActivityResult(
             new ActivityResultContracts.RequestPermission(), granted -> {
@@ -164,7 +166,7 @@ public final class SettingsFragment extends Fragment {
     }
 
     /**
-     * Двухцветный ColorStateList: цвет для enabled, цвет для disabled.
+     * Constructs dual-state ColorStateList for enabled and disabled view states.
      */
     private static ColorStateList stateful(int enabled, int disabled) {
         return new ColorStateList(
@@ -185,7 +187,7 @@ public final class SettingsFragment extends Fragment {
     } else {
         b.setShapeAppearanceModel(new ShapeAppearanceModel.Builder()
                 .setAllCornerSizes(ShapeAppearanceModel.PILL).build());
-        b.setBackgroundTintList(ColorStateList.valueOf(android.graphics.Color.TRANSPARENT));
+        b.setBackgroundTintList(ColorStateList.valueOf(Color.TRANSPARENT));
         b.setIconTint(ColorStateList.valueOf(
                 MaterialColors.getColor(b, com.google.android.material.R.attr.colorOnSurfaceVariant)));
         b.setStrokeColor(ColorStateList.valueOf(
@@ -195,8 +197,7 @@ public final class SettingsFragment extends Fragment {
 }
 
     /**
-     * Динамик: по умолчанию — серая круглая кнопка с иконкой динамика (звук в трубке),
-     * при включении — скруглённый квадрат в акцентном цвете (звук на громкую).
+     * Applies pill or rounded rectangle style for speakerphone toggle button.
      */
     private void applySpkLook(MaterialButton b, boolean on, int iconRes) {
         b.setIconResource(iconRes);
@@ -211,7 +212,7 @@ public final class SettingsFragment extends Fragment {
         } else {
             b.setShapeAppearanceModel(new ShapeAppearanceModel.Builder()
                     .setAllCornerSizes(ShapeAppearanceModel.PILL).build());
-            b.setBackgroundTintList(ColorStateList.valueOf(android.graphics.Color.TRANSPARENT));
+            b.setBackgroundTintList(ColorStateList.valueOf(Color.TRANSPARENT));
             b.setIconTint(ColorStateList.valueOf(
                     MaterialColors.getColor(b, com.google.android.material.R.attr.colorOnSurfaceVariant)));
             b.setStrokeColor(ColorStateList.valueOf(
@@ -221,8 +222,7 @@ public final class SettingsFragment extends Fragment {
     }
 
     /**
-     * Подбирает размер шрифта номера так, чтобы весь номер помещался по ширине поля.
-     * Верхняя граница — 24sp (штатный размер), нижняя — 10sp.
+     * Dynamically scales phone number text size between 10sp and 24sp to fit field width.
      */
     private void fitNumberText() {
         if (number == null) return;
@@ -230,7 +230,7 @@ public final class SettingsFragment extends Fragment {
         if (avail <= 0) return;
         float density = getResources().getDisplayMetrics().scaledDensity;
         float sp = 24f;
-        android.graphics.Paint p = number.getPaint();
+        Paint p = number.getPaint();
         float old = p.getTextSize();
         while (sp > 10f) {
             p.setTextSize(sp * density);
@@ -265,7 +265,7 @@ public final class SettingsFragment extends Fragment {
         super.onCreate(b);
         app = (App) requireActivity().getApplication();
         page = requireArguments().getInt(ARG_PAGE, 0);
-        prefs = PageStore.prefs(requireContext(), page);       // у каждой страницы свои настройки
+        prefs = PageStore.prefs(requireContext(), page);       // each page has isolated preferences
     }
 
     @NonNull
@@ -279,7 +279,7 @@ public final class SettingsFragment extends Fragment {
         int pad = dp(16);
         col.setPadding(pad, pad, pad, pad);
 
-        // --- Блок 1: Настройка АТС сервера ---
+        // --- Block 1: PBX Server Settings ---
         Block sipBlock = createBlock(0);
         sipLog = title(sipBlock.container, "SIP server settings", 0);
 
@@ -311,7 +311,7 @@ public final class SettingsFragment extends Fragment {
         sipBlock.container.addView(sipLog.panel, row(dp(8)));
 
 
-        // --- Блок 2: Номер телефона и источник звука ---
+        // --- Block 2: Dialer & Audio Route ---
         Block callBlock = createBlock(1);
         LinearLayout dialerTitleRow = new LinearLayout(ctx);
         dialerTitleRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -531,7 +531,7 @@ public final class SettingsFragment extends Fragment {
         chLp.height = dp(44);
         callHistoryScroll.setLayoutParams(chLp);
 
-        // --- Блок 3: Настройка VPN ---
+        // --- Block 3: VPN Settings ---
         Block vpnBlock = createBlock(2);
         vpnLog = titleVpn(vpnBlock.container, "VPN settings (IKEv2)", 0);
 
@@ -546,7 +546,7 @@ public final class SettingsFragment extends Fragment {
         vpnPass = field(vpnMainSpoilerContainer, "VPN password", null, prefs.getString("vpnPass", ""),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD, true);
 
-        // Вложенный (дополнительный) спойлер внутри настроек VPN
+        // Nested spoiler container inside VPN settings
         vpnAdvancedSpoilerContainer = new LinearLayout(ctx);
         vpnAdvancedSpoilerContainer.setOrientation(LinearLayout.VERTICAL);
         vpnAdvancedSpoilerContainer.setVisibility(View.GONE);
@@ -594,7 +594,7 @@ public final class SettingsFragment extends Fragment {
         setupCardDragAndDrop(callBlock.card, 1, col);
         setupCardDragAndDrop(vpnBlock.card, 2, col);
 
-        // Добавляем карточки в контейнер согласно сохраненному порядку
+        // Adds cards to layout container according to saved card order
         String savedOrder = prefs.getString("blockOrder", "0,1,2");
         String[] orderArr = savedOrder.split(",");
         for (String idStr : orderArr) {
@@ -619,7 +619,7 @@ public final class SettingsFragment extends Fragment {
             }
         }
 
-        // Строка версии: под всеми блоками. Долгое удержание 2 с — диалог канала обновлений.
+        // Version string below all blocks. Long press 2s triggers update channel dialog.
         FrameLayout verRow = new FrameLayout(ctx);
         versionLabel = new TextView(ctx);
         versionLabel.setText("v" + appVersion());
@@ -669,7 +669,7 @@ public final class SettingsFragment extends Fragment {
 
         col.addView(updateLog.panel, row(dp(8)));
 
-        // Кнопка удаления страницы
+        // Delete Page button
         deleteBtn = button(col, "Delete Page", true, v -> confirmDeletePage());
         deleteBtn.setIconResource(R.drawable.ic_delete);
         deleteBtn.setIconGravity(MaterialButton.ICON_GRAVITY_TEXT_START);
@@ -679,7 +679,7 @@ public final class SettingsFragment extends Fragment {
         deleteBtn.setTextColor(0xFFFFFFFF);
         deleteBtn.setVisibility(View.GONE);
 
-        // всё, что набрано, сразу запоминается: страницы-копии одной настройки не расходятся
+        // Auto-saves input field values immediately to sync profiles
         save(server, "server");
         save(login, "login");
         save(pass, "pass");
@@ -714,7 +714,7 @@ public final class SettingsFragment extends Fragment {
                                             });
                                         }
                                     };
-                                    gestureHandler.postDelayed(revealDeleteRunnable, 1000); // 1 секунда
+                                    gestureHandler.postDelayed(revealDeleteRunnable, 1000); // 1 second threshold
                                 }
                             } else {
                                 cancelHoldTimer();
@@ -733,7 +733,7 @@ public final class SettingsFragment extends Fragment {
         scroll.addView(col, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // «Страница» — карточка с небольшими полями вокруг: по краям виден фон главной активити
+        // Page card container with surrounding margins showing main activity background
         MaterialCardView card = new MaterialCardView(ctx);
         card.addView(scroll, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
@@ -800,11 +800,11 @@ public final class SettingsFragment extends Fragment {
             updateLog.setText(app.updateLog().text());
             app.updateLog().setListener(updateLog.onEnable);
         }
-        app.onChange = renderer;     // событиями App живёт только видимая страница
+        app.onChange = renderer;     // visible settings page subscribes to App state changes
         render();
     }
 
-    // ---------- действия ----------
+    // ---------- Actions ----------
 
     @Override
     public void onPause() {
@@ -817,7 +817,7 @@ public final class SettingsFragment extends Fragment {
     }
 
     /**
-     * versionName установленного APK — для подписи под блоками.
+     * Returns app versionName for display below blocks.
      */
     private String appVersion() {
         try {
@@ -829,9 +829,7 @@ public final class SettingsFragment extends Fragment {
     }
 
     /**
-     * Диалог канала обновлений. Single-choice Stable / Pre-release, кнопка «Проверить»
-     * сохраняет выбор и запускает check(). Ответ с hasUpdate=true обрабатывает полоса в
-     * MainActivity; здесь — только «последняя версия» и 404-stable.
+     * Dialog for update channels. Single-choice Stable / Pre-release.
      */
     private void showChannelDialog() {
         String[] names = {"Stable", "Pre-release"};
@@ -874,7 +872,7 @@ public final class SettingsFragment extends Fragment {
             status.setText("Microphone permission required");
             return;
         }
-        app.setSpeaker(prefs.getBoolean("speaker", false));   // вывод звука, выбранный на этой странице
+        app.setSpeaker(prefs.getBoolean("speaker", false));   // audio route selected for page
         app.setMute(prefs.getBoolean("muted", false));
         app.dial(page, n);
     }
@@ -887,13 +885,12 @@ public final class SettingsFragment extends Fragment {
     }
 
     /**
-     * Локальный слушатель check(). Полоса в MainActivity подключена постоянным слушателем
-     * и уже показывает скачивание; здесь — только случаи, когда полосы не будет.
+     * Local update check listener.
      */
     private final Update.Listener checkListener = new Update.Listener() {
         @Override
         public void onChecked(Update.Result r) {
-            if (r == null || r.hasUpdate) return;   // показ полосы — не наша забота
+            if (r == null || r.hasUpdate) return;   // update bar handling delegated to MainActivity
             if (r.noStable) {
                 MainActivity.showCustomConfirmDialog(requireContext(),
                         "No stable versions yet",
@@ -907,7 +904,7 @@ public final class SettingsFragment extends Fragment {
             }
             Toast.makeText(requireContext(), "You have the latest version", Toast.LENGTH_SHORT).show();
         }
-        // onError показывает MainActivity (Toast + скрытие полосы) — здесь не дублируем
+        // onError handled by MainActivity Toast notification
     };
 
     private void doVpnConnect() {
@@ -920,12 +917,12 @@ public final class SettingsFragment extends Fragment {
             return;
         }
         if (!app.allowed(page)) return;
-        // false — показан системный диалог, ответ придёт в MainActivity и вернётся в onVpnConsent
+        // false — system permission dialog shown; result delivered via MainActivity to onVpnConsent
         if (app.vpnConsent(requireActivity(), MainActivity.REQ_VPN)) vpnStart();
     }
 
     /**
-     * Ответ на системный запрос согласия на VPN (его получает MainActivity).
+     * Callback invoked when system VPN consent result is returned.
      */
     void onVpnConsent(boolean granted) {
         if (granted) vpnStart();
@@ -993,7 +990,7 @@ public final class SettingsFragment extends Fragment {
     }
 
     /**
-     * Список приложений с галочками: их трафик пойдёт через VPN. MiniSIP включён всегда.
+     * Shows dialog for selecting split tunneling app package list.
      */
     private void pickApps() {
         PackageManager pm = requireContext().getPackageManager();
@@ -1027,7 +1024,7 @@ public final class SettingsFragment extends Fragment {
     }
 
     /**
-     * Переключение источника звука: применяется сразу, в том числе посреди вызова.
+     * Toggles speakerphone vs earpiece audio route immediately.
      */
     private void pickSpeaker(boolean speaker) {
         prefs.edit().putBoolean("speaker", speaker).apply();
@@ -1036,7 +1033,7 @@ public final class SettingsFragment extends Fragment {
     }
 
     /**
-     * Диалог со списком Refers: строки правятся на месте, Use — blind transfer, ✕ — удалить.
+     * Displays interactive blind transfer contacts dialog.
      */
     private void showRefersDialog() {
         final Context ctx = requireContext();
@@ -1225,7 +1222,7 @@ public final class SettingsFragment extends Fragment {
 
     private void render() {
         if (getView() == null || status == null) return;
-        // Подключением владеет одна страница. Чужую сессию эта страница не видит и управлять ею не может.
+        // Connection owned by single active page; other pages cannot view or control another session.
         boolean mine = app.lastPage == page;
         boolean other = app.busy() && !mine;
         boolean idle = !mine || app.state == App.IDLE;
@@ -1277,11 +1274,11 @@ public final class SettingsFragment extends Fragment {
 
 	connect.setEnabled(!other && idle && !reg && !conn);
         disconnect.setEnabled(reg || conn);
-        // VPN: подключить можно только когда он не поднят и нет вызова; отключить — когда поднят или поднимается
+        // VPN: connect available when inactive and no call; disconnect available when active/connecting
         String saved = prefs.getString("vpnApps", "").trim();
         int n = saved.isEmpty() ? 0 : saved.split("\\s+").length;
         vpnAppsBtn.setText("Apps using VPN (MiniSIP" + (n > 0 ? " + " + n : "") + ")");
-        vpnAppsBtn.setEnabled(!other && !vUp && !vConn);   // список применяется при подключении
+        vpnAppsBtn.setEnabled(!other && !vUp && !vConn);   // split tunneling applied on connection start
         vpnConnect.setEnabled(!other && idle && !vUp && !vConn);
         if (vUp) {
             String mobikeStatus = app.vpnMobike() ? "Active" : "Not supported";
@@ -1298,7 +1295,7 @@ public final class SettingsFragment extends Fragment {
     }
 
     /**
-     * Запоминает поле в настройках страницы по мере набора.
+     * Auto-saves input field values to page preferences as text changes.
      */
     private void save(TextInputEditText e, String key) {
         e.addTextChangedListener(new TextWatcher() {
@@ -1314,7 +1311,7 @@ public final class SettingsFragment extends Fragment {
             public void afterTextChanged(Editable s) {
                 if (loading) return;
                 prefs.edit().putString(key, s.toString()).apply();
-                // от сервера и логина зависит, можно ли листать дальше и создавать новую страницу
+                // server and login configuration determines page creation eligibility
                 if (key.equals("server") || key.equals("login")) {
                     if (getActivity() instanceof MainActivity)
                         ((MainActivity) getActivity()).pagesChanged();
@@ -1443,7 +1440,7 @@ public final class SettingsFragment extends Fragment {
         return (int) (v * getResources().getDisplayMetrics().density);
     }
 
-    // ---------- мелочи вёрстки ----------
+    // ---------- Layout Utilities ----------
 
     private LinearLayout.LayoutParams row(int top) {
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
@@ -1468,7 +1465,7 @@ public final class SettingsFragment extends Fragment {
         LinearLayout head = new LinearLayout(ctx);
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
-	
+
         TextView t = new TextView(ctx);
         t.setText(text);
         t.setTextAppearance(android.R.style.TextAppearance_Medium);
@@ -1488,9 +1485,7 @@ public final class SettingsFragment extends Fragment {
     }
 
     /**
-     * Заголовок блока VPN: в ⋮-меню, кроме «Log», есть чекбокс strict-режима.
-     * strict хранится per-page в prefs под ключом "vpnStrict" (по умолчанию включён);
-     * при активном VPN применяется к живому туннелю сразу.
+     * Creates VPN block title header with log toggle widget.
      */
     private LogArea titleVpn(LinearLayout parent, String text, int top) {
         Context ctx = parent.getContext();
@@ -1594,7 +1589,7 @@ public final class SettingsFragment extends Fragment {
     }
 
     /**
-     * Панель лога блока: контейнер, поле для текста и кнопки.
+     * UI panel component holding log text field and control buttons.
      */
     private final class LogArea {
         final LinearLayout panel;
@@ -1657,7 +1652,7 @@ public final class SettingsFragment extends Fragment {
             band.addView(text, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.83f));
             View right = new View(ctx);
             band.addView(right, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.085f));
-            
+
 	    LinearLayout.LayoutParams bandLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             bandLp.topMargin = dp(8);
@@ -1803,7 +1798,7 @@ public final class SettingsFragment extends Fragment {
     private void callHistoryScrollToTop() {
         callHistoryScroll.smoothScrollTo(0, 0);
     }
-    
+
     private void resizeCallHistory() {
         if (callHistoryScroll == null || callHistoryContainer == null) return;
         callHistoryScroll.post(() -> {

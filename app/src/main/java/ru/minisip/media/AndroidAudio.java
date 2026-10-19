@@ -14,7 +14,7 @@ import android.os.Build;
 import java.util.Arrays;
 
 /**
- * Микрофон и динамик разговорного тракта (в ухо, с эхоподавлением системы).
+ * Microphone and earpiece/speakerphone audio path with acoustic echo cancellation.
  */
 final class AndroidAudio implements Audio {
 
@@ -25,8 +25,8 @@ final class AndroidAudio implements Audio {
     private AudioTrack trk;
     private AudioFocusRequest focusReq;
     private int prevMode = -1;
-    private volatile boolean speaker;        // выбранный вывод: громкая связь или в ухо
-    private volatile boolean muted;          // заглушен ли микрофон
+    private volatile boolean speaker;        // selected route: speakerphone or earpiece
+    private volatile boolean muted;          // microphone mute state
 
     AndroidAudio(Context ctx) {
         am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
@@ -124,7 +124,7 @@ final class AndroidAudio implements Audio {
 
             trk.play();
             return true;
-        } catch (RuntimeException e) {   // нет разрешения, устройство занято и т.п.
+        } catch (RuntimeException e) {   // permission missing or device busy
             stop();
             return false;
         }
@@ -133,7 +133,7 @@ final class AndroidAudio implements Audio {
     @Override
     public void setSpeaker(boolean on) {
         speaker = on;
-        if (prevMode >= 0) route();           // разговор уже идёт: переключаем на лету
+        if (prevMode >= 0) route();           // active call: switch audio route on the fly
     }
 
     @Override
@@ -151,9 +151,7 @@ final class AndroidAudio implements Audio {
     }
 
     /**
-     * Android 12+: штатный выбор устройства связи (разговорный динамик или громкая связь).
-     * Старее, и если нужного устройства нет (планшет без разговорного динамика), — старый переключатель.
-     * Версию Android читаем в момент вызова, так что после обновления системы сама берётся новая ветка.
+     * Routes audio to speakerphone or earpiece via AudioManager communication devices API.
      */
     @SuppressWarnings("deprecation")
     private void route() {
@@ -184,7 +182,7 @@ final class AndroidAudio implements Audio {
         try {
             trk.write(buf, 0, n);
         } catch (RuntimeException e) {
-            // трек уже остановлен
+            // audio track stopped
         }
     }
 

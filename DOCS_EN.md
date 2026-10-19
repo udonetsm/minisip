@@ -37,126 +37,273 @@ To prevent state race conditions and recursive routing conflicts, MiniSIP enforc
 
 ---
 
-## 2. Detailed Package & Class Specifications
+## 2. Comprehensive Method Inventory & Class Specifications
 
 ### 2.1 `ru.minisip.app` Package (UI & Services)
 
-#### [`MainActivity.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/MainActivity.java)
-- **Pager Management**: Uses `ViewPager2` backed by the `Pages` adapter.
-- **Dynamic Card Creation**: Scrolling to `position >= PageStore.count()` triggers `showCustomConfirmDialog()`. Upon user confirmation, `PageStore.count` increments in `SharedPreferences`, updating `ViewPager2`.
-- **Lock-Screen Flags**: `updateLockScreenFlags()` invokes `setShowWhenLocked(active)` and `setTurnScreenOn(active)` to display active or incoming calls over Android's lock screen.
-
-#### [`SettingsFragment.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/SettingsFragment.java)
-- **Code-Based UI Construction**: Entire UI is built programmatically in `onCreateView()` using Material Design 3 components.
-- **Interactive Call History (`updateCallHistory`)**: Groups log events into chronological sessions, renders color-coded sequence dots (`getStatusColor`: Orange = Dial, Yellow = Ringing, Green = Connected, Purple = Transfer, Red = Ended/Error), supports scrolling, event copying, and populates the dial field via long press.
-- **VPN App Picker (`pickApps`)**: Scans installed packages via `PackageManager.getInstalledPackages()` (subject to `<queries>` in `AndroidManifest.xml`) to construct split tunneling package lists.
-- **Call Transfer Window (`showRefersDialog`)**: Builds an interactive list of transfer contacts (`PageStore.Refer`) with editable Login and Name fields, add/delete controls, and instant blind transfer execution (`↪️`).
-- **Card Drag & Drop (`setupCardDragAndDrop`)**: Handles block dragging with `alpha = 0.2` transparency and saves custom layout order to `SharedPreferences` under the `blockOrder` key.
-- **Delete Page Trigger (`revealDeleteRunnable`)**: Monitors downward pull gesture at the bottom of `NestedScrollView` for 1 second to reveal the hidden **Delete Page 🗑** button.
-
-#### [`PageStore.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/PageStore.java)
-- **Preference Storage**: `prefs(c, page)` returns `cfg` for page 0, and `cfg1`, `cfg2`, etc., for subsequent pages.
-- **Page Deletion (`deletePage`)**: When a profile is deleted, shifts subsequent `SharedPreferences` files left by 1 position, clearing the last file and decrementing `count`.
+#### [`App.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/App.java)
+- `void addChangeListener(Runnable r)`: Registers a UI state change listener.
+- `void removeChangeListener(Runnable r)`: Unregisters a UI state change listener.
+- `boolean isCallActive()`: Returns true if call state is not IDLE.
+- `boolean busy()`: Returns true if SIP registration, call, or VPN session is active/connecting.
+- `boolean allowed(int page)`: Checks if settings page has exclusive connection rights.
+- `void onCreate()`: Initializes UDP sockets, media engine, SIP stack, VPN, log buffers, and network callback.
+- `LogBuffer vpnLog()`: Returns VPN ring buffer log.
+- `LogBuffer callLog()`: Returns call event ring buffer log.
+- `LogBuffer sipLog()`: Returns SIP signaling ring buffer log.
+- `LogBuffer updateLog()`: Returns update checker ring buffer log.
+- `Update update()`: Returns update manager instance.
+- `void connect(int page, String host, int port, String user, String pass)`: Initiates SIP registration.
+- `void disconnect(int page)`: Unregisters SIP session.
+- `boolean vpnConsent(Activity a, int requestCode)`: Requests VPN permission consent.
+- `void vpnConnect(...)`: Establishes IKEv2/IPsec VPN tunnel.
+- `void vpnDisconnect(int page)`: Disconnects VPN tunnel.
+- `String vpnDpd()`: Returns DPD status string.
+- `boolean vpnMobike()`: Returns MOBIKE support status.
+- `boolean isVpnStrict()`: Returns strict watchdog mode flag.
+- `void setVpnStrict(boolean on)`: Configures strict watchdog mode.
+- `int getVpnLossCount()`: Returns ping loss count.
+- `void vpnDenied(int page)`: Handles VPN permission denial.
+- `void vpnError(int page, String error)`: Handles VPN error state.
+- `void onUp(String iface)`: VPN listener callback on tunnel established.
+- `void onReconnecting(String reason, int attempt)`: VPN listener callback on reconnection attempt.
+- `void onDown(String reason)`: VPN listener callback on tunnel disconnection.
+- `void dial(int page, String number)`: Initiates outgoing SIP call.
+- `void setSpeaker(boolean on)`: Toggles speakerphone audio route.
+- `void setMute(boolean mute)`: Toggles microphone mute.
+- `boolean isMuted()`: Returns microphone mute state.
+- `void hangup(int page)`: Terminates active call or cancels outgoing call.
+- `void transfer(int page, String target)`: Executes blind transfer (REFER).
+- `void onRekey(String info)`: VPN listener callback on IPsec SA rekey.
+- `void onPingLoss(int lostCount)`: VPN listener callback on healthcheck packet loss.
+- `void onRegistered(boolean ok, String info)`: SIP listener callback on registration status.
+- `void onRinging()`: SIP listener callback on remote ringback (180/183).
+- `void onConnected()`: SIP listener callback on call answered (200 OK).
+- `void onEnded(String reason)`: SIP listener callback on call termination.
 
 #### [`CallService.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/CallService.java)
-- **Foreground Service**: Runs with `foregroundServiceType="microphone"`, launching a high-priority system notification to guarantee audio recording and playback when the app is backgrounded.
+- `int onStartCommand(Intent intent, int flags, int startId)`: Starts foreground service with microphone type.
+- `IBinder onBind(Intent intent)`: Returns null (not bound).
+
+#### [`MainActivity.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/MainActivity.java)
+- `static void showCustomConfirmDialog(...)`: Displays styled confirmation dialog with custom buttons.
+- `void onCreate(Bundle b)`: Initializes ViewPager2 settings cards, update bar, and permission requests.
+- `void pagesChanged()`: Refreshes ViewPager2 adapter page count.
+- `void pageDeleted(int pageToDelete)`: Deletes specified settings page and resets adapter.
+- `void onRequestPermissionsResult(...)`: Handles audio record permission results.
+- `void onActivityResult(...)`: Forwards VPN permission consent result to fragment.
+
+#### [`PageStore.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/PageStore.java)
+- `static SharedPreferences prefs(Context c, int page)`: Returns page-specific SharedPreferences.
+- `static int count(Context c)`: Returns total created settings pages.
+- `static void setCount(Context c, int n)`: Saves total settings page count.
+- `static boolean configured(Context c, int page)`: Checks if server and login are configured.
+- `static List<Refer> refers(Context c, int page)`: Reads transfer contacts list.
+- `static void setRefers(...)`: Saves transfer contacts list.
+- `static void deletePage(Context c, int pageToDelete)`: Deletes profile page and shifts remaining preference files.
+- `Refer#Refer(String login, String name)`: Constructor for transfer contact.
+- `String Refer#label()`: Returns display name or login.
+
+#### [`SettingsFragment.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/SettingsFragment.java)
+- `static SettingsFragment create(int page)`: Factory method creating fragment instance.
+- `void onCreate(Bundle b)`: Loads page index and preferences.
+- `View onCreateView(...)`: Programmatically constructs Material 3 UI layout for SIP, Call, and VPN settings.
+- `void onPause()`: Unregisters log listeners and App change callback.
+- `void onVpnConsent(boolean granted)`: Handles VPN permission grant.
+- `String appVersion()`: Returns package version name.
+- `void showChannelDialog()`: Displays update channel selection dialog.
+- `void doConnect()`: Parses server address/port and triggers SIP connect.
+- `void doCall()`: Checks microphone permission and initiates dial.
+- `void toggleMute()`: Toggles microphone mute state.
+- `void doVpnConnect()`: Validates VPN fields and requests consent/start.
+- `void vpnStart()`: Resolves healthcheck IP and starts VPN connection.
+- `void pickApps()`: Displays split tunneling app selection multi-choice dialog.
+- `void pickSpeaker(boolean speaker)`: Sets speakerphone preference.
+- `void showRefersDialog()`: Displays interactive blind transfer contacts editor.
+- `void render()`: Updates UI widget enabled states and text values based on connection state.
+- `void save(TextInputEditText e, String key)`: Attaches text watcher for auto-saving preferences.
+- `void load(TextInputEditText e, String key)`: Reloads field value from preferences.
+
+#### [`UpdateBar.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/UpdateBar.java)
+- `void attachInset(View v)`: Attaches target view for bottom padding insets.
+- `void setVisibility(int v)`: Updates visibility and adjusts target view padding.
+- `void showProgress(int percent, String tag)`: Displays APK download progress bar.
+- `void showInstall(OnClickListener onInstall)`: Displays clickable install button.
+- `void hide()`: Hides update bar.
 
 ---
 
-### 2.2 `ru.minisip.sip` Package (VoIP Signaling)
+### 2.2 `ru.minisip.log` Package (Logging)
 
-#### [`SipImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/sip/SipImpl.java)
-Implements the Finite State Machine (FSM) for SIP (RFC 3261):
+#### [`LogSink.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/log/LogSink.java)
+- `void log(String line)`: Writes log entry string.
 
-```
-[UNREG] ---> (REGISTER sent) ---> [REGISTRING] ---> (401/407 + Auth Header) ---> [REGISTRING] ---> (200 OK) ---> [REGISTERED]
-                                                                                                                       |
-[IDLE] <--- (BYE / 200 OK) <--- [TALK] <--- (200 OK + ACK) <--- [RINGING] <--- (180 Ringing) <--- (INVITE sent) <-------+
-```
+#### [`LogBuffer.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/log/LogBuffer.java)
+- `static LogBuffer create(int maxLines)`: Factory method for LogBufferImpl.
+- `boolean isEnabled()`: Returns logging enabled state.
+- `void setEnabled(boolean on)`: Enables or disables logging.
+- `void clear()`: Clears buffer contents.
+- `String text()`: Returns complete buffered log text.
+- `void setListener(Runnable onChange)`: Sets change notification callback.
+- `void load(String saved)`: Loads previously saved log text.
+- `void setPersist(Runnable persist)`: Sets persistence callback.
 
-1. **Registration Flow (`reregister()`)**:
-   - Constructs an unauthenticated `REGISTER` request.
-   - Handles `401 Unauthorized` or `407 Proxy Authentication Required` responses containing `WWW-Authenticate` headers.
-   - Extracts `nonce`, `realm`, `qop`, and invokes `Digest` to calculate response hashes.
-   - Re-sends `REGISTER` with `Authorization: Digest username=..., realm=..., nonce=..., uri=..., response=...`.
-   - Schedules re-registration at half of `Expires` duration upon receiving `200 OK`.
+#### [`LogBufferImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/log/LogBufferImpl.java)
+- Implements all methods of `LogBuffer` with thread-safe `ArrayDeque` storage and timestamp formatting (`yyyy-MM-dd HH:mm:ss.SSS`).
 
-2. **Outgoing Call Flow (`call()`)**:
-   - Generates random `Call-ID` and `Via` branch identifiers.
-   - Builds SDP payload offering PCMU/PCMA codecs and local RTP ports via `Sdp.build()`.
-   - Sends `INVITE`. Plays ringback tone upon receiving `180 Ringing`. Parses remote SDP from `200 OK`, starts `Media.start()`, and transmits `ACK`.
-
-3. **Call Transfer Flow (`transfer()`)**:
-   - Constructs SIP `REFER` requests (RFC 3515) with `Refer-To: <sip:target@host>`.
-
-#### [`Digest.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/sip/Digest.java)
-Computes HTTP Digest Authentication (RFC 7616 / RFC 2617):
-$$\text{HA1} = \text{MD5}(\text{username} : \text{realm} : \text{password})$$
-$$\text{HA2} = \text{MD5}(\text{method} : \text{digestURI})$$
-$$\text{Response} = \text{MD5}(\text{HA1} : \text{nonce} : \text{nc} : \text{cnonce} : \text{qop} : \text{HA2})$$
-
-#### [`Sdp.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/sip/Sdp.java)
-Parses and generates SDP session descriptions (RFC 4566).
+#### [`LogFile.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/log/LogFile.java)
+- `static String save(Context ctx, String prefix, String text)`: Saves text log to `Documents/MiniSIP/logs` via MediaStore API (Android 10+) or File API (legacy).
 
 ---
 
-### 2.3 `ru.minisip.media` Package (Audio & Codecs)
+### 2.3 `ru.minisip.media` Package (Audio & RTP)
 
-#### [`MediaImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/media/MediaImpl.java)
-Runs two background worker threads:
-1. **Tx Thread**: Pulls PCM samples (8000 Hz 16-bit mono) from `AndroidAudio`, encodes them into G.711 (PCMA/PCMU) 160-byte packets (20ms audio), prepends a 12-byte RTP header (RFC 3550), and transmits via `rtpUdp`.
-2. **Rx Thread**: Polls incoming RTP packets from `rtpUdp`, verifies sequence numbers, extracts payloads, decodes G.711 into linear PCM, and streams audio to `AndroidAudio`.
+#### [`Audio.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/media/Audio.java)
+- `boolean start()`: Starts audio hardware recording and playback.
+- `int read(short[] buf)`: Reads PCM samples (blocking).
+- `void write(short[] buf, int n)`: Writes PCM playback samples.
+- `void stop()`: Stops audio hardware.
+- `void setSpeaker(boolean on)`: Configures audio output route.
+- `void setMute(boolean mute)`: Sets microphone mute.
+- `boolean isMuted()`: Returns mute state.
 
 #### [`AndroidAudio.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/media/AndroidAudio.java)
-- Encapsulates `AudioRecord` and `AudioTrack`.
-- Initializes hardware `AcousticEchoCanceler` and `NoiseSuppressor` effects.
-- `spk(boolean)` handles speakerphone toggling via `AudioManager.setSpeakerphoneOn()` and `MODE_IN_COMMUNICATION`.
+- Implements `Audio` using `AudioRecord`, `AudioTrack`, `AudioManager`, and communication device routing APIs with acoustic echo cancellation.
+
+#### [`G711.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/media/G711.java)
+- `static byte encode(int pt, short pcm)`: Encodes linear PCM into G.711 A-law (8) or u-law (0).
+- `static short decode(int pt, byte b)`: Decodes G.711 A-law or u-law byte into linear PCM.
+
+#### [`Media.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/media/Media.java)
+- `static Media create(Udp rtpSocket, Context ctx)`: Factory method.
+- `int open()`: Allocates local RTP UDP port.
+- `boolean start(String host, int port, int payload)`: Starts RTP capture and playback threads.
+- `void stop()`: Stops RTP threads and closes socket.
+
+#### [`MediaImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/media/MediaImpl.java)
+- Implements `Media` and `Udp.Listener`: manages `rtp-capture` thread (mic -> G.711 -> RTP packet) and `rtp-playback` thread (RTP packet -> G.711 -> speaker). Handles symmetric RTP.
 
 ---
 
-### 2.4 `ru.minisip.vpn` Package (IKEv2 / IPsec VPN)
+### 2.4 `ru.minisip.net` Package (Network & UDP)
 
-#### [`TunService.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/TunService.java)
-- Subclasses `android.net.VpnService`.
-- Configures virtual interface `tun0` via `VpnService.Builder`, setting IP/mask, MTU (1400), and `addAllowedApplication` for split tunneling.
-- Reads raw IP packets from `ParcelFileDescriptor` TUN interface and passes them to `Tunnel.java`.
+#### [`Binder.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/net/Binder.java)
+- `boolean bind(DatagramSocket s, String iface) throws IOException`: Binds socket to network interface.
 
-#### [`Ike.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/Ike.java) & [`Tunnel.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/Tunnel.java)
-Complete user-space implementation of IKEv2 (RFC 7296) and ESP (RFC 4303):
-1. **IKE_SA_INIT**: Diffie-Hellman public key exchange (`DhGroup.java`), nonces, master key `SKEYSEED` and `SK_e`/`SK_a` derivation.
-2. **IKE_AUTH**: Encrypted payload exchange carrying EAP MS-CHAPv2 (`Mschap.java`) or X.509 certificate (`Certs.java`) authentication, traffic selector (`TSi`/`TSr`) negotiation, and `CHILD_SA` establishment.
-3. **ESP Handling (`Esp.java`)**: AES-CBC / AES-GCM encryption and HMAC-SHA1/SHA256 integrity verification.
+#### [`AndroidBinder.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/net/AndroidBinder.java)
+- Implements `Binder` using `ConnectivityManager.getActiveNetwork()` and `Network.bindSocket()`.
+
+#### [`Udp.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/net/Udp.java)
+- `static Udp create()`: Creates standard UDP socket instance.
+- `static Udp create(Context ctx)`: Creates network-bound UDP socket instance.
+- `int open(int port, Listener l)`: Opens UDP socket and starts background receiver thread (`udp-rx`).
+- `boolean send(byte[] data, String host, int port)`: Transmits UDP datagram packet.
+- `String localIp(String host, int port)`: Returns local IP for target destination.
+- `void bind(String iface)`: Binds subsequent sockets to network interface (e.g. `tun0`).
+- `void close()`: Closes UDP socket.
+- `String error()`: Returns last error string.
+
+#### [`UdpImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/net/UdpImpl.java)
+- Implements `Udp` with asynchronous datagram packet reception and interface attachment.
 
 ---
 
 ### 2.5 `ru.minisip.screen` Package (Screen Control)
 
+#### [`Screen.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/screen/Screen.java)
+- `static Screen create(Context ctx)`: Factory method.
+- `void start()`: Enables proximity wake lock and CPU partial wake lock.
+- `void stop()`: Releases wake locks and unregisters proximity sensor listener.
+
 #### [`ScreenImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/screen/ScreenImpl.java)
-- Leverages `PROXIMITY_SCREEN_OFF_WAKE_LOCK` to dim the screen when placed near the ear.
-- Holds `PARTIAL_WAKE_LOCK` (`cpuLock`) to prevent CPU sleep during active calls.
-- Uses `SCREEN_BRIGHT_WAKE_LOCK | ACQUIRE_CAUSES_WAKEUP` to wake up the screen during incoming/answered calls.
+- Implements `Screen` and `SensorEventListener`: manages proximity screen dimming and screen wake actions.
 
 ---
 
-### 2.6 `ru.minisip.update` & `ru.minisip.log` Packages
+### 2.6 `ru.minisip.sip` Package (SIP/SDP Protocol)
+
+#### [`Digest.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/sip/Digest.java)
+- `static String answer(...)`: Computes HTTP Digest MD5 authentication response string (RFC 2617 / RFC 7616).
+
+#### [`Msg.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/sip/Msg.java)
+- `static Msg parse(byte[] data)`: Parses raw SIP message bytes.
+- `static String param(String hdr, String name)`: Extracts header parameter value.
+- `static String uri(String nameAddr)`: Extracts URI from Name-Addr.
+- `static String user(String nameAddr)`: Extracts user portion for caller ID.
+- `static String eventName(String hdr)`: Extracts event name from Event header.
+- `int status()`, `String reason()`, `String method()`, `String get(String)`, `List<String> all(String)`, `int cseq()`, `String key()`: SIP message introspection helpers.
+
+#### [`Sdp.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/sip/Sdp.java)
+- `static String make(String ip, int port, int... pts)`: Generates SDP session description for G.711 (PCMA/PCMU).
+- `static String[] parse(String sdp)`: Parses remote SDP body and returns `{ip, port, payloadType}`.
+
+#### [`Sip.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/sip/Sip.java)
+- `static Sip create(Udp signalling, Media media)`: Factory method.
+- `void setListener(Listener l)`: Sets SIP state change listener.
+- `void setLogSink(LogSink sink)`: Sets debug log sink.
+- `void register(String host, int port, String user, String password)`: Registers SIP account.
+- `void unregister()`: Unregisters SIP account.
+- `void call(String number)`: Initiates outgoing SIP call.
+- `void transfer(String target)`: Initiates blind transfer (REFER).
+- `void hangup()`: Terminates active call or cancels invite.
+
+#### [`SipImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/sip/SipImpl.java)
+- Implements `Sip`: single-threaded SIP Finite State Machine running on dedicated `"sip"` thread with Digest authentication, SDP negotiation, and transaction retransmission timers.
+
+---
+
+### 2.7 `ru.minisip.update` Package (Auto-Update)
+
+#### [`Http.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/update/Http.java)
+- `static String get(String url)`: Executes HTTP GET request returning response string.
+- `static void download(String url, File dst, Progress p)`: Downloads file with progress reporting.
+
+#### [`Timestamps.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/update/Timestamps.java)
+- `static long parseIso8601(String iso)`: Parses ISO 8601 date string into UTC milliseconds.
+
+#### [`Update.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/update/Update.java)
+- `static Update create(Context ctx)`: Factory method.
+- `void setChannel(String channel)`: Sets update channel ("stable" or "prerelease").
+- `void check(Listener l)`: Checks GitHub Releases for updates.
+- `void download(Listener l)`: Downloads release APK.
+- `void install()`: Launches system APK installer.
 
 #### [`UpdateImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/update/UpdateImpl.java)
-- Executes HTTP queries against GitHub Releases API (`Http.java`).
-- Compares `published_at` release timestamps against the installed application's `lastUpdateTime`.
-- Deletes stale cache APK files on app startup (`cleanUpdates`).
-- Verifies `pm.canRequestPackageInstalls()`. If missing, launches `Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES`, then triggers installation via `FileProvider` (`content://${applicationId}.fileprovider`).
-
-#### [`LogBufferImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/log/LogBufferImpl.java)
-- Thread-safe fixed-size ring buffer (500 entries) with listener callbacks and `SharedPreferences` persistence support.
+- Implements `Update`: background worker checking GitHub Releases API, downloading APKs, and managing FileProvider installations.
 
 ---
 
-## 3. System Requirements & RFC Specifications
+### 2.8 `ru.minisip.vpn` Package (IKEv2 / IPsec VPN)
+
+#### [`Tun.java` & `AndroidTun.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/AndroidTun.java)
+- Manages virtual TUN network interface (`tun0`) via `VpnService.Builder`, configuring IP addresses, DNS, split tunneling routes, and protected UDP sockets.
+
+#### [`Certs.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/Certs.java)
+- Parses X.509 PEM/DER certificates, validates PKIX trust chains, checks SAN names and AUTH signatures (RFC 7296 / RFC 7427).
+
+#### [`Crypto.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/Crypto.java)
+- Provides cryptographic primitives for IPsec/IKEv2: Diffie-Hellman Group 14 (MODP 2048), AES-CBC, AES-GCM-16, HMAC-SHA1/SHA256, PRF, and `Crypto.Box` encryption/decryption channels.
+
+#### [`Esp.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/Esp.java)
+- Implements IPsec ESP (RFC 4303) packet encapsulation, decapsulation, and anti-replay sliding window checking (`wrap`, `unwrap`).
+
+#### [`Ike.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/Ike.java)
+- Implements IKEv2 protocol (RFC 7296): IKE_SA_INIT exchange, IKE_AUTH authentication (PSK and EAP-MSCHAPv2), MOBIKE (RFC 4555), and DPD.
+
+#### [`Tunnel.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/Tunnel.java)
+- Manages active VPN session threads (`vpn`, `vpn-rx`, `vpn-tun`, `vpn-keep`, `vpn-mobike`), handling network health checks, keepalives, and automatic recovery.
+
+#### [`VpnImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/VpnImpl.java)
+- Orchestrates VPN lifecycle, user consent dialogs, wake locks, network change subscriptions, and automatic reconnects.
+
+---
+
+## 3. Supported RFC Standards & Runtime Requirements
 
 ### 3.1 Supported RFC Standards
 - **SIP**: RFC 3261 (Core SIP), RFC 3515 (SIP REFER), RFC 4566 (SDP), RFC 7616 / 2617 (HTTP Digest Auth).
 - **Media**: RFC 3550 (RTP), ITU-T G.711 (PCMA/PCMU).
-- **VPN / IPsec**: RFC 7296 (IKEv2), RFC 4303 (ESP), RFC 2759 (MS-CHAPv2).
+- **VPN / IPsec**: RFC 7296 (IKEv2), RFC 4303 (ESP), RFC 2759 (MS-CHAPv2), RFC 4555 (MOBIKE).
 
 ### 3.2 Runtime Requirements
 - **Android SDK**: Min SDK 24 (Android 7.0), Target SDK 34 (Android 14).

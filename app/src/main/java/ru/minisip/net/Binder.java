@@ -4,12 +4,12 @@ import java.io.IOException;
 import java.net.DatagramSocket;
 
 /**
- * Привязка сокета к сети по имени интерфейса. Внутри пакета: Android или подделка в тестах.
+ * Network socket binder interface.
  */
 interface Binder {
 
     /**
-     * true — сокет привязан; false — сети с таким интерфейсом нет. Сокет ещё не подключён.
+     * Returns true if socket was bound to interface network.
      */
     boolean bind(DatagramSocket s, String iface) throws IOException;
 }

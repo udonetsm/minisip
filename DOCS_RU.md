@@ -37,141 +37,171 @@ MiniSIP реализован на основе декларативного ра
 
 ---
 
-## 2. Подробная спецификация пакетов и классов
+## 2. Полный каталог методов и спецификация классов
 
 ### 2.1 Пакет `ru.minisip.app` (Пользовательский интерфейс и сервисы)
 
-#### [`MainActivity.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/MainActivity.java)
-- **Управление страницами**: Использует `ViewPager2` с адаптером `Pages`.
-- **Динамическое создание страниц**: При прокрутке на страницу с индексом `position >= PageStore.count()` вызывается диалог `showCustomConfirmDialog()`. В случае согласия пользователя значение `PageStore.count` увеличивается в `SharedPreferences`, вызвав обновление `ViewPager2`.
-- **Флаги заблокированного экрана**: Метод `updateLockScreenFlags()` вызывает `setShowWhenLocked(active)` и `setTurnScreenOn(active)`, что позволяет отображать интерфейс входящего/активного звонка поверх заблокированного экрана Android.
-
-#### [`SettingsFragment.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/SettingsFragment.java)
-- **Сборка UI без XML**: Весь UI создается программно в методе `onCreateView()` с использованием Material Design 3 компонентов.
-- **Интерактивная история звонков (`updateCallHistory`)**: Группирует события лога вызовов в хронологические сессии, строит цветовую цепочку событий (`getStatusColor`: Оранжевый — Dial, Желтый — Ringing, Зеленый — Connected, Фиолетовый — Transfer, Красный — Ended/Error), поддерживает скроллинг, копирование и подстановку номера в поле набора по долгому нажатию.
-- **Выбор приложений VPN (`pickApps`)**: Сканирует установленные приложения через `PackageManager.getInstalledPackages()` (согласно объявлению `<queries>` в `AndroidManifest.xml`) и позволяет сформировать список пакетов для раздельного туннелирования.
-- **Окно перевода вызова (`showRefersDialog`)**: Формирует интерактивный список контакта перевода (`PageStore.Refer`) с полями редактирования Login и Name, кнопками добавления, удаления и быстрого слепого перевода (`↪️`).
-- **Drag & Drop карточек (`setupCardDragAndDrop`)**: Реализует перетаскивание блоков с установкой прозрачности `alpha = 0.2` и сохранением кастомного порядка в `SharedPreferences` под ключом `blockOrder`.
-- **Показ кнопки удаления (`revealDeleteRunnable`)**: Отслеживает натяжение вниз на дне `NestedScrollView` в течение 1 секунды и отображает скрытую кнопку **Delete Page 🗑**.
-
-#### [`PageStore.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/PageStore.java)
-- **Хранение настроек**: Метод `prefs(c, page)` возвращает `cfg` для первой страницы и `cfg1`, `cfg2`... для последующих.
-- **Удаление профилей (`deletePage`)**: При удалении страницы сдвигает содержимое всех последующих файлов `SharedPreferences` на 1 позицию влево, очищая последний файл и уменьшая значение `count`.
+#### [`App.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/App.java)
+- `void addChangeListener(Runnable r)`: Регистрация слушателя изменений UI.
+- `void removeChangeListener(Runnable r)`: Удаление слушателя изменений UI.
+- `boolean isCallActive()`: Проверка активности звонка.
+- `boolean busy()`: Проверка занятости SIP, вызова или VPN.
+- `boolean allowed(int page)`: Проверка прав страницы на управление сессией.
+- `void onCreate()`: Инициализация сетевых сокетов, аудио, SIP, VPN, буферов логов.
+- `LogBuffer vpnLog()`: Кольцевой буфер логов VPN.
+- `LogBuffer callLog()`: Кольцевой буфер логов вызова.
+- `LogBuffer sipLog()`: Кольцевой буфер SIP-сигнализации.
+- `LogBuffer updateLog()`: Кольцевой буфер обновлений.
+- `Update update()`: Менеджер обновлений.
+- `void connect(...)`: Запуск SIP-регистрации.
+- `void disconnect(...)`: Сброс SIP-регистрации.
+- `boolean vpnConsent(...)`: Запрос системного согласия на VPN.
+- `void vpnConnect(...)`: Подключение VPN туннеля.
+- `void vpnDisconnect(...)`: Отключение VPN туннеля.
+- `String vpnDpd()`: Статус DPD.
+- `boolean vpnMobike()`: Поддержка MOBIKE.
+- `boolean isVpnStrict()`: Проверка строгого режима watchdog.
+- `void setVpnStrict(boolean on)`: Установка строгого режима watchdog.
+- `int getVpnLossCount()`: Счётчик потерь пингов.
+- `void vpnDenied(int page)`: Обработка отказа разрешений VPN.
+- `void vpnError(...)`: Обработка ошибок VPN.
+- `void onUp(...)`, `void onReconnecting(...)`, `void onDown(...)`: Слушатели состояния VPN.
+- `void dial(...)`, `void setSpeaker(...)`, `void setMute(...)`, `boolean isMuted()`, `void hangup(...)`, `void transfer(...)`: Управление вызовом.
+- `void onRekey(...)`, `void onPingLoss(...)`, `void onRegistered(...)`, `void onRinging(...)`, `void onConnected(...)`, `void onEnded(...)`: Слушатели SIP/VPN событий.
 
 #### [`CallService.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/CallService.java)
-- **Фоновый сервис**: Запускается с типом `foregroundServiceType="microphone"`, создавая системное уведомление высокого приоритета. Гарантирует работу микрофона и динамика при заблокированном экране.
+- `int onStartCommand(...)`: Запуск Foreground Service типа `microphone`.
+- `IBinder onBind(...)`: Возвращает null.
+
+#### [`MainActivity.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/MainActivity.java)
+- `static void showCustomConfirmDialog(...)`: Диалог с кастомными кнопками.
+- `void onCreate(...)`: Инициализация ViewPager2 и полосы обновлений.
+- `void pagesChanged()`: Пересчёт доступных страниц.
+- `void pageDeleted(int pageToDelete)`: Удаление карточки настроек.
+- `void onRequestPermissionsResult(...)`: Обработка разрешений аудио.
+- `void onActivityResult(...)`: Передача результата согласия VPN во фрагмент.
+
+#### [`PageStore.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/PageStore.java)
+- `static SharedPreferences prefs(...)`: Получение настроек страницы.
+- `static int count(...)`, `static void setCount(...)`: Количество страниц.
+- `static boolean configured(...)`: Проверка заполнения АТС.
+- `static List<Refer> refers(...)`, `static void setRefers(...)`: Список контактов перевода.
+- `static void deletePage(...)`: Удаление страницы со сдвигом индексов.
+- `Refer(String, String)`, `String label()`: Контакт перевода.
+
+#### [`SettingsFragment.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/SettingsFragment.java)
+- `static SettingsFragment create(int page)`: Фабричный метод создания фрагмента.
+- `void onCreate(...)`, `View onCreateView(...)`, `void onPause()`: Жизненный цикл фрагмента.
+- `void onVpnConsent(...)`, `String appVersion()`, `void showChannelDialog()`, `void doConnect()`, `void doCall()`, `void toggleMute()`, `void doVpnConnect()`, `void vpnStart()`, `void pickApps()`, `void pickSpeaker(...)`, `void showRefersDialog()`, `void render()`, `void save(...)`, `void load(...)`: Логика UI и обработчики действий.
+
+#### [`UpdateBar.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/UpdateBar.java)
+- `void attachInset(...)`, `void setVisibility(...)`, `void showProgress(...)`, `void showInstall(...)`, `void hide()`: Управление плашкой прогресса обновлений.
 
 ---
 
-### 2.2 Пакет `ru.minisip.sip` (Сигнализация VoIP SIP)
+### 2.2 Пакет `ru.minisip.log` (Логирование)
 
-#### [`SipImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/sip/SipImpl.java)
-Реализует конечный автомат (FSM) протокола SIP (RFC 3261):
+#### [`LogSink.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/log/LogSink.java)
+- `void log(String line)`: Запись строки лога.
 
-```
-[UNREG] ---> (REGISTER sent) ---> [REGISTRING] ---> (401/407 + Auth Header) ---> [REGISTRING] ---> (200 OK) ---> [REGISTERED]
-                                                                                                                       |
-[IDLE] <--- (BYE / 200 OK) <--- [TALK] <--- (200 OK + ACK) <--- [RINGING] <--- (180 Ringing) <--- (INVITE sent) <-------+
-```
+#### [`LogBuffer.java` & `LogBufferImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/log/LogBufferImpl.java)
+- `static LogBuffer create(...)`, `boolean isEnabled()`, `void setEnabled(...)`, `void clear()`, `String text()`, `void setListener(...)`, `void load(...)`, `void setPersist(...)`: Потокобезопасный кольцевой буфер логов в памяти.
 
-1. **Процесс регистрации (`reregister()`)**:
-   - Формируется сообщение `REGISTER` без заголовока `Authorization`.
-   - В ответ от АТС приходит `401 Unauthorized` или `407 Proxy Authentication Required`, содержащий заголовок `WWW-Authenticate`.
-   - Парсится параметр `nonce`, `realm`, `qop`, и вызывается класс `Digest` для вычисления дайджест-ответа.
-   - Повторно отправляется `REGISTER` с заголовком `Authorization: Digest username=..., realm=..., nonce=..., uri=..., response=...`.
-   - При получении `200 OK` устанавливается таймер повторной регистрации на половину времени `Expires`.
-
-2. **Процесс исходящего вызова (`call()`)**:
-   - Создается случайный `Call-ID`, генерируется `Branch` для заголовка `Via`.
-   - Через `Sdp.build()` формируется SDP-тело с предложением кодеков PCMU/PCMA и локальным RTP-портом.
-   - Отправляется `INVITE`. Получив `180 Ringing`, включается КПВ. При получении `200 OK` парсится SDP сервера, запускается `Media.start()`, и отправляется пакет `ACK`.
-
-3. **Перевод вызова (`transfer()`)**:
-   - Формируется SIP-запрос `REFER` согласно RFC 3515 с заголовком `Refer-To: <sip:target@host>`.
-
-#### [`Digest.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/sip/Digest.java)
-Реализует HTTP Digest Authentication (RFC 7616 / RFC 2617):
-$$\text{HA1} = \text{MD5}(\text{username} : \text{realm} : \text{password})$$
-$$\text{HA2} = \text{MD5}(\text{method} : \text{digestURI})$$
-$$\text{Response} = \text{MD5}(\text{HA1} : \text{nonce} : \text{nc} : \text{cnonce} : \text{qop} : \text{HA2})$$
-
-#### [`Sdp.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/sip/Sdp.java)
-Парсит и формирует структуры SDP (RFC 4566):
-```text
-v=0
-o=- 17182910 17182910 IN IP4 192.168.1.50
-s=-
-c=IN IP4 192.168.1.50
-t=0 0
-m=audio 4000 RTP/AVP 0 8 101
-a=rtpmap:0 PCMU/8000
-a=rtpmap:8 PCMA/8000
-a=sendrecv
-```
+#### [`LogFile.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/log/LogFile.java)
+- `static String save(Context ctx, String prefix, String text)`: Сохранение лога в `Documents/MiniSIP/logs`.
 
 ---
 
-### 2.3 Пакет `ru.minisip.media` (Аудио и кодеки)
+### 2.3 Пакет `ru.minisip.media` (Аудио и RTP)
 
-#### [`MediaImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/media/MediaImpl.java)
-Запускает два фоновых потока:
-1. **Поток записи (Tx)**: Запрашивает PCM-сэмплы (8000 Гц, 16 бит mono) из `AndroidAudio`, кодирует их в G.711 (PCMA/PCMU) пакетами по 160 байт (20 мс звука), добавляет 12-байтовый RTP-заголовок (RFC 3550) и отправляет через `rtpUdp`.
-2. **Поток приема (Rx)**: Считывает RTP-пакеты из `rtpUdp`, проверяет Sequence Number и Timestamp, извлекает 160 байт полезной нагрузки, декодирует G.711 в PCM и передает на воспроизведение в `AndroidAudio`.
+#### [`Audio.java` & `AndroidAudio.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/media/AndroidAudio.java)
+- `boolean start()`, `int read(...)`, `void write(...)`, `void stop()`, `void setSpeaker(...)`, `void setMute(...)`, `boolean isMuted()`: Управление аудиозаписью и воспроизведением через `AudioRecord` и `AudioTrack` с эхоподавлением.
 
-#### [`AndroidAudio.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/media/AndroidAudio.java)
-- Управляет классами Android `AudioRecord` и `AudioTrack`.
-- Инициализирует аппаратные эффекты: `AcousticEchoCanceler` (эхоподавление) и `NoiseSuppressor` (шумоподавление).
-- Метод `spk(boolean)` управляет переключением громкой связи через `AudioManager.setSpeakerphoneOn()` и режим `AudioManager.MODE_IN_COMMUNICATION`.
+#### [`G711.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/media/G711.java)
+- `static byte encode(int pt, short pcm)`, `static short decode(int pt, byte b)`: Кодирование и декодирование G.711 A-law / u-law.
+
+#### [`Media.java` & `MediaImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/media/MediaImpl.java)
+- `static Media create(...)`, `int open()`, `boolean start(...)`, `void stop()`, `void setSpeaker(...)`, `void setMute(...)`, `boolean isMuted()`, `void onPacket(...)`: Управление потоками RTP-захвата (`rtp-capture`) и воспроизведения (`rtp-playback`).
 
 ---
 
-### 2.4 Пакет `ru.minisip.vpn` (IKEv2 / IPsec VPN)
+### 2.4 Пакет `ru.minisip.net` (Сеть и UDP)
 
-#### [`TunService.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/TunService.java)
-- Является подклассом `android.net.VpnService`.
-- Формирует виртуальный сетевой интерфейс `tun0` через `VpnService.Builder`: задает локальный IP-адрес, маску сети, MTU (1400) и добавляет разрешенные пакеты приложений через `addAllowedApplication()`.
-- Вычитывает необработанные IP-пакеты из `ParcelFileDescriptor` TUN-интерфейса и передает их в `Tunnel.java`.
+#### [`Binder.java` & `AndroidBinder.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/net/AndroidBinder.java)
+- `boolean bind(DatagramSocket s, String iface)`: Привязка сокета к сетевому интерфейсу через `Network.bindSocket()`.
 
-#### [`Ike.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/Ike.java) & [`Tunnel.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/Tunnel.java)
-Полная реализация стека IKEv2 (RFC 7296) и IPsec ESP (RFC 4303) в пользовательском пространстве:
-1. **IKE_SA_INIT**: Обмен Diffie-Hellman публичными ключами (`DhGroup.java`), генерация nonce, вычисление мастер-ключа `SKEYSEED` и ключей шифрования `SK_e`, `SK_a`.
-2. **IKE_AUTH**: Передача зашифрованной полезной нагрузки с данными аутентификации EAP MS-CHAPv2 (`Mschap.java`) или сертификатов X.509 (`Certs.java`), согласование селекторов трафика `TSi`/`TSr` и создание `CHILD_SA`.
-3. **ESP Обработка (`Esp.java`)**: Качественное шифрование/расшифрование данных по алгоритмам AES-CBC / AES-GCM и проверка целостности HMAC-SHA1/SHA256.
-
-#### [`NetWatch.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/NetWatch.java)
-- Регулярно отправляет ICMP/HTTP эхо-запросы через виртуальный интерфейс.
-- При потере пакетов инициирует процедуры MOBIKE или IKE Rekey.
+#### [`Udp.java` & `UdpImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/net/UdpImpl.java)
+- `static Udp create(...)`, `int open(...)`, `boolean send(...)`, `String localIp(...)`, `void bind(...)`, `void close()`, `String error()`: Управление асинхронным UDP-сокетом и демоном приёма пакетов (`udp-rx`).
 
 ---
 
 ### 2.5 Пакет `ru.minisip.screen` (Управление экраном)
 
-#### [`ScreenImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/screen/ScreenImpl.java)
-- Использует `PROXIMITY_SCREEN_OFF_WAKE_LOCK` для автоматического гашения экрана, когда смартфон приложен к уху.
-- Использует `PARTIAL_WAKE_LOCK` (`cpuLock`) для предотвращения засыпания ЦП во время вызова.
-- Использует `SCREEN_BRIGHT_WAKE_LOCK | ACQUIRE_CAUSES_WAKEUP` для принудительного включения экрана при поступившем или принятом вызове.
+#### [`Screen.java` & `ScreenImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/screen/ScreenImpl.java)
+- `static Screen create(...)`, `void start()`, `void stop()`: Управление датчиком приближения и WakeLock блокировками.
 
 ---
 
-### 2.6 Пакеты `ru.minisip.update` и `ru.minisip.log`
+### 2.6 Пакет `ru.minisip.sip` (Сигнализация SIP/SDP)
 
-#### [`UpdateImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/update/UpdateImpl.java)
-- Выполняет HTTP-запросы к GitHub Releases API (`Http.java`).
-- Сравнивает время релиза `published_at` с системным `lastUpdateTime` установленного приложения.
-- При запуске удаляет старые файлы APK из кэша (`cleanUpdates`).
-- Проверяет разрешение `pm.canRequestPackageInstalls()`. При отсутствии вызывает `Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES`, после чего запускает установщик через `FileProvider` (`content://${applicationId}.fileprovider`).
+#### [`Digest.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/sip/Digest.java)
+- `static String answer(...)`: Вычисление HTTP Digest MD5 авторизации.
 
-#### [`LogBufferImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/log/LogBufferImpl.java)
-- Потокобезопасный кольцевой буфер фиксированного размера (500 записей) с поддержкой listeners, форматирования временных меток и сохранения в `SharedPreferences`.
+#### [`Msg.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/sip/Msg.java)
+- `static Msg parse(...)`, `static String param(...)`, `static String uri(...)`, `static String user(...)`, `static String eventName(...)`, `int status()`, `String reason()`, `String method()`, `String get(...)`, `List<String> all(...)`, `int cseq()`, `String key()`: Разбор и генерация SIP-сообщений.
+
+#### [`Sdp.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/sip/Sdp.java)
+- `static String make(...)`, `static String[] parse(...)`: Формирование и разбор SDP для G.711.
+
+#### [`Sip.java` & `SipImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/sip/SipImpl.java)
+- `static Sip create(...)`, `void setListener(...)`, `void setLogSink(...)`, `void register(...)`, `void unregister()`, `void call(...)`, `void transfer(...)`, `void hangup()`: SIP-клиент (UAC) на выделенном потоке `"sip"` с конечным автоматом состояний.
 
 ---
 
-## 3. Системные требования и спецификации RFC
+### 2.7 Пакет `ru.minisip.update` (Автообновление)
+
+#### [`Http.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/update/Http.java)
+- `static String get(...)`, `static void download(...)`: HTTP GET запросы и скачивание файлов.
+
+#### [`Timestamps.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/update/Timestamps.java)
+- `static long parseIso8601(...)`: Парсинг ISO 8601 дат в миллисекунды UTC.
+
+#### [`Update.java` & `UpdateImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/update/UpdateImpl.java)
+- `static Update create(...)`, `void setChannel(...)`, `String channel()`, `void setListener(...)`, `void check(...)`, `void download(...)`, `void install()`, `void setLogSink(...)`: Проверка GitHub Releases, фоновое скачивание APK и установка через `FileProvider`.
+
+---
+
+### 2.8 Пакет `ru.minisip.vpn` (IKEv2 / IPsec VPN)
+
+#### [`Tun.java` & `AndroidTun.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/AndroidTun.java)
+- Создание и управление виртуальным TUN-интерфейсом через `VpnService.Builder`.
+
+#### [`Certs.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/Certs.java)
+- Парсинг X.509 сертификатов, проверка PKIX цепочек доверия, SAN имён и подписей AUTH.
+
+#### [`Crypto.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/Crypto.java)
+- Криптографические примитивы IPsec/IKEv2: DH Group 14, AES-CBC, AES-GCM-16, HMAC-SHA1/SHA256, PRF и шифрование `Crypto.Box`.
+
+#### [`Esp.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/Esp.java)
+- Упаковка и распаковка пакетов IPsec ESP (RFC 4303) с антиреплей окном.
+
+#### [`Ike.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/Ike.java)
+- Полная реализация IKEv2 (RFC 7296): IKE_SA_INIT, аутентификация PSK и EAP-MSCHAPv2, MOBIKE и DPD.
+
+#### [`Tunnel.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/Tunnel.java)
+- Активный VPN-сеанс и рабочие потоки мониторинга связи, keepalive и авто-реконнекта.
+
+#### [`VpnImpl.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/vpn/VpnImpl.java)
+- Оркестратор VPN с поддержкой разрешений, WakeLock, подписок на сеть и восстановления соединения.
+
+---
+
+## 3. Поддерживаемые стандарты RFC и требования к среде
 
 ### 3.1 Поддерживаемые стандарты RFC
 - **SIP**: RFC 3261 (Core SIP), RFC 3515 (SIP REFER), RFC 4566 (SDP), RFC 7616 / 2617 (HTTP Digest Auth).
 - **Media**: RFC 3550 (RTP), ITU-T G.711 (PCMA/PCMU).
-- **VPN / IPsec**: RFC 7296 (IKEv2), RFC 4303 (ESP), RFC 2759 (MS-CHAPv2).
+- **VPN / IPsec**: RFC 7296 (IKEv2), RFC 4303 (ESP), RFC 2759 (MS-CHAPv2), RFC 4555 (MOBIKE).
 
 ### 3.2 Требования к среде исполнения
 - **Android SDK**: Min SDK 24 (Android 7.0), Target SDK 34 (Android 14).

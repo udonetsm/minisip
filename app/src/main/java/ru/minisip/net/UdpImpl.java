@@ -12,7 +12,7 @@ final class UdpImpl implements Udp {
     private final Binder binder;
     private volatile String err = "";
     private DatagramSocket sock;
-    private volatile String iface;     // null — основной стек системы
+    private volatile String iface;     // null for system default network stack
 
     UdpImpl(Binder binder) {
         this.binder = binder;
@@ -30,7 +30,7 @@ final class UdpImpl implements Udp {
     }
 
     /**
-     * Привязывает свежий сокет к выбранному интерфейсу; без привязки всегда true.
+     * Binds freshly created socket to selected network interface if configured.
      */
     private boolean attach(DatagramSocket s) {
         String f = iface;
@@ -55,7 +55,7 @@ final class UdpImpl implements Udp {
             err = "socket: " + e;
             return -1;
         }
-        if (!attach(s)) {          // туннеля нет — молча уходить мимо него нельзя
+        if (!attach(s)) {          // interface missing: abort without leaking outside tunnel
             s.close();
             return -1;
         }
@@ -71,7 +71,7 @@ final class UdpImpl implements Udp {
                 } catch (IOException e) {
                     if (s.isClosed()) break;
                 } catch (RuntimeException e) {
-                    // ошибка в обработчике не должна убивать приём
+                    // handler errors must not terminate receiver loop
                 }
             }
         }, "udp-rx");

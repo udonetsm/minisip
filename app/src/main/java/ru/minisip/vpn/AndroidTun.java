@@ -18,7 +18,7 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
- * Tun на Android: VpnService.Builder.establish() даёт дескриптор интерфейса.
+ * Android VpnService TUN interface provider.
  */
 final class AndroidTun implements Tun {
     private final TunService svc;
@@ -44,10 +44,9 @@ final class AndroidTun implements Tun {
                     .setMtu(mtu)
                     .setBlocking(true)
                     .addAddress(ip, 32)
-                    // IPv6 в туннель не умеет: заворачиваем его в «чёрную дыру» (tx его выбрасывает),
-                    // чтобы выбранные приложения не утекали мимо VPN по IPv6, а откатывались на IPv4
+                    // Blackhole IPv6 to force IPv4 fallback
                     .addRoute("::", 0);
-            // в туннель идёт трафик только нашего приложения и выбранных, остальная система не затронута
+            // Route traffic only for this app and selected split tunneling apps
             Set<String> pkgs = new LinkedHashSet<>();
             pkgs.add(svc.getPackageName());
             for (String p : apps.split("[\\s,]+")) if (!p.isEmpty()) pkgs.add(p);
@@ -55,7 +54,7 @@ final class AndroidTun implements Tun {
                 try {
                     b.addAllowedApplication(p);
                 } catch (PackageManager.NameNotFoundException e) {
-                    // приложение удалили после выбора: пропускаем
+                    // App uninstalled after selection: ignore
                 }
             }
             for (String r : routes.split(" ")) {
@@ -66,10 +65,9 @@ final class AndroidTun implements Tun {
             for (String d : dns.split(" ")) {
                 if (!d.isEmpty()) b.addDnsServer(d);
             }
-            ParcelFileDescriptor f = b.establish();     // заодно вытесняет любой другой действующий VPN
+            ParcelFileDescriptor f = b.establish();     // replaces active VPN
             if (f == null) {
-                // Система временно не даёт VPN (например, только что отозвала разрешение или
-                // активировалось другое VPN). Это сетевая, а не фатальная причина: пробуем снова.
+                // System temporarily refused VPN permission: retry as transient network error.
                 transientFail = true;
                 return null;
             }
@@ -87,9 +85,7 @@ final class AndroidTun implements Tun {
     }
 
     /**
-     * Имя интерфейса именно нашей VPN-сети. Система регистрирует её через долю секунды после
-     * establish(), поэтому ждём до ~3 секунд. Выбираем только сеть, у которой IP-адрес
-     * совпадает с ip нашей сессии.
+     * Resolves network interface name matching assigned VPN IP address.
      */
     private String ifaceName(String ip) {
         ConnectivityManager cm = (ConnectivityManager) svc.getSystemService(Context.CONNECTIVITY_SERVICE);
@@ -116,11 +112,7 @@ final class AndroidTun implements Tun {
     }
 
     /**
-     * Вытеснение другим VPN-приложением.
-     * В многопрофильной среде Android (личный/рабочий профиль) ConnectivityManager.getAllNetworks()
-     * видимы сети всех профилей устройства, а getOwnerUid() недоступен сторонним приложениям.
-     * Вытеснение в нашем профиле отслеживается штатно системой через TunService.onRevoke().
-     * Сети других профилей полностью игнорируются и не приводят к сбросу VPN.
+     * Checks if another active VPN hijacked the tunnel in current user profile.
      */
     @Override
     public boolean otherVpn(String ip) {

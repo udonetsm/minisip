@@ -108,14 +108,14 @@ final class Certs {
         try {
             leaf.checkValidity();
             Set<TrustAnchor> roots = anchors(own);
-            boolean pinned = false;                       // сам сервер указан как доверенный
+            boolean pinned = false;                       // server leaf itself pinned as trusted anchor
             List<X509Certificate> path = new ArrayList<>();
             for (X509Certificate c : order(chain)) {
                 boolean root = false;
                 for (TrustAnchor t : roots) root |= c.equals(t.getTrustedCert());
                 if (root) {
                     pinned |= c.equals(leaf);
-                    break;                                // дальше цепочку ведёт сам корень
+                    break;                                // root anchor found: path building completes
                 }
                 path.add(c);
             }
@@ -131,7 +131,7 @@ final class Certs {
         return matches(leaf, host) ? null : "server certificate does not match " + host;
     }
 
-    // ---------- подпись AUTH ----------
+    // ---------- AUTH Signature Verification ----------
 
     /**
      * Имя хоста должно быть в SAN (DNS или IP); поддерживается «*.» в первой метке.
