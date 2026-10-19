@@ -1,0 +1,13 @@
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -674,8 +674,8 @@
+                 row.addView(use);
+ 
+                 TextView del = new TextView(ctx);
+-                del.setText("❌");
+-                del.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
++                del.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_close, 0, 0, 0);
++                del.setContentDescription("Delete refer");
+                 del.setIncludeFontPadding(false);
+                 del.setGravity(Gravity.CENTER);
+                 del.setPadding(dp(8), dp(8), dp(8), dp(8));

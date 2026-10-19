@@ -1,0 +1,13 @@
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -1071,8 +1071,8 @@
+             footer.addView(footerSpacer, new LinearLayout.LayoutParams(0, 0, 1f));
+ 
+             TextView save = new TextView(ctx);
+-            save.setText("\uD83D\uDCE5");
+-            save.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
++            save.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_save, 0, 0, 0);
++            save.setContentDescription("Save log");
+             save.setPadding(cp, dp(2), cp, dp(2));
+             save.setClickable(true);
+             save.setFocusable(true);

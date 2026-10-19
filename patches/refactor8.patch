@@ -1,0 +1,19 @@
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -466,13 +466,12 @@
+         col.addView(updateLog.panel, row(dp(8)));
+ 
+         // Кнопка удаления страницы
+-        String delText = "Delete Page 🗑";
+-        deleteBtn = button(col, delText, true, v -> confirmDeletePage());
+-        SpannableString delSpan = new SpannableString(delText);
+-        int delIdx = delText.indexOf("🗑");
+-        delSpan.setSpan(new RelativeSizeSpan(1.3f), delIdx, delIdx + Character.charCount(delText.codePointAt(delIdx)), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+-        deleteBtn.setText(delSpan);
++        deleteBtn = button(col, "Delete Page", true, v -> confirmDeletePage());
++        deleteBtn.setIconResource(R.drawable.ic_delete);
++        deleteBtn.setIconGravity(MaterialButton.ICON_GRAVITY_TEXT_START);
++        deleteBtn.setContentDescription("Delete page");
+         deleteBtn.setBackgroundColor(0xFFD32F2F);
+         deleteBtn.setTextColor(0xFFFFFFFF);
+         deleteBtn.setVisibility(View.GONE);

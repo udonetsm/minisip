@@ -1,0 +1,22 @@
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -355,7 +355,20 @@
+         saveHistoryBtn.setPadding(fcp, dp(2), fcp, dp(2));
+         saveHistoryBtn.setClickable(true);
+         saveHistoryBtn.setFocusable(true);
+-        saveHistoryBtn.setOnClickListener(v -> saveLogText("calls", app.callLog().text()));
++        saveHistoryBtn.setOnClickListener(v -> {
++            new MaterialAlertDialogBuilder(ctx)
++                    .setTitle("Save call history")
++                    .setItems(new String[]{"Copy to clipboard", "Save to file"}, (d, which) -> {
++                        if (which == 0) {
++                            ClipboardManager cm = (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
++                            if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("call log", app.callLog().text()));
++                        } else {
++                            saveLogText("calls", app.callLog().text());
++                        }
++                    })
++                    .setNegativeButton("Cancel", null)
++                    .show();
++        });
+         callHistoryFooter.addView(saveHistoryBtn);

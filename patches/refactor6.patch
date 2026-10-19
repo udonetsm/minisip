@@ -1,0 +1,13 @@
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -642,8 +642,8 @@
+                 row.addView(name);
+ 
+                 TextView use = new TextView(ctx);
+-                use.setText("\u21AA\uFE0F");
+-                use.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
++                use.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_transfer, 0, 0, 0);
++                use.setContentDescription("Transfer call");
+                 use.setIncludeFontPadding(false);
+                 use.setGravity(Gravity.CENTER);
+                 use.setPadding(dp(8), dp(8), dp(8), dp(8));

@@ -1,0 +1,15 @@
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -354,11 +354,11 @@
+         View footerSpacer = new View(ctx);
+         callHistoryFooter.addView(footerSpacer, new LinearLayout.LayoutParams(0, 0, 1f));
+         TextView saveHistoryBtn = new TextView(ctx);
+-        saveHistoryBtn.setText("\uD83D\uDCE5");
+-        saveHistoryBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
++        saveHistoryBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_save, 0, 0, 0);
++        saveHistoryBtn.setContentDescription("Save call history");
+         saveHistoryBtn.setPadding(fcp, dp(2), fcp, dp(2));
+         saveHistoryBtn.setClickable(true);
+         saveHistoryBtn.setFocusable(true);
+         saveHistoryBtn.setOnClickListener(v -> saveLogText("calls", app.callLog().text()));
+         callHistoryFooter.addView(saveHistoryBtn);

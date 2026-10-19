@@ -1,0 +1,24 @@
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -1060,17 +1060,17 @@
+             footer.setGravity(Gravity.CENTER_VERTICAL);
+ 
+             TextView up = new TextView(ctx);
+-            up.setText("\u25B2");
+-            up.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
++            up.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_expand_less, 0, 0, 0);
++            up.setContentDescription("Scroll to top");
+             up.setPadding(cp, dp(2), cp, dp(2));
+             up.setClickable(true);
+             up.setFocusable(true);
+             up.setOnClickListener(v -> scrollToTop());
+             footer.addView(up);
+ 
+             TextView down = new TextView(ctx);
+-            down.setText("\u25BC");
+-            down.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
++            down.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_expand_more, 0, 0, 0);
++            down.setContentDescription("Scroll to bottom");
+             down.setPadding(cp, dp(2), cp, dp(2));
+             down.setClickable(true);
+             down.setFocusable(true);

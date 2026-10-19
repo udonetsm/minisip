@@ -1,0 +1,9 @@
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -472,6 +472,7 @@
+         deleteBtn.setIconResource(R.drawable.ic_delete);
+         deleteBtn.setIconGravity(MaterialButton.ICON_GRAVITY_TEXT_START);
+         deleteBtn.setContentDescription("Delete page");
++        deleteBtn.setIconTint(ColorStateList.valueOf(0xFFFFFFFF));
+         deleteBtn.setBackgroundColor(0xFFD32F2F);
+         deleteBtn.setTextColor(0xFFFFFFFF);

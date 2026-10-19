@@ -1,5 +1,4 @@
 package ru.minisip.app;
-
 import android.Manifest;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -54,6 +53,7 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
 import com.google.android.material.color.MaterialColors;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.shape.ShapeAppearanceModel;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
 
@@ -65,6 +65,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import ru.minisip.R;
 import ru.minisip.log.LogFile;
 import ru.minisip.update.Update;
 
@@ -131,11 +132,13 @@ public final class SettingsFragment extends Fragment {
     /**
      * Отложенный показ диалога канала: срабатывает через 2 с удержания на строке версии.
      */
+    private final Runnable clearNumberRunnable = () -> {
+        if (number != null) number.setText("");
+    };
     private final Runnable channelDialogRunnable = () -> {
         if (isAdded()) showChannelDialog();
     };
-    /**
-     * Отложенное сохранение на Android ≤ 9, пока пользователь не выдаст разрешение.
+    /*Отложенное сохранение на Android ≤ 9, пока пользователь не выдаст разрешение.
      */
     private Runnable pendingSave;
     /**
@@ -167,6 +170,75 @@ public final class SettingsFragment extends Fragment {
         return new ColorStateList(
                 new int[][]{{android.R.attr.state_enabled}, {}},
                 new int[]{enabled, disabled});
+    }
+
+    private void applyToggleLook(MaterialButton b, boolean active, int iconRes) {
+    b.setIconResource(iconRes);
+    if (active) {
+        b.setShapeAppearanceModel(new ShapeAppearanceModel.Builder()
+                .setAllCornerSizes(dp(12)).build());
+        b.setBackgroundTintList(ColorStateList.valueOf(
+                MaterialColors.getColor(b, com.google.android.material.R.attr.colorPrimaryContainer)));
+        b.setIconTint(ColorStateList.valueOf(
+                MaterialColors.getColor(b, com.google.android.material.R.attr.colorOnPrimaryContainer)));
+        b.setStrokeWidth(0);
+    } else {
+        b.setShapeAppearanceModel(new ShapeAppearanceModel.Builder()
+                .setAllCornerSizes(ShapeAppearanceModel.PILL).build());
+        b.setBackgroundTintList(ColorStateList.valueOf(android.graphics.Color.TRANSPARENT));
+        b.setIconTint(ColorStateList.valueOf(
+                MaterialColors.getColor(b, com.google.android.material.R.attr.colorOnSurfaceVariant)));
+        b.setStrokeColor(ColorStateList.valueOf(
+                MaterialColors.getColor(b, com.google.android.material.R.attr.colorOutline)));
+        b.setStrokeWidth(dp(1));
+    }
+}
+
+    /**
+     * Динамик: по умолчанию — серая круглая кнопка с иконкой динамика (звук в трубке),
+     * при включении — скруглённый квадрат в акцентном цвете (звук на громкую).
+     */
+    private void applySpkLook(MaterialButton b, boolean on, int iconRes) {
+        b.setIconResource(iconRes);
+        if (on) {
+            b.setShapeAppearanceModel(new ShapeAppearanceModel.Builder()
+                    .setAllCornerSizes(dp(12)).build());
+            b.setBackgroundTintList(ColorStateList.valueOf(
+                    MaterialColors.getColor(b, com.google.android.material.R.attr.colorPrimaryContainer)));
+            b.setIconTint(ColorStateList.valueOf(
+                    MaterialColors.getColor(b, com.google.android.material.R.attr.colorOnPrimaryContainer)));
+            b.setStrokeWidth(0);
+        } else {
+            b.setShapeAppearanceModel(new ShapeAppearanceModel.Builder()
+                    .setAllCornerSizes(ShapeAppearanceModel.PILL).build());
+            b.setBackgroundTintList(ColorStateList.valueOf(android.graphics.Color.TRANSPARENT));
+            b.setIconTint(ColorStateList.valueOf(
+                    MaterialColors.getColor(b, com.google.android.material.R.attr.colorOnSurfaceVariant)));
+            b.setStrokeColor(ColorStateList.valueOf(
+                    MaterialColors.getColor(b, com.google.android.material.R.attr.colorOutline)));
+            b.setStrokeWidth(dp(1));
+        }
+    }
+
+    /**
+     * Подбирает размер шрифта номера так, чтобы весь номер помещался по ширине поля.
+     * Верхняя граница — 24sp (штатный размер), нижняя — 10sp.
+     */
+    private void fitNumberText() {
+        if (number == null) return;
+        int avail = number.getWidth() - number.getPaddingLeft() - number.getPaddingRight();
+        if (avail <= 0) return;
+        float density = getResources().getDisplayMetrics().scaledDensity;
+        float sp = 24f;
+        android.graphics.Paint p = number.getPaint();
+        float old = p.getTextSize();
+        while (sp > 10f) {
+            p.setTextSize(sp * density);
+            if (p.measureText(text(number)) <= avail) break;
+            sp -= 1f;
+        }
+        p.setTextSize(old);
+        number.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
     }
 
     private static void setFieldEnabled(TextInputEditText field, boolean enabled) {
@@ -221,11 +293,13 @@ public final class SettingsFragment extends Fragment {
         pass = field(sipSpoilerContainer, "Password", null, prefs.getString("pass", ""),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD, true);
 
-        sipAdvancedBtn = button(sipBlock.container, "SIP settings ▼", true, v -> {
+        sipAdvancedBtn = button(sipBlock.container, "SIP settings", true, v -> {
             boolean show = sipSpoilerContainer.getVisibility() == View.GONE;
             sipSpoilerContainer.setVisibility(show ? View.VISIBLE : View.GONE);
-            sipAdvancedBtn.setText(show ? "SIP settings ▲" : "SIP settings ▼");
+            sipAdvancedBtn.setIconResource(show ? R.drawable.ic_expand_less : R.drawable.ic_expand_more);
         });
+        sipAdvancedBtn.setIconResource(R.drawable.ic_expand_more);
+        sipAdvancedBtn.setIconGravity(MaterialButton.ICON_GRAVITY_TEXT_END);
 
         sipBlock.container.addView(sipSpoilerContainer);
 
@@ -239,69 +313,132 @@ public final class SettingsFragment extends Fragment {
 
         // --- Блок 2: Номер телефона и источник звука ---
         Block callBlock = createBlock(1);
-        simpleTitle(callBlock.container, "Number and voice source");
-        number = field(callBlock.container, "Number", null, "", InputType.TYPE_CLASS_PHONE, false);
-        number.setTextSize(TypedValue.COMPLEX_UNIT_SP, 35f);
-        number.setPadding(dp(16), dp(16), dp(16), dp(16));
-        if (number.getParent() instanceof TextInputLayout) {
-            ((TextInputLayout) number.getParent()).setHintTextAppearance(android.R.style.TextAppearance_Medium);
-        }
+        LinearLayout dialerTitleRow = new LinearLayout(ctx);
+        dialerTitleRow.setOrientation(LinearLayout.HORIZONTAL);
+        dialerTitleRow.setGravity(Gravity.CENTER_VERTICAL);
+        callBlock.container.addView(dialerTitleRow, row(0));
 
-        LinearLayout audioRow = new LinearLayout(ctx);
-        audioRow.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams arLp = new LinearLayout.LayoutParams(
+        TextView dialerTitle = new TextView(ctx);
+        dialerTitle.setText("Dialer");
+        dialerTitle.setTextAppearance(android.R.style.TextAppearance_Medium);
+        dialerTitleRow.addView(dialerTitle, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        muteBtn = new MaterialButton(ctx);
+        muteBtn.setText("");
+        muteBtn.setOnClickListener(v -> toggleMute());
+        muteBtn.setIconResource(R.drawable.ic_mic_off);
+        muteBtn.setIconGravity(MaterialButton.ICON_GRAVITY_TEXT_START);
+        muteBtn.setIconSize(dp(14));
+        muteBtn.setIconPadding(0);
+        muteBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
+        muteBtn.setPadding(dp(10), dp(6), dp(10), dp(6));
+        muteBtn.setMinimumWidth(0);
+        muteBtn.setMinimumHeight(0);
+        muteBtn.setShapeAppearanceModel(new ShapeAppearanceModel.Builder()
+                .setAllCornerSizes(ShapeAppearanceModel.PILL).build());
+        LinearLayout.LayoutParams muteLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        muteLp.rightMargin = dp(2);
+        dialerTitleRow.addView(muteBtn, muteLp);
+
+        spkBtn = new MaterialButton(ctx);
+        spkBtn.setText("");
+        spkBtn.setOnClickListener(v -> pickSpeaker(!prefs.getBoolean("speaker", false)));
+        spkBtn.setIconResource(R.drawable.ic_volume_up);
+        spkBtn.setIconGravity(MaterialButton.ICON_GRAVITY_TEXT_START);
+        spkBtn.setIconSize(dp(14));
+        spkBtn.setIconPadding(0);
+        spkBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
+        spkBtn.setPadding(dp(10), dp(6), dp(10), dp(6));
+        spkBtn.setMinimumWidth(0);
+        spkBtn.setMinimumHeight(0);
+        spkBtn.setShapeAppearanceModel(new ShapeAppearanceModel.Builder()
+                .setAllCornerSizes(ShapeAppearanceModel.PILL).build());
+        LinearLayout.LayoutParams spkLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        spkLp.leftMargin = dp(2);
+        dialerTitleRow.addView(spkBtn, spkLp);
+
+        LinearLayout dialRow = new LinearLayout(ctx);
+        dialRow.setOrientation(LinearLayout.HORIZONTAL);
+        dialRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams drLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        arLp.topMargin = dp(8);
-        callBlock.container.addView(audioRow, arLp);
+        drLp.topMargin = dp(8);
+        callBlock.container.addView(dialRow, drLp);
 
-        muteBtn = button(audioRow, "🤫", true, v -> toggleMute());
-        muteBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f);
-        muteBtn.setPadding(0, dp(12), 0, dp(12));
-        LinearLayout.LayoutParams muteLp = new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        muteLp.rightMargin = dp(4);
-        muteBtn.setLayoutParams(muteLp);
+        LinearLayout.LayoutParams numLp = new LinearLayout.LayoutParams(0, dp(72), 1f);
+        TextInputLayout numTil = new TextInputLayout(ctx);
+        numTil.setHintEnabled(false);
+        numTil.setBoxBackgroundMode(TextInputLayout.BOX_BACKGROUND_OUTLINE);
+        number = new TextInputEditText(numTil.getContext());
+        number.setHint("Number");
+        number.setInputType(InputType.TYPE_CLASS_PHONE);
+        number.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f);
+        number.setPadding(dp(10), dp(10), dp(10), dp(10));
+        number.setLongClickable(false);
+        number.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) {
+            }
 
-        spkBtn = button(audioRow, "📢", true, v -> pickSpeaker(!prefs.getBoolean("speaker", false)));
-        spkBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f);
-        spkBtn.setPadding(0, dp(12), 0, dp(12));
-        LinearLayout.LayoutParams spkLp = new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        spkLp.leftMargin = dp(4);
-        spkLp.rightMargin = dp(4);
-        spkBtn.setLayoutParams(spkLp);
+            @Override
+            public void onTextChanged(CharSequence s, int a, int b, int c) {
+            }
 
-        LinearLayout callRow = new LinearLayout(ctx);
-        callRow.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams crLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        crLp.topMargin = dp(8);
-        callBlock.container.addView(callRow, crLp);
+            @Override
+            public void afterTextChanged(Editable s) {
+                fitNumberText();
+            }
+        });
+        number.addOnLayoutChangeListener((v, l, t, r, bot, ol, ot, or, obot) -> {
+            if (r - l != or - ol) fitNumberText();
+        });
+	number.setOnTouchListener((v, ev) -> {
+            switch (ev.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    gestureHandler.postDelayed(clearNumberRunnable, 1000);
+                    break;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    gestureHandler.removeCallbacks(clearNumberRunnable);
+                    break;
+            }
+            return false;
+        });
+        numTil.addView(number, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        dialRow.addView(numTil, numLp);
 
-        View leftSpacer = new View(ctx);
-        callRow.addView(leftSpacer, new LinearLayout.LayoutParams(0, 0, 1f));
-
-        call = button(callRow, "📞", false, v -> {
+	call = button(dialRow, "", false, v -> {
             if (app.state != App.IDLE) {
                 app.hangup(page);
             } else {
                 doCall();
             }
         });
+        call.setIconResource(R.drawable.ic_call);
+        call.setIconGravity(MaterialButton.ICON_GRAVITY_TEXT_START);
+        call.setIconSize(dp(32));
+        call.setIconPadding(0);
         call.setTextSize(TypedValue.COMPLEX_UNIT_SP, 30f);
         call.setTypeface(null, Typeface.BOLD);
         call.setGravity(Gravity.CENTER);
-        call.setPadding(0, dp(16), 0, dp(16));
+        call.setPadding(0, 0, 0, 0);
         call.setBackgroundTintList(stateful(0xFF1976D2, 0x33808080));
-        call.setTextColor(stateful(0xFFFFFFFF, 0x99FFFFFF));
-        LinearLayout.LayoutParams callLp = new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 2f);
-        call.setLayoutParams(callLp);
-
-        View rightSpacer = new View(ctx);
-        callRow.addView(rightSpacer, new LinearLayout.LayoutParams(0, 0, 1f));
-
-        callHistoryScroll = new NestedScrollView(ctx);
+        call.setIconTint(stateful(0xFFFFFFFF, 0x99FFFFFF));
+        call.setShapeAppearanceModel(new ShapeAppearanceModel.Builder()
+                .setAllCornerSizes(ShapeAppearanceModel.PILL).build());
+        call.setMinimumWidth(0);
+        call.setMinimumHeight(0);
+        int callSize = dp(72);
+        LinearLayout.LayoutParams callLp = new LinearLayout.LayoutParams(callSize, callSize);
+        callLp.leftMargin = dp(8);
+        callLp.gravity = Gravity.CENTER_VERTICAL;
+        dialRow.removeView(call);
+        dialRow.addView(call, callLp);
+	callHistoryScroll = new NestedScrollView(ctx);
         callHistoryScroll.setVerticalScrollBarEnabled(true);
 	callHistoryScroll.setFillViewport(true);
 
@@ -325,8 +462,8 @@ public final class SettingsFragment extends Fragment {
         int fcp = dp(10);
 
         TextView callHistUp = new TextView(ctx);
-        callHistUp.setText("\u25B2");
-        callHistUp.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
+        callHistUp.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_expand_less, 0, 0, 0);
+        callHistUp.setContentDescription("Scroll to top");
         callHistUp.setPadding(fcp, dp(2), fcp, dp(2));
         callHistUp.setClickable(true);
         callHistUp.setFocusable(true);
@@ -334,8 +471,8 @@ public final class SettingsFragment extends Fragment {
         callHistoryFooter.addView(callHistUp);
 
         TextView callHistDown = new TextView(ctx);
-        callHistDown.setText("\u25BC");
-        callHistDown.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
+        callHistDown.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_expand_more, 0, 0, 0);
+        callHistDown.setContentDescription("Scroll to bottom");
         callHistDown.setPadding(fcp, dp(2), fcp, dp(2));
         callHistDown.setClickable(true);
         callHistDown.setFocusable(true);
@@ -345,17 +482,30 @@ public final class SettingsFragment extends Fragment {
         View footerSpacer = new View(ctx);
         callHistoryFooter.addView(footerSpacer, new LinearLayout.LayoutParams(0, 0, 1f));
         TextView saveHistoryBtn = new TextView(ctx);
-        saveHistoryBtn.setText("\uD83D\uDCE5");
-        saveHistoryBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
+        saveHistoryBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_save, 0, 0, 0);
+        saveHistoryBtn.setContentDescription("Save call history");
         saveHistoryBtn.setPadding(fcp, dp(2), fcp, dp(2));
         saveHistoryBtn.setClickable(true);
         saveHistoryBtn.setFocusable(true);
-        saveHistoryBtn.setOnClickListener(v -> saveLogText("calls", app.callLog().text()));
+        saveHistoryBtn.setOnClickListener(v -> {
+            new MaterialAlertDialogBuilder(ctx)
+                    .setTitle("Save call history")
+                    .setItems(new String[]{"Copy to clipboard", "Save to file"}, (d, which) -> {
+                        if (which == 0) {
+                            ClipboardManager cm = (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
+                            if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("call log", app.callLog().text()));
+                        } else {
+                            saveLogText("calls", app.callLog().text());
+                        }
+                    })
+                    .setNegativeButton("Cancel", null)
+                    .show();
+        });
         callHistoryFooter.addView(saveHistoryBtn);
 
         TextView clearHistoryBtn = new TextView(ctx);
-        clearHistoryBtn.setText("\uD83D\uDDD1\uFE0F");
-        clearHistoryBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
+        clearHistoryBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_delete, 0, 0, 0);
+        clearHistoryBtn.setContentDescription("Clear call history");
         clearHistoryBtn.setPadding(fcp, dp(2), fcp, dp(2));
         clearHistoryBtn.setClickable(true);
         clearHistoryBtn.setFocusable(true);
@@ -371,11 +521,7 @@ public final class SettingsFragment extends Fragment {
 
         LinearLayout callHistoryBand = new LinearLayout(ctx);
         callHistoryBand.setOrientation(LinearLayout.HORIZONTAL);
-        View chLeft = new View(ctx);
-        callHistoryBand.addView(chLeft, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.085f));
-        callHistoryBand.addView(callHistoryWrapper, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.83f));
-        View chRight = new View(ctx);
-        callHistoryBand.addView(chRight, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.085f));
+        callHistoryBand.addView(callHistoryWrapper, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         LinearLayout.LayoutParams chwLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -418,19 +564,23 @@ public final class SettingsFragment extends Fragment {
 
         vpnAppsBtn = button(vpnMainSpoilerContainer, "Apps using VPN", true, v -> pickApps());
 
-        vpnAdvancedBtn = button(vpnMainSpoilerContainer, "Advanced VPN settings ▼", true, v -> {
+        vpnAdvancedBtn = button(vpnMainSpoilerContainer, "Advanced VPN settings", true, v -> {
             boolean show = vpnAdvancedSpoilerContainer.getVisibility() == View.GONE;
             vpnAdvancedSpoilerContainer.setVisibility(show ? View.VISIBLE : View.GONE);
-            vpnAdvancedBtn.setText(show ? "Advanced VPN settings ▲" : "Advanced VPN settings ▼");
+            vpnAdvancedBtn.setIconResource(show ? R.drawable.ic_expand_less : R.drawable.ic_expand_more);
         });
+        vpnAdvancedBtn.setIconResource(R.drawable.ic_expand_more);
+        vpnAdvancedBtn.setIconGravity(MaterialButton.ICON_GRAVITY_TEXT_END);
 
         vpnMainSpoilerContainer.addView(vpnAdvancedSpoilerContainer);
 
-        vpnMainBtn = button(vpnBlock.container, "VPN settings ▼", true, v -> {
+        vpnMainBtn = button(vpnBlock.container, "VPN settings", true, v -> {
             boolean show = vpnMainSpoilerContainer.getVisibility() == View.GONE;
             vpnMainSpoilerContainer.setVisibility(show ? View.VISIBLE : View.GONE);
-            vpnMainBtn.setText(show ? "VPN settings ▲" : "VPN settings ▼");
+            vpnMainBtn.setIconResource(show ? R.drawable.ic_expand_less : R.drawable.ic_expand_more);
         });
+        vpnMainBtn.setIconResource(R.drawable.ic_expand_more);
+        vpnMainBtn.setIconGravity(MaterialButton.ICON_GRAVITY_TEXT_END);
 
         vpnBlock.container.addView(vpnMainSpoilerContainer);
 
@@ -470,9 +620,7 @@ public final class SettingsFragment extends Fragment {
         }
 
         // Строка версии: под всеми блоками. Долгое удержание 2 с — диалог канала обновлений.
-        LinearLayout verRow = new LinearLayout(ctx);
-        verRow.setOrientation(LinearLayout.HORIZONTAL);
-        verRow.setGravity(Gravity.CENTER_VERTICAL);
+        FrameLayout verRow = new FrameLayout(ctx);
         versionLabel = new TextView(ctx);
         versionLabel.setText("v" + appVersion());
         versionLabel.setTextAppearance(android.R.style.TextAppearance_Small);
@@ -497,37 +645,36 @@ public final class SettingsFragment extends Fragment {
             }
             return false;
         });
-        verRow.addView(versionLabel, new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        TextView moreVer = new TextView(ctx);
-        moreVer.setText("\u22EE");
-        moreVer.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
-        moreVer.setPadding(dp(10), 0, dp(10), 0);
-        moreVer.setClickable(true);
-        moreVer.setFocusable(true);
-        verRow.addView(moreVer);
-        col.addView(verRow, row(dp(8)));
+        FrameLayout.LayoutParams vlp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        vlp.gravity = Gravity.CENTER;
+        verRow.addView(versionLabel, vlp);
 
         updateLog = new LogArea(ctx);
-        moreVer.setOnClickListener(v -> {
-            PopupMenu pm = new PopupMenu(ctx, v);
-            pm.getMenu().add("Log");
-            pm.setOnMenuItemClickListener(item -> {
-                boolean show = updateLog.panel.getVisibility() == View.GONE;
-                updateLog.panel.setVisibility(show ? View.VISIBLE : View.GONE);
-                return true;
-            });
-            pm.show();
-        });
+        LinearLayout logGroup = new LinearLayout(ctx);
+        logGroup.setOrientation(LinearLayout.HORIZONTAL);
+        logGroup.setGravity(Gravity.CENTER_VERTICAL);
+        TextView logLabel = new TextView(ctx);
+        logLabel.setText("Log");
+        logLabel.setTextAppearance(android.R.style.TextAppearance_Small);
+        logLabel.setPadding(dp(6), 0, dp(6), 0);
+        logGroup.addView(logLabel);
+        logGroup.addView(updateLog.toggle);
+        FrameLayout.LayoutParams llp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        llp.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
+        verRow.addView(logGroup, llp);
+
+        col.addView(verRow, row(dp(8)));
+
         col.addView(updateLog.panel, row(dp(8)));
 
         // Кнопка удаления страницы
-        String delText = "Delete Page 🗑";
-        deleteBtn = button(col, delText, true, v -> confirmDeletePage());
-        SpannableString delSpan = new SpannableString(delText);
-        int delIdx = delText.indexOf("🗑");
-        delSpan.setSpan(new RelativeSizeSpan(1.3f), delIdx, delIdx + Character.charCount(delText.codePointAt(delIdx)), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        deleteBtn.setText(delSpan);
+        deleteBtn = button(col, "Delete Page", true, v -> confirmDeletePage());
+        deleteBtn.setIconResource(R.drawable.ic_delete);
+        deleteBtn.setIconGravity(MaterialButton.ICON_GRAVITY_TEXT_START);
+        deleteBtn.setContentDescription("Delete page");
+        deleteBtn.setIconTint(ColorStateList.valueOf(0xFFFFFFFF));
         deleteBtn.setBackgroundColor(0xFFD32F2F);
         deleteBtn.setTextColor(0xFFFFFFFF);
         deleteBtn.setVisibility(View.GONE);
@@ -609,7 +756,8 @@ public final class SettingsFragment extends Fragment {
         vpnMainSpoilerContainer = vpnAdvancedSpoilerContainer = sipSpoilerContainer = null;
         versionLabel = null;
         updateLog = null;
-        gestureHandler.removeCallbacks(channelDialogRunnable);
+        gestureHandler.removeCallbacks(clearNumberRunnable);
+	gestureHandler.removeCallbacks(channelDialogRunnable);
     }
 
     @Override
@@ -963,8 +1111,8 @@ public final class SettingsFragment extends Fragment {
                 row.addView(name);
 
                 TextView use = new TextView(ctx);
-                use.setText("\u21AA\uFE0F");
-                use.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
+                use.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_transfer, 0, 0, 0);
+                use.setContentDescription("Transfer call");
                 use.setIncludeFontPadding(false);
                 use.setGravity(Gravity.CENTER);
                 use.setPadding(dp(8), dp(8), dp(8), dp(8));
@@ -997,8 +1145,8 @@ public final class SettingsFragment extends Fragment {
                 row.addView(use);
 
                 TextView del = new TextView(ctx);
-                del.setText("❌");
-                del.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
+                del.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_close, 0, 0, 0);
+                del.setContentDescription("Delete refer");
                 del.setIncludeFontPadding(false);
                 del.setGravity(Gravity.CENTER);
                 del.setPadding(dp(8), dp(8), dp(8), dp(8));
@@ -1105,35 +1253,29 @@ public final class SettingsFragment extends Fragment {
         status.setText(mine ? app.status : other ? busy : "Disconnected");
         vpnStatus.setText(mine ? app.vpnStatus : other ? busy : "VPN: disconnected");
         call.setEnabled(!other && (inCall || reg));
+
         if (inCall) {
-            call.setText("🚫");
+            call.setIconResource(R.drawable.ic_call_end);
             call.setBackgroundTintList(stateful(0xB3D32F2F, 0x33808080));
             call.setStrokeColor(stateful(0xB3D32F2F, 0x33808080));
             call.setStrokeWidth(dp(1));
-            call.setTextColor(stateful(0xFFFFFFFF, 0x99FFFFFF));
+            call.setIconTint(stateful(0xFFFFFFFF, 0x99FFFFFF));
         } else {
-            call.setText("📞");
+            call.setIconResource(R.drawable.ic_call);
             call.setBackgroundTintList(stateful(0xFF1976D2, 0x33808080));
             call.setStrokeWidth(0);
-            call.setTextColor(stateful(0xFFFFFFFF, 0x99FFFFFF));
+            call.setIconTint(stateful(0xFFFFFFFF, 0x99FFFFFF));
         }
+
         muteBtn.setEnabled(!other);
         boolean muted = prefs.getBoolean("muted", false);
-        String muteEmoji = muted ? "👄" : "🤫";
-        SpannableString muteSpan = new SpannableString(muteEmoji);
-        muteSpan.setSpan(new RelativeSizeSpan(1.3f), 0, muteEmoji.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        muteBtn.setText(muteSpan);
-        muteBtn.setStrokeColor(muted ? stateful(0xFFD32F2F, 0x33808080) : ColorStateList.valueOf(0x33808080));
-        muteBtn.setStrokeWidth(muted ? dp(3) : dp(1));
+        applyToggleLook(muteBtn, muted, muted ? R.drawable.ic_mic_off : R.drawable.ic_mic);
 
         spkBtn.setEnabled(!other);
         boolean spk = prefs.getBoolean("speaker", false);
-        String spkEmoji = spk ? "👂" : "📢";
-        SpannableString spkSpan = new SpannableString(spkEmoji);
-        spkSpan.setSpan(new RelativeSizeSpan(1.3f), 0, spkEmoji.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        spkBtn.setText(spkSpan);
+        applySpkLook(spkBtn, spk, R.drawable.ic_volume_up);
 
-        connect.setEnabled(!other && idle && !reg && !conn);
+	connect.setEnabled(!other && idle && !reg && !conn);
         disconnect.setEnabled(reg || conn);
         // VPN: подключить можно только когда он не поднят и нет вызова; отключить — когда поднят или поднимается
         String saved = prefs.getString("vpnApps", "").trim();
@@ -1321,6 +1463,8 @@ public final class SettingsFragment extends Fragment {
 
     private LogArea title(LinearLayout parent, String text, int top) {
         Context ctx = parent.getContext();
+        LogArea area = new LogArea(ctx);
+
         LinearLayout head = new LinearLayout(ctx);
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
@@ -1331,29 +1475,14 @@ public final class SettingsFragment extends Fragment {
         head.addView(t, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView more = new TextView(ctx);
-        more.setText("\u22EE");                 // ⋮
-        more.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
-        int pad = dp(10);
-        more.setPadding(pad, 0, pad, 0);
-        more.setClickable(true);
-        more.setFocusable(true);
-        head.addView(more);
+        TextView logLabel = new TextView(ctx);
+        logLabel.setText("Log");
+        logLabel.setTextAppearance(android.R.style.TextAppearance_Small);
+        logLabel.setPadding(dp(6), 0, dp(6), 0);
+        head.addView(logLabel);
+        head.addView(area.toggle);
 
         parent.addView(head, row(top));
-
-        LogArea area = new LogArea(ctx);
-
-        more.setOnClickListener(v -> {
-            PopupMenu pm = new PopupMenu(ctx, v);
-            pm.getMenu().add("Log");
-            pm.setOnMenuItemClickListener(item -> {
-                boolean show = area.panel.getVisibility() == View.GONE;
-                area.panel.setVisibility(show ? View.VISIBLE : View.GONE);
-                return true;
-            });
-            pm.show();
-        });
 
         return area;
     }
@@ -1365,6 +1494,8 @@ public final class SettingsFragment extends Fragment {
      */
     private LogArea titleVpn(LinearLayout parent, String text, int top) {
         Context ctx = parent.getContext();
+        LogArea area = new LogArea(ctx);
+
         LinearLayout head = new LinearLayout(ctx);
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
@@ -1375,40 +1506,14 @@ public final class SettingsFragment extends Fragment {
         head.addView(t, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView more = new TextView(ctx);
-        more.setText("\u22EE");                 // ⋮
-        more.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
-        int pad = dp(10);
-        more.setPadding(pad, 0, pad, 0);
-        more.setClickable(true);
-        more.setFocusable(true);
-        head.addView(more);
+        TextView logLabel = new TextView(ctx);
+        logLabel.setText("Log");
+        logLabel.setTextAppearance(android.R.style.TextAppearance_Small);
+        logLabel.setPadding(dp(6), 0, dp(6), 0);
+        head.addView(logLabel);
+        head.addView(area.toggle);
 
         parent.addView(head, row(top));
-
-        LogArea area = new LogArea(ctx);
-
-        more.setOnClickListener(v -> {
-            PopupMenu pm = new PopupMenu(ctx, v);
-            pm.getMenu().add("Log");
-            MenuItem strict = pm.getMenu().add("Strict mode");
-            strict.setCheckable(true);
-            strict.setChecked(prefs.getBoolean("vpnStrict", false));
-            pm.setOnMenuItemClickListener(item -> {
-                if ("Log".contentEquals(item.getTitle())) {
-                    boolean show = area.panel.getVisibility() == View.GONE;
-                    area.panel.setVisibility(show ? View.VISIBLE : View.GONE);
-                    return true;
-                }
-                boolean next = !item.isChecked();
-                item.setChecked(next);
-                prefs.edit().putBoolean("vpnStrict", next).apply();
-                if (app.lastPage == page && (app.vpnUp || app.vpnConnecting))
-                    app.setVpnStrict(next);
-                return true;
-            });
-            pm.show();
-        });
 
         return area;
     }
@@ -1504,41 +1609,15 @@ public final class SettingsFragment extends Fragment {
             panel = new LinearLayout(ctx);
             panel.setOrientation(LinearLayout.VERTICAL);
             panel.setVisibility(View.GONE);
-            
-	    LinearLayout head = new LinearLayout(ctx);
-            head.setOrientation(LinearLayout.HORIZONTAL);
-            head.setGravity(Gravity.CENTER_VERTICAL);
+
             int cp = dp(6);
-
-	    toggle = new Switch(ctx);
-
+            toggle = new Switch(ctx);
             toggle.setPadding(cp, dp(2), cp, dp(2));
             toggle.setOnCheckedChangeListener((v, checked) -> {
                 enabled = checked;
-                if (enabled && onEnable != null) onEnable.run();
+                panel.setVisibility(checked ? View.VISIBLE : View.GONE);
+                if (checked && onEnable != null) onEnable.run();
             });
-            head.addView(toggle);
-
-	    View spacer = new View(ctx);
-            head.addView(spacer, new LinearLayout.LayoutParams(0, 0, 1f));
-
-            TextView close = new TextView(ctx); 
-
-            close.setText("\u2715");
-            close.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
-            close.setPadding(cp, dp(2), cp, dp(2));
-            close.setClickable(true);
-            close.setFocusable(true);
-            close.setOnClickListener(v -> panel.setVisibility(View.GONE));
-            head.addView(close);
-            LinearLayout headBand = new LinearLayout(ctx);
-            headBand.setOrientation(LinearLayout.HORIZONTAL);
-            View hLeft = new View(ctx);
-            headBand.addView(hLeft, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.085f));
-            headBand.addView(head, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.83f));
-            View hRight = new View(ctx);
-            headBand.addView(hRight, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.085f));
-            panel.addView(headBand);
             text = new EditText(ctx);
             text.setKeyListener(null);
             text.setTextIsSelectable(true);
@@ -1589,8 +1668,8 @@ public final class SettingsFragment extends Fragment {
             footer.setGravity(Gravity.CENTER_VERTICAL);
 
             TextView up = new TextView(ctx);
-            up.setText("\u25B2");
-            up.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
+            up.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_expand_less, 0, 0, 0);
+            up.setContentDescription("Scroll to top");
             up.setPadding(cp, dp(2), cp, dp(2));
             up.setClickable(true);
             up.setFocusable(true);
@@ -1598,8 +1677,8 @@ public final class SettingsFragment extends Fragment {
             footer.addView(up);
 
             TextView down = new TextView(ctx);
-            down.setText("\u25BC");
-            down.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
+            down.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_expand_more, 0, 0, 0);
+            down.setContentDescription("Scroll to bottom");
             down.setPadding(cp, dp(2), cp, dp(2));
             down.setClickable(true);
             down.setFocusable(true);
@@ -1610,8 +1689,8 @@ public final class SettingsFragment extends Fragment {
             footer.addView(footerSpacer, new LinearLayout.LayoutParams(0, 0, 1f));
 
             TextView save = new TextView(ctx);
-            save.setText("\uD83D\uDCE5");
-            save.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
+            save.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_save, 0, 0, 0);
+            save.setContentDescription("Save log");
             save.setPadding(cp, dp(2), cp, dp(2));
             save.setClickable(true);
             save.setFocusable(true);
@@ -1632,8 +1711,8 @@ public final class SettingsFragment extends Fragment {
             footer.addView(save);
 
             TextView clear = new TextView(ctx);
-            clear.setText("\uD83D\uDDD1\uFE0F");
-            clear.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
+            clear.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_delete, 0, 0, 0);
+            clear.setContentDescription("Clear log");
             clear.setPadding(cp, dp(2), cp, dp(2));
             clear.setClickable(true);
             clear.setFocusable(true);
@@ -1827,8 +1906,8 @@ public final class SettingsFragment extends Fragment {
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             TextView copyBtn = new TextView(ctx);
-            copyBtn.setText("📋");
-            copyBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
+            copyBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_copy, 0, 0, 0);
+            copyBtn.setContentDescription("Copy call session");
             int pad = dp(6);
             copyBtn.setPadding(pad, pad, pad, pad);
             copyBtn.setClickable(true);
@@ -1879,8 +1958,9 @@ public final class SettingsFragment extends Fragment {
             headerLayout.addView(stackContainer);
 
             TextView expandIndicator = new TextView(ctx);
-            expandIndicator.setText(isExpanded ? "▲" : "▼");
-            expandIndicator.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f);
+            expandIndicator.setCompoundDrawablesWithIntrinsicBounds(
+                    isExpanded ? R.drawable.ic_expand_less : R.drawable.ic_expand_more, 0, 0, 0);
+            expandIndicator.setContentDescription("Toggle call details");
             expandIndicator.setPadding(dp(8), dp(4), dp(8), dp(4));
             headerLayout.addView(expandIndicator);
 
@@ -1951,11 +2031,11 @@ public final class SettingsFragment extends Fragment {
                 boolean expanded = hScroll.getVisibility() == View.VISIBLE;
                 if (expanded) {
                     hScroll.setVisibility(View.GONE);
-                    expandIndicator.setText("▼");
+                    expandIndicator.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_expand_more, 0, 0, 0);
                     expandedSessions.remove(sessionKey);
                 } else {
                     hScroll.setVisibility(View.VISIBLE);
-                    expandIndicator.setText("▲");
+                    expandIndicator.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_expand_less, 0, 0, 0);
                     expandedSessions.add(sessionKey);
                 }
             });

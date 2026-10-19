@@ -1082,7 +1082,7 @@ final class Tunnel {
         // от реального начала тишины (lastEspRx), а не от первого heal: heal мог опоздать (hangMs
         // требует новых отправок), а без MOBIKE heal всё равно ничего не лечит — там окно короче.
         long giveUp = (ike != null && ike.mobike) ? HEAL_GIVE_UP_MS : HEAL_GIVE_UP_PLAIN_MS;
-        if (now - lastEspRx >= giveUp) {
+	if (now - healSince >= giveUp) {
             if (l != null)
                 l.d(why + ": no ESP for " + (now - lastEspRx) / 1000 + "s: reconnect");
             lost(why);

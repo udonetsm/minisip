@@ -1,0 +1,22 @@
+--- a/app/src/main/java/ru/minisip/vpn/Tunnel.java
++++ b/app/src/main/java/ru/minisip/vpn/Tunnel.java
+@@ -XXX,YY +XXX,YY @@ private boolean heal(String why) {
+         int n = ++healTries;
+         if (n == 1) healSince = now;
+         Log l = log;
+         // Реконнект закрывает tun («отключено от постоянной VPN», АТС теряет регистрацию), а пропажи пути
+-        // (смена вышки, провал радиоканала) обычно проходят сами. Ждём окно тишины ESP, но считаем его
+-        // от реального начала тишины (lastEspRx), а не от первого heal: heal мог опоздать (hangMs
+-        // требует новых отправок), а без MOBIKE heal всё равно ничего не лечит — там окно короче.
++        // (смена вышки, провал радиоканала) обычно проходят сами. RFC 7296 §2.4: обрыв — только когда
++        // повторные попытки связаться остаются без ответа в течение таймаута. Простой без отправок —
++        // не попытка (watchdog стартует лишь при появлении TX), поэтому окно give-up считаем от первого
++        // heal (healSince), а не от lastEspRx. Без MOBIKE окно короче.
+         long giveUp = (ike != null && ike.mobike) ? HEAL_GIVE_UP_MS : HEAL_GIVE_UP_PLAIN_MS;
+-        if (now - lastEspRx >= giveUp) {
++        if (now - healSince >= giveUp) {
+             if (l != null)
+                 l.d(why + ": no ESP for " + (now - lastEspRx) / 1000 + "s: reconnect");
+             lost(why);
+             return true;
+         }

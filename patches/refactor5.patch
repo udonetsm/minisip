@@ -1,0 +1,10 @@
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -1276,8 +1276,8 @@
+             TextView copyBtn = new TextView(ctx);
+-            copyBtn.setText("📋");
+-            copyBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
++            copyBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_copy, 0, 0, 0);
++            copyBtn.setContentDescription("Copy call session");
+             int pad = dp(6);
+             copyBtn.setPadding(pad, pad, pad, pad);

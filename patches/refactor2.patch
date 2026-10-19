@@ -1,0 +1,13 @@
+--- a/app/src/main/java/ru/minisip/app/SettingsFragment.java
++++ b/app/src/main/java/ru/minisip/app/SettingsFragment.java
+@@ -366,8 +366,8 @@
+         callHistoryFooter.addView(saveHistoryBtn);
+ 
+         TextView clearHistoryBtn = new TextView(ctx);
+-        clearHistoryBtn.setText("\uD83D\uDDD1\uFE0F");
+-        clearHistoryBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
++        clearHistoryBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_delete, 0, 0, 0);
++        clearHistoryBtn.setContentDescription("Clear call history");
+         clearHistoryBtn.setPadding(fcp, dp(2), fcp, dp(2));
+         clearHistoryBtn.setClickable(true);
+         clearHistoryBtn.setFocusable(true);
