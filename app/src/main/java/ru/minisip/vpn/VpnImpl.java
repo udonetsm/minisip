@@ -26,8 +26,8 @@ import ru.minisip.log.LogSink;
  * каждого пользователя/профиль, а наши сети ищем только среди NOT_VPN. Вытеснение — только
  * onRevoke() текущего экземпляра TunService.
  * 5. PARTIAL_WAKE_LOCK держим всегда, пока VPN запущен (нужен постоянному NAT-keepalive).
- * Два режима (setStrict): АТС подключена — Tunnel рвёт связь жёстким watchdog'ом;
- * АТС нет — мягкий watchdog (MOBIKE-refresh, затем реконнект).
+ * Два режима (setStrict): идёт звонок — Tunnel рвёт связь жёстким watchdog'ом;
+ * звонка нет — мягкий watchdog (MOBIKE-refresh, затем реконнект).
  * Все вызовы слушателя идут под замком VpnImpl.
  */
 final class VpnImpl implements Vpn {
@@ -64,7 +64,7 @@ final class VpnImpl implements Vpn {
     private int pingIntervalSec = 5;
     private boolean running;               // connect() был, disconnect()/сброса ещё не было
     private boolean want;                  // connect() был, сервис ещё не ответил
-    private boolean strict;                // АТС подключена: wake lock и жёсткий watchdog
+    private boolean strict;                // идёт звонок: жёсткий watchdog (wake lock держится всегда)
     private PowerManager.WakeLock wl;
     private int gen;                       // меняется при connect/disconnect/revoke/рестарте: отменяет циклы
     private Thread recovery;               // поток подъёма/переподключения; null — не идёт
@@ -110,22 +110,17 @@ final class VpnImpl implements Vpn {
         return false;
     }
 
-    @Override
-    public synchronized boolean isStrict() {
-        return strict;
-    }
-
     /**
-     * Режим работы. true — АТС подключена: Tunnel жёстко следит за ответами (watchdog рвёт связь).
-     * false — обычный VPN: watchdog мягкий (MOBIKE-refresh, потом реконнект). Wake lock в обоих
-     * режимах держится, пока VPN запущен.
+     * Режим работы. true — идёт звонок: Tunnel жёстко следит за ответами (watchdog рвёт связь).
+     * false — звонка нет: watchdog мягкий (MOBIKE-refresh, потом реконнект). Wake lock в обоих
+     * режимах держится, пока VPN запущен (независимо от strict).
      * Можно звать в любой момент и сколько угодно раз.
      */
     @Override
     public synchronized void setStrict(boolean on) {
         if (strict == on) return;
         strict = on;
-        log("mode: " + (on ? "PBX (strict watchdog)" : "plain VPN (soft watchdog)") + ", wake lock always");
+        log("mode: " + (on ? "call (strict watchdog)" : "plain VPN (soft watchdog)") + ", wake lock always");
         Tunnel t = tunnel;
         if (t != null) t.strict = on;
         updateWake();
@@ -243,7 +238,7 @@ final class VpnImpl implements Vpn {
         log("onRevoke from " + System.identityHashCode(s) + ", current "
                 + (svc == null ? "none" : String.valueOf(System.identityHashCode(svc))));
         if (s != svc) return;
-        cancel("VPN was revoked by the system or another app");
+        cancel("VPN was revoked by another VPN");
     }
 
     // ---------------------------------------------------------------- сеть

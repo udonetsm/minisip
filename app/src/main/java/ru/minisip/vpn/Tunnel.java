@@ -22,9 +22,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * "vpn-tun" (tun -> сокет), "vpn-mobike" (смена пути при смене сети).
  * <p>
  * Два режима (поле strict, меняется на лету):
- * - strict (АТС подключена): watchdog рвёт туннель, если за wdMs после отправки не пришло
+ * - strict (идёт звонок): watchdog рвёт туннель, если за wdMs после отправки не пришло
  * ни одного ESP. Нужен быстрый отклик для телефонии.
- * - обычный VPN (strict = false): watchdog сначала пробует MOBIKE-refresh, при повторе —
+ * - обычный VPN (strict = false, звонка нет): watchdog сначала пробует MOBIKE-refresh, при повторе —
  * реконнект; обрыв по тишине определяется ещё и по deadMs.
  * VpnImpl держит PARTIAL_WAKE_LOCK всегда, пока VPN запущен: поток vpn-keep (NAT-keepalive)
  * должен работать и при выключенном экране.
@@ -106,7 +106,8 @@ final class Tunnel {
      */
     volatile boolean retryable;
     /**
-     * Strict PBX watchdog mode.
+     * Strict mode: enabled only while a call is active (App.begin / App.finish).
+     * In strict mode the watchdog treats any ESP silence as a failure and heals immediately.
      */
     volatile boolean strict;
     volatile Log log;
@@ -855,8 +856,7 @@ final class Tunnel {
                             if (hl != null)
                                 hl.d("no ESP for " + hangMs / 1000 + "s while sending, IKE alive");
                             pathSilence("no ESP while IKE alive");
-                            heal("no ESP replies while IKE answers");
-                            if (closed.get()) return;
+                            if (heal("no ESP replies while IKE answers") == HealResult.CLOSED) return;
                         }
                     } else {
                         hangSince = 0;
@@ -875,8 +875,7 @@ final class Tunnel {
                                 l.d("WATCHDOG(" + (strict ? "strict" : "soft") + "): no ESP back for "
                                         + silent + "s after send; " + esp.drops());
                             pathSilence("watchdog");
-                            heal("no ESP replies while sending");
-                            if (closed.get()) return;
+                            if (heal("no ESP replies while sending") == HealResult.CLOSED) return;
                         } else {
                             // обычный VPN без ping: не рвём, а просим DPD проверить путь; решит deadMs
                             if (l != null)
@@ -937,8 +936,7 @@ final class Tunnel {
                         missed = 0;
                         Log l = log;
                         if (l != null) l.d("ping healthcheck: " + pingLoss + " losses reached");
-                        heal("ESP path dead (ping loss)");
-                        if (closed.get()) return;
+                        if (heal("ESP path dead (ping loss)") == HealResult.CLOSED) return;
                     }
                     byte[] ip = echo(++seq);
                     sendQuiet(esp.wrap(ip, ip.length), natPort);
@@ -952,12 +950,12 @@ final class Tunnel {
                 if (idle >= deadMs && now >= graceUntil && now - lastIkeRx > deadMs) {
                     // Сначала один раз лечим путь (после сна NAT-маппинг мёртв), потом уже реконнект.
                     pathSilence("deadMs");
-                    long before = lastHealAct;
-                    heal("server does not respond");
-                    if (closed.get()) return;
-                    // Если heal реально сработал (lastHealAct обновился), перезапускаем DPD;
-                    // если троттлится — не трогаем lastRx, следующий тик снова попадёт сюда.
-                    if (lastHealAct != before) {
+                    HealResult r = heal("server does not respond");
+                    if (r == HealResult.CLOSED) return;
+                    // Если heal реально что-то сделал (STARTED) или уже идёт миграция (BUSY),
+                    // перезапускаем DPD. При THROTTLED lastRx не трогаем — следующий тик снова
+                    // попадёт сюда и либо запустит heal, либо снова затроттлит.
+                    if (r != HealResult.THROTTLED) {
                         lastRx = now - dpdMs;
                         idle = dpdMs;
                     }
@@ -1070,7 +1068,32 @@ final class Tunnel {
         }, "vpn-probe");
     }
 
-    private boolean heal(String why) {
+    /**
+     * Возвращаемое значение {@link #heal(String)}: статус для timers-цикла.
+     */
+    private enum HealResult {
+        /**
+         * Туннель закрыт (окно тишины ESP истекло). timers() должен выйти из цикла.
+         */
+        CLOSED,
+        /**
+         * Heal затроттлен (последняя попытка была меньше HEAL_MIN_GAP_MS назад).
+         * lastHealAct не менялся — следующий тик повторит попытку.
+         */
+        THROTTLED,
+        /**
+         * Уже идёт MOBIKE-миграция (migLatch != null). Новая миграция не запущена,
+         * но lastHealAct обновлён: caller должен сбросить lastRx.
+         */
+        BUSY,
+        /**
+         * Heal-действие запущено (MOBIKE-миграция или nudge DPD+keepalive). lastHealAct обновлён;
+         * caller должен перезапустить DPD (сбросить lastRx).
+         */
+        STARTED
+    }
+
+    private HealResult heal(String why) {
         long now = System.currentTimeMillis();
         int n = ++healTries;
         if (n == 1) healSince = now;
@@ -1080,25 +1103,25 @@ final class Tunnel {
         // от реального начала тишины (lastEspRx), а не от первого heal: heal мог опоздать (hangMs
         // требует новых отправок), а без MOBIKE heal всё равно ничего не лечит — там окно короче.
         long giveUp = (ike != null && ike.mobike) ? HEAL_GIVE_UP_MS : HEAL_GIVE_UP_PLAIN_MS;
-	if (now - lastEspRx >= giveUp) {
+        if (now - lastEspRx >= giveUp) {
             if (l != null)
                 l.d(why + ": no ESP for " + (now - lastEspRx) / 1000 + "s: reconnect");
             lost(why);
-            return true;
+            return HealResult.CLOSED;
         }
-        // В окне HEAL_MIN_GAP_MS повторный heal ничего не делает. Возвращаем true — «сейчас
+        // В окне HEAL_MIN_GAP_MS повторный heal ничего не делает. Возвращаем THROTTLED — «сейчас
         // не лечим», чтобы timers() НЕ сбрасывал lastRx и не запускал новый DPD: иначе DPD
         // уходит каждые ~1.6 с, реальной попытки нет, а окно HEAL_GIVE_UP_MS тянется.
         if (n > 1 && now - lastHealAct < HEAL_MIN_GAP_MS) {
             if (l != null) l.d(why + ": heal throttled (last attempt "
                     + (now - lastHealAct) + "ms ago)");
             healTries--;
-	    return false;
+            return HealResult.THROTTLED;
         }
         lastHealAct = now;
         if (n > 1) probePath(why);
         if (ike != null && ike.mobike) {
-            if (migLatch != null) return false;                           // migrate уже идёт
+            if (migLatch != null) return HealResult.BUSY;                 // migrate уже идёт
             if (l != null) l.d(why + ": trying MOBIKE refresh (heal #" + n + ")");
             pathHeal(why);
             migrate(ok -> {
@@ -1108,7 +1131,7 @@ final class Tunnel {
                     lost(why + ": MOBIKE refresh failed");
                 }
             });
-            return false;
+            return HealResult.STARTED;
         }
         if (l != null)
             l.d(why + ": MOBIKE not negotiated, refreshing NAT on the same socket (heal #" + n + ")");
@@ -1116,21 +1139,8 @@ final class Tunnel {
         wakeKeep();
         dpdNow = true;
         lastRx = Math.min(lastRx, now - dpdMs);   // DPD стартует сразу
-        return false;
+        return HealResult.STARTED;
     }
-
-    /**
-     * ESP-путь признан мёртвым (DPD по IKE при этом может отвечать: NAT-маппинг сменился).
-     * Первая попытка лечения:
-     *  - MOBIKE согласован: MOBIKE-refresh (новый сокет + UPDATE_SA_ADDRESSES); не подтвердился —
-     *    реконнект;
-     *  - MOBIKE не согласован: сокет НЕ меняем (новый порт сервер для IKE не подхватит, его IKE-сообщения
-     *    уйдут на старый порт и потеряются). Вместо этого тот же сокет: keepalive и DPD вне очереди,
-     *    и ещё одна серия пингов.
-     * Повторно без единого ESP — обрыв, дальше решает владелец через onReconnecting.
-     * @return true, если туннель закрыт и timers() должен завершиться.
-     * false во всех остальных случаях, включая троттлинг.
-     */
 
     /**
      * Смена сети без пересоздания туннеля (RFC 4555): новый защищённый сокет, UPDATE_SA_ADDRESSES

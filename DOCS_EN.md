@@ -53,6 +53,8 @@ To prevent state race conditions and recursive routing conflicts, MiniSIP enforc
 - `LogBuffer sipLog()`: Returns SIP signaling ring buffer log.
 - `LogBuffer updateLog()`: Returns update checker ring buffer log.
 - `Update update()`: Returns update manager instance.
+- `String toggleVpnFromTile(Context ctx)`: Toggles the app-wide VPN from the Quick Settings tile without opening any activity. Returns a user-facing error message on failure, or `null` on success.
+- `String connectVpnPage(Context ctx, int page)`: Connects the VPN profile configured on the given settings page. Returns a user-facing error message on failure, or `null` on success. Used by `TileProxyActivity` when the tile picker is opened.
 - `void connect(int page, String host, int port, String user, String pass)`: Initiates SIP registration.
 - `void disconnect(int page)`: Unregisters SIP session.
 - `boolean vpnConsent(Activity a, int requestCode)`: Requests VPN permission consent.
@@ -130,6 +132,88 @@ To prevent state race conditions and recursive routing conflicts, MiniSIP enforc
 - `void showProgress(int percent, String tag)`: Displays APK download progress bar.
 - `void showInstall(OnClickListener onInstall)`: Displays clickable install button.
 - `void hide()`: Hides update bar.
+
+#### [`TileProxyActivity.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/TileProxyActivity.java)
+- `void onCreate(Bundle b)`: Invisible proxy activity launched from the Quick Settings tile; chooses between picker mode (`EXTRA_PICK == true` or action `android.service.quicksettings.action.QS_TILE_PREFERENCES`) and direct toggle mode.
+- `void onActivityResult(int req, int res, Intent data)`: Continues the flow once the system VPN consent dialog returns; if consent is denied, the activity closes.
+- `void runToggle()`: Calls `App.toggleVpnFromTile` and finishes; a Toast shows a user-facing error message on failure.
+- `void showPicker()`: Lists all configured VPN profiles (`PageStore.configuredVpnPages`) and connects the chosen one via `App.connectVpnPage`. If none are configured, shows a Toast and finishes.
+- `EXTRA_PICK` (constant `"pick"`): When `true` — or when the incoming action is `QS_TILE_PREFERENCES` — the activity opens the profile picker instead of toggling directly.
+
+#### [`VpnTileService.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/VpnTileService.java)
+- `void onStartListening()`: Refreshes the Quick Settings tile label and state (`STATE_ACTIVE` while `App.vpnUp || App.vpnConnecting`, otherwise `STATE_INACTIVE`).
+- `void onClick()`: Quick Settings tile entry point.
+  - If `VpnService.prepare(this) == null` (consent already granted) — calls `App.toggleVpnFromTile(this)` directly, keeping the QS panel open. The tile flips optimistically, then re-syncs after 1.5 s.
+  - Otherwise — launches `TileProxyActivity` via `startActivityAndCollapse` so the system can display the VPN consent dialog (Android 14+ uses the `PendingIntent` overload).
+
+#### Control, gesture and event reference (`ru.minisip.app`)
+
+This table is the authoritative reference for every interactive control exposed by the `ru.minisip.app` package. It complements the per-class method lists above and should be kept in sync with `SettingsFragment.onCreateView`, `MainActivity` and `PageStore`.
+
+##### SIP block
+
+| Control | Trigger | Effect |
+|---------|---------|--------|
+| `Server` field | text input | Auto-saved to page preferences. Parsed by `SettingsFragment.doConnect()` as `host[:port]` (default port `5060`). |
+| `Login` / `Password` fields | text input | Auto-saved. `Password` has a reveal-toggle end icon. |
+| **SIP settings** expander | tap | Shows/hides `server`, `login`, `pass`; icon flips `ic_expand_more` ⇄ `ic_expand_less`. |
+| **Connect** | tap | Validates `server` / `login`, then calls `App.connect(...)`. Disabled while another page owns the session or while a call is active. |
+| **Disconnect** | tap | Calls `App.disconnect(page)`; enabled only while registered or connecting. |
+| **Refers** | tap | Opens the blind-transfer contacts editor (`showRefersDialog`). |
+| SIP log `Log` switch | toggle | Enables live mirroring of `App.sipLog()` into the log `EditText`. |
+| SIP log save icon (`ic_save`) | tap | Dialog: **Copy to clipboard** or **Save to file** (`LogFile.save`). |
+| SIP log clear icon (`ic_delete`) | tap | Confirmation dialog → `App.sipLog().clear()`. |
+| SIP log `▲` / `▼` | tap | Scrolls the log `EditText` to top / bottom. |
+
+##### Dialer block
+
+| Control | Trigger | Effect |
+|---------|---------|--------|
+| `Number` field | text input | Dynamically resizes text between 10sp and 24sp (`fitNumberText()`). |
+| `Number` field | long press 1 s | Clears the field (`clearNumberRunnable`). |
+| **Call / Hangup** round button | tap | `App.state == IDLE` → `doCall()` (checks `RECORD_AUDIO`, applies per-page `speaker` / `muted` preferences, calls `App.dial`). Otherwise → `App.hangup(page)`. Icon flips between `ic_call` (blue) and `ic_call_end` (red) based on `App.state`. |
+| **Mute** (`ic_mic` ⇄ `ic_mic_off`) | tap | Toggles `prefs.muted`; calls `App.setMute(...)` unless the active call belongs to another page. Button shape switches between outline pill and filled rounded-rect when muted (`applyToggleLook`). |
+| **Spk** (`ic_volume_up`) | tap | Toggles `prefs.speaker`; calls `App.setSpeaker(...)` under the same page-ownership guard (`applySpkLook`). |
+| Call history session header | tap | Expands/collapses the horizontal status-dot timeline. State is remembered per session key in `expandedSessions`. |
+| Call history session header | long press | Copies the destination number into `Number` and toasts "Number inserted". |
+| Call history copy icon (`ic_copy`) | tap | Copies the full session summary (`Number:`, then every event line) to the clipboard. |
+| Call history dot | tap | Opens a dialog showing the raw event line with **Copy** / **Close** actions. |
+| Call history `▲` / `▼` | tap | Smooth-scrolls the call history list (`smoothScrollTo`). |
+| Call history save icon (`ic_save`) | tap | Dialog: **Copy to clipboard** or **Save to file**. |
+| Call history clear icon (`ic_delete`) | tap | Confirmation dialog → `App.callLog().clear()`. |
+
+##### VPN block
+
+| Control | Trigger | Effect |
+|---------|---------|--------|
+| **VPN settings** expander | tap | Shows/hides main VPN fields plus **Apps using VPN** and **Advanced VPN settings**. |
+| `VPN server` / `VPN login` / `VPN password` fields | text input | Auto-saved. `VPN password` has a reveal toggle. |
+| **Advanced VPN settings** expander | tap | Shows/hides PSK, CA certificate, healthcheck address, ping interval fields. |
+| `VPN pre-shared key` | text input | Optional PSK for IKEv2; reveal toggle enabled. |
+| `VPN CA certificate (PEM)` | text input, multi-line (max 4) | Optional PEM CA bundle; empty → system trust store. |
+| `Healthcheck address` | text input | IPv4 or hostname. Empty or `0` → healthcheck the VPN server itself. Domains are resolved to IPv4 in a background thread (`vpnStart`) before connecting. |
+| `Ping interval (sec)` | numeric input | Allowed 5..9, or `0` (default 5). Out-of-range values abort the connection with a status message. |
+| **Apps using VPN** | tap | Split-tunneling picker (`pickApps()`); label shows `MiniSIP + N` where N is the number of selected packages. |
+| **VPN connect** | tap | Validates VPN fields, calls `App.vpnConsent(...)`; on consent, `vpnStart()` resolves the healthcheck (if domain) and calls `App.vpnConnect`. While connected the label is decorated with `MOBIKE: Active / Not supported` and `DPD: <state>`. |
+| **VPN disconnect** | tap | Calls `App.vpnDisconnect(page)`. |
+| VPN log switch / save / clear / `▲` / `▼` | as in SIP block | Same behaviour over `App.vpnLog()`. |
+
+##### Bottom row, card management and app-level gestures
+
+| Control / gesture | Trigger | Effect |
+|------------------|---------|--------|
+| Version label `vX.Y.Z` | long press ≥ 2 s | Opens the update channel selector (Stable / Pre-release) with **Check**. |
+| Version label | movement ≥ 20 dp from center during long press | Cancels the channel-dialog timer. |
+| Version label `Log` switch | toggle | Live update area over `App.updateLog()`. |
+| **Delete Page** button | pull down at the very bottom for 1 s (`dispatchTouchEvent`, requires `PageStore.count > 1`) | Button fades in; tap → confirmation dialog → `MainActivity.pageDeleted(page)`. Hidden when only one page exists. |
+| SIP / Call / VPN card header | long press | Starts drag-and-drop reorder (card alpha drops to 0.2). Order persisted under `blockOrder`. |
+| Horizontal swipe to next page when the last card is configured | swipe | Triggers **Create New Card** dialog (`onPageSelected`); on **Yes** `PageStore.setCount` is called and the `Pages` adapter refreshes. |
+| App `onCreate` | once | Registers `ConnectivityManager.registerDefaultNetworkCallback` → `App.onNetwork()` re-registers SIP on default-network switch. |
+| Mic / notifications permissions | first launch | Requested once (`RECORD_AUDIO`, and on Android 13+ `POST_NOTIFICATIONS`). |
+| Battery optimization | first launch after permissions | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` prompt (`askBatteryOnce`), skips if already granted. |
+| Quick Settings tile | Android 13+, first launch | `StatusBarManager.requestAddTileService` asks once (`tileOffered`) to add the MiniSIP VPN tile. |
+| `CallService` | call state → `CALLING`/`TALK` | Foreground service started (`begin`); `FOREGROUND_SERVICE_TYPE_MICROPHONE` keeps audio alive on the lock screen. |
+| Lock-screen flags | call active | `setShowWhenLocked` / `setTurnScreenOn` toggled by `appChangeListener`. |
 
 ---
 

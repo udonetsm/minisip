@@ -102,12 +102,10 @@ In the **VPN settings (IKEv2)** section:
 - **Advanced VPN settings**:
   - **VPN pre-shared key**: Pre-Shared Key (PSK) for key-based authentication.
   - **VPN CA certificate (PEM)**: PEM-encoded Root CA Certificate.
-  - **Healthcheck address**: Host address for ICMP/HTTP probes. Domain names trigger background DNS resolution before connection.
+  - **Healthcheck address**: Probe address (IP or domain). Domains trigger background DNS resolution before connection. Empty or `0` — only the VPN server itself is checked, not a specific host reachable through it.
   - **Ping interval (sec)**: Probe frequency in seconds (5 to 9 seconds, or 0 for default 5s).
 
-### 5.2 Strict Mode (Kill-Switch)
-- Located in the overflow menu (`⋮`) of the VPN header.
-- Enforcing Strict mode blocks all non-VPN network traffic during reconnections, preventing leaks. During active SIP calls, Strict mode is enabled automatically.
+### 5.2 Deleted.
 
 ### 5.3 Split Tunneling (Apps using VPN)
 1. Tap **Apps using VPN**.
@@ -119,9 +117,9 @@ In the **VPN settings (IKEv2)** section:
 ## 6. Advanced Gestures, Logging & Updates
 
 ### 6.1 Update Channels & Gesture Shortcuts
-- **Long Press Version Label vX.Y.Z (2 seconds)**: Opens the Update Channel selector (**Stable** or **Pre-release**) with an instant **Check** button.
-- **Overflow Menu (`⋮`) on Version Label**: Displays the update engine log (`updateLog`).
-- **UpdateBar**: Displays a top notification bar with a download progress bar and an install trigger when new GitHub releases are found.
+- **Long Press Version Label vX.Y.Z (1 second)**: Opens the Update Channel selector (**Stable** or **Pre-release**) with an instant **Check** button.
+- **Toggle on the Version Row**: Enables the update engine log (`updateLog`).
+- **UpdateBar**: When a new GitHub release is detected, an overlay bar appears at the bottom of the screen with a download progress bar and an install trigger.
 
 ### 6.2 Log Area Controls
 Each block contains an independent log console (**SIP Log**, **VPN Log**, **Call Log**, **Update Log**):
@@ -132,16 +130,79 @@ Each block contains an independent log console (**SIP Log**, **VPN Log**, **Call
 
 ---
 
-## 7. Frequently Asked Questions & Troubleshooting
+## 7. Deleted.
 
-### ❓ One-Way Audio Issues
-- **Cause**: ISP RTP port blocking or NAT restrictions.
-- **Solution**: Enable **VPN connect**. Encapsulating SIP and RTP traffic inside IPsec ESP packets resolves NAT traversal issues completely.
+---
 
-### ❓ SIP Registration Error 401 / 407
-- **Cause**: Incorrect Login or Password.
-- **Solution**: Verify credentials in the SIP server settings block.
+## 8. Button, Gesture and Event Reference
 
-### ❓ Frequent VPN Disconnections
-- **Cause**: Unstable mobile signal or short DPD timeouts.
-- **Solution**: Increase **Ping interval** in Advanced VPN settings to `9` seconds.
+This chapter is a single-source-of-truth cheat-sheet for every interactive element in the MiniSIP UI. It answers the question *"what exactly happens when I tap / hold / swipe this?"*.
+
+### 8.1 SIP block
+
+| Action | What it does |
+|--------|--------------|
+| Type in **Server** | Auto-saved to the current page's preferences. `host` or `host:port`; default port `5060`. |
+| Type in **Login** / **Password** | Auto-saved. Tap the eye icon in **Password** to reveal the password. |
+| Tap **SIP settings** | Expands/collapses the `Server`, `Login`, `Password` fields. The arrow icon flips. |
+| Tap **Connect** | Validates `Server` and `Login`, then sends `REGISTER`. Greys out when another page owns the session or a call is in progress. |
+| Tap **Disconnect** | Sends `REGISTER (Expires: 0)`. Enabled only while registered or connecting. |
+| Tap **Refers** | Opens the blind-transfer contacts editor. |
+| Toggle **Log** (SIP) | Enables live SIP signaling trace inside the log area. |
+| Tap **save** (SIP log) | Dialog: **Copy to clipboard** or **Save to file** (`Documents/MiniSIP/logs`). |
+| Tap **clear** (SIP log) | Asks for confirmation, then wipes the SIP log buffer. |
+| Tap **▲ / ▼** (SIP log) | Scrolls the log text to top / bottom. |
+
+### 8.2 Dialer block
+
+| Action | What it does |
+|--------|--------------|
+| Type in **Number** | Font auto-shrinks between 10sp and 24sp to fit the field. |
+| **Long-press Number for 1 s** | Clears the field. |
+| Tap **Call / Hangup** | While idle: places the call (checks microphone permission, applies your `Spk` / `Mute` preferences). While in a call: hangs up. Icon turns red when a call is active. |
+| Tap **Mute** | Toggles the microphone. Muted → rounded rectangle, colour changes. Unmuted → ellipse (pill) with an outline. |
+| Tap **Spk** | Toggles speakerphone ⇄ earpiece. Speakerphone on → rounded rectangle, colour changes. Speakerphone off → ellipse (pill) with an outline. |
+| Tap a **session header** in call history | Expands/collapses the horizontal status-dot timeline. |
+| **Long-press a session header** | Copies the number of that session into the **Number** field and toasts "Number inserted". |
+| Tap a **status dot** | Opens a dialog with the raw event line and **Copy** / **Close**. |
+| Tap **copy icon** next to a session | Copies the whole session (number + every event) to clipboard. |
+| Tap **▲ / ▼** under history | Smooth-scrolls the history list. |
+| Tap **save icon** under history | Copy or save the call history. |
+| Tap **clear icon** under history | Confirmation → wipes the call log. |
+
+### 8.3 VPN block
+
+| Action | What it does |
+|--------|--------------|
+| Tap **VPN settings** | Expands/collapses the main VPN fields plus **Apps using VPN** and **Advanced VPN settings**. |
+| Tap **Advanced VPN settings** | Expands/collapses PSK, CA certificate, healthcheck, ping interval. |
+| Type in **VPN pre-shared key** | Optional PSK. Leave empty to use EAP / MS-CHAPv2. |
+| Type in **VPN CA certificate** | Optional PEM bundle. Empty → system trust store. |
+| Type in **Healthcheck address** | IP or hostname. Empty or `0` → checks the VPN server itself. Domain names are resolved to IPv4 in the background before connecting. |
+| Type in **Ping interval (sec)** | Allowed 5..9 or `0` (default 5). Out-of-range values abort connection. |
+| Tap **Apps using VPN** | Opens split-tunneling picker. The label shows `MiniSIP + N` with the number of chosen apps. |
+| Tap **VPN connect** | Validates the fields, requests VPN consent if needed, then connects. While connected the label shows `MOBIKE:` and `DPD:` state. |
+| Tap **VPN disconnect** | Tears the tunnel down. |
+| Toggle **Log** / save / clear / **▲ / ▼** (VPN) | Same as the SIP block, but for `vpnLog`. |
+
+### 8.4 Cards and app-level gestures
+
+| Gesture | What it does |
+|---------|--------------|
+| **Long-press version label `vX.Y.Z` for 2 s** | Opens the update channel selector (Stable / Pre-release) with a **Check** button. |
+| **Move finger more than 20 dp away** during that long press | Cancels the channel dialog. |
+| **Pull down at the very bottom of the scroll view for 1 s** | Reveals the red **Delete Page** button (only when more than one page exists). |
+| **Long-press a card header (SIP / Call / VPN)** | Drags the card to reorder blocks. Order is saved in the page preferences. |
+| **Swipe to the next page** when the last page is already configured | Opens the **Create New Card** dialog. |
+| **Quick Settings tile** | Toggles VPN without opening the app. Long-press to open the profile picker (if you have more than one VPN profile configured). |
+| First launch | System prompts ask for `RECORD_AUDIO`, `POST_NOTIFICATIONS`, battery-optimization exclusion, and (once) to add the MiniSIP VPN Quick Settings tile. |
+
+### 8.5 Status colour legend (call history)
+
+| Colour | Meaning |
+|--------|---------|
+| 🟧 Orange `#FF9800` | Dialing (`dial`) |
+| 🟨 Yellow `#FFD54F` | Ringing (`ringing`) |
+| 🟩 Green `#4CAF50` | Connected / Talk (`connected`) |
+| 🟪 Purple `#9C27B0` | Transfer (`transfer`) |
+| 🟥 Red `#F44336` | Ended / Error / Hangup (`ended`, `error`, `hangup`) |

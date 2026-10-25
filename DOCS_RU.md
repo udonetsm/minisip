@@ -53,6 +53,8 @@ MiniSIP реализован на основе декларативного ра
 - `LogBuffer sipLog()`: Кольцевой буфер SIP-сигнализации.
 - `LogBuffer updateLog()`: Кольцевой буфер обновлений.
 - `Update update()`: Менеджер обновлений.
+- `String toggleVpnFromTile(Context ctx)`: Переключает VPN на уровне приложения из плитки Quick Settings без открытия Activity. Возвращает сообщение об ошибке либо `null` при успехе.
+- `String connectVpnPage(Context ctx, int page)`: Подключает VPN-профиль указанной страницы настроек. Возвращает сообщение об ошибке либо `null` при успехе. Используется `TileProxyActivity` при открытии выбора профиля из плитки.
 - `void connect(...)`: Запуск SIP-регистрации.
 - `void disconnect(...)`: Сброс SIP-регистрации.
 - `boolean vpnConsent(...)`: Запрос системного согласия на VPN.
@@ -96,6 +98,88 @@ MiniSIP реализован на основе декларативного ра
 
 #### [`UpdateBar.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/UpdateBar.java)
 - `void attachInset(...)`, `void setVisibility(...)`, `void showProgress(...)`, `void showInstall(...)`, `void hide()`: Управление плашкой прогресса обновлений.
+
+#### [`TileProxyActivity.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/TileProxyActivity.java)
+- `void onCreate(Bundle b)`: Невидимая proxy-activity, запускаемая из плитки Quick Settings. Выбирает режим: показ списка профилей (`EXTRA_PICK == true` либо action `android.service.quicksettings.action.QS_TILE_PREFERENCES`) или прямой переключатель.
+- `void onActivityResult(int req, int res, Intent data)`: Продолжает сценарий после возврата системного диалога согласия VPN; при отказе — закрывает activity.
+- `void runToggle()`: Вызывает `App.toggleVpnFromTile` и закрывается; Toast показывает сообщение об ошибке.
+- `void showPicker()`: Перечисляет все сконфигурированные VPN-профили (`PageStore.configuredVpnPages`) и подключает выбранный через `App.connectVpnPage`.
+- `EXTRA_PICK` (константа `"pick"`): если `true` — или action `QS_TILE_PREFERENCES` — activity открывает выбор профиля вместо прямого переключения.
+
+#### [`VpnTileService.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/VpnTileService.java)
+- `void onStartListening()`: Обновляет подпись и состояние плитки (`STATE_ACTIVE`, пока `App.vpnUp || App.vpnConnecting`, иначе `STATE_INACTIVE`).
+- `void onClick()`: Обработка нажатия на плитку Quick Settings.
+  - Если `VpnService.prepare(this) == null` (согласие уже получено) — вызывает `App.toggleVpnFromTile(this)` напрямую, шторка Quick Settings не закрывается. Плитка переключается оптимистично и синхронизируется через 1.5 с.
+  - Иначе — запускает `TileProxyActivity` через `startActivityAndCollapse`, чтобы система показала диалог согласия VPN (Android 14+ использует `PendingIntent`-перегрузку).
+
+#### Справочник управления: кнопки, жесты и события (`ru.minisip.app`)
+
+Таблица — авторитетная шпаргалка по всем интерактивным элементам Android-интерфейса MiniSIP. Она дополняет списки методов выше и должна синхронизироваться с `SettingsFragment.onCreateView`, `MainActivity` и `PageStore`.
+
+##### Блок SIP
+
+| Элемент | Триггер | Что делает |
+|---------|---------|-----------|
+| Поле `Server` | ввод | Автосохраняется в настройки страницы. Парсится `SettingsFragment.doConnect()` как `host[:port]` (порт по умолчанию `5060`). |
+| Поля `Login` / `Password` | ввод | Автосохраняются. У `Password` есть end-icon для показа пароля. |
+| Экспандер **SIP settings** | тап | Показывает/скрывает `server`, `login`, `pass`; иконка меняется `ic_expand_more` ⇄ `ic_expand_less`. |
+| **Connect** | тап | Валидирует `server` / `login`, вызывает `App.connect(...)`. Неактивна, если сессией владеет другая страница или идёт звонок. |
+| **Disconnect** | тап | Вызывает `App.disconnect(page)`; активна только при регистрации/подключении. |
+| **Refers** | тап | Открывает редактор контактов blind transfer (`showRefersDialog`). |
+| Переключатель `Log` (SIP) | переключение | Включает живое зеркалирование `App.sipLog()` в `EditText` лога. |
+| Иконка сохранения (SIP, `ic_save`) | тап | Диалог: **Copy to clipboard** или **Save to file** (`LogFile.save`). |
+| Иконка очистки (SIP, `ic_delete`) | тап | Диалог подтверждения → `App.sipLog().clear()`. |
+| `▲` / `▼` (SIP) | тап | Прокрутка `EditText` лога в начало / конец. |
+
+##### Блок Dialer
+
+| Элемент | Триггер | Что делает |
+|---------|---------|-----------|
+| Поле `Number` | ввод | Динамически масштабирует текст между 10sp и 24sp (`fitNumberText()`). |
+| Поле `Number` | долгое нажатие 1 с | Очищает поле (`clearNumberRunnable`). |
+| Круглая кнопка **Call / Hangup** | тап | Если `App.state == IDLE` → `doCall()` (проверка `RECORD_AUDIO`, применение `speaker`/`muted`, вызов `App.dial`). Иначе → `App.hangup(page)`. Иконка меняется `ic_call` (синяя) ⇄ `ic_call_end` (красная) по `App.state`. |
+| **Mute** (`ic_mic` ⇄ `ic_mic_off`) | тап | Переключает `prefs.muted`; вызывает `App.setMute(...)`, если активный звонок принадлежит этой странице. Форма кнопки — outline-pill ⇄ filled-rounded (`applyToggleLook`). |
+| **Spk** (`ic_volume_up`) | тап | Переключает `prefs.speaker`; вызывает `App.setSpeaker(...)` при том же условии владения (`applySpkLook`). |
+| Заголовок сессии истории | тап | Разворачивает/сворачивает горизонтальную шкалу-доты. Состояние запоминается по ключу сессии в `expandedSessions`. |
+| Заголовок сессии истории | долгое нажатие | Копирует номер в поле `Number` и показывает Toast «Number inserted». |
+| Иконка копирования (`ic_copy`) | тап | Копирует всю сводку сессии (`Number:` + строки событий) в буфер обмена. |
+| Точка статуса в истории | тап | Открывает диалог с полным текстом события и кнопками **Copy** / **Close**. |
+| `▲` / `▼` (история звонков) | тап | Плавно прокручивает список (`smoothScrollTo`). |
+| Иконка сохранения (история, `ic_save`) | тап | Диалог: **Copy to clipboard** или **Save to file**. |
+| Иконка очистки (история, `ic_delete`) | тап | Диалог подтверждения → `App.callLog().clear()`. |
+
+##### Блок VPN
+
+| Элемент | Триггер | Что делает |
+|---------|---------|-----------|
+| Экспандер **VPN settings** | тап | Показывает/скрывает основные поля VPN + **Apps using VPN** и **Advanced VPN settings**. |
+| Поля `VPN server` / `VPN login` / `VPN password` | ввод | Автосохраняются. У `VPN password` есть переключатель показа. |
+| Экспандер **Advanced VPN settings** | тап | Показывает/скрывает PSK, CA-certificate, healthcheck, ping interval. |
+| `VPN pre-shared key` | ввод | Опциональный PSK для IKEv2; переключатель показа включён. |
+| `VPN CA certificate (PEM)` | ввод, многострочное (до 4 строк) | Опциональный PEM CA-bundle; пусто → системное trust-store. |
+| `Healthcheck address` | ввод | IPv4 или hostname. Пусто или `0` → healthcheck самого VPN-сервера. Домены резолвятся в IPv4 в фоновом потоке (`vpnStart`). |
+| `Ping interval (sec)` | числовой ввод | Допустимо 5..9 или `0` (по умолчанию 5). Некорректные значения прерывают подключение со статусом. |
+| **Apps using VPN** | тап | Диалог split-tunneling (`pickApps()`); подпись кнопки — `MiniSIP + N`, где N — число выбранных пакетов. |
+| **VPN connect** | тап | Валидирует поля, вызывает `App.vpnConsent(...)`; после согласия `vpnStart()` (при необходимости резолвит healthcheck) → `App.vpnConnect`. При активном подключении подпись расширяется `MOBIKE: Active / Not supported` и `DPD: <state>`. |
+| **VPN disconnect** | тап | Вызывает `App.vpnDisconnect(page)`. |
+| Переключатель `Log` / save / clear / `▲` / `▼` (VPN) | как в SIP-блоке | То же поведение через `App.vpnLog()`. |
+
+##### Нижний ряд, карточки и жесты уровня приложения
+
+| Элемент / жест | Триггер | Что делает |
+|----------------|---------|-----------|
+| Метка версии `vX.Y.Z` | долгое нажатие ≥ 2 с | Открывает выбор канала обновлений (Stable / Pre-release) с кнопкой **Check**. |
+| Метка версии | движение ≥ 20 dp от центра во время долгого нажатия | Отменяет таймер диалога канала. |
+| Переключатель `Log` (версия) | переключение | Живая область лога `App.updateLog()`. |
+| Кнопка **Delete Page** | натяжение вниз в самом низу в течение 1 с (`dispatchTouchEvent`, при `PageStore.count > 1`) | Кнопка проявляется; тап → диалог подтверждения → `MainActivity.pageDeleted(page)`. Скрыта, если страница одна. |
+| Заголовок карточки SIP / Call / VPN | долгое нажатие | Старт drag-and-drop (alpha карточки падает до 0.2). Порядок сохраняется под ключом `blockOrder`. |
+| Свайп вправо, когда последняя карточка сконфигурирована | свайп | Диалог **Create New Card** (`onPageSelected`); на **Yes** вызывается `PageStore.setCount`, адаптер `Pages` обновляется. |
+| `App.onCreate` | один раз | Регистрирует `ConnectivityManager.registerDefaultNetworkCallback` → `App.onNetwork()` перерегистрирует SIP при смене сети. |
+| Разрешения mic / notifications | первый запуск | Запрашиваются один раз (`RECORD_AUDIO`, на Android 13+ ещё `POST_NOTIFICATIONS`). |
+| Оптимизация батареи | первый запуск после разрешений | Диалог `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (`askBatteryOnce`), пропускается, если уже разрешено. |
+| Плитка Quick Settings | Android 13+, первый запуск | `StatusBarManager.requestAddTileService` один раз предлагает добавить плитку MiniSIP VPN (`tileOffered`). |
+| `CallService` | переход состояния звонка в `CALLING`/`TALK` | Запуск foreground-сервиса (`begin`); `FOREGROUND_SERVICE_TYPE_MICROPHONE` держит микрофон на заблокированном экране. |
+| Флаги локскрина | активный звонок | `setShowWhenLocked` / `setTurnScreenOn` переключаются по `appChangeListener`. |
 
 ---
 

@@ -28,14 +28,9 @@ public interface Vpn {
     }
 
     /**
-     * Текущий режим watchdog: true — PBX (жёсткий), false — обычный VPN (мягкий).
-     */
-    default boolean isStrict() {
-        return false;
-    }
-
-    /**
-     * true — подключена АТС: wake lock и жёсткий watchdog. false — обычный VPN.
+     * true — идёт звонок: жёсткий watchdog (watchdog рвёт туннель при тишине ESP).
+     * false — звонка нет: мягкий watchdog (MOBIKE-refresh, затем реконнект).
+     * Вызывается только из App.begin()/App.finish().
      */
     default void setStrict(boolean on) {
     }

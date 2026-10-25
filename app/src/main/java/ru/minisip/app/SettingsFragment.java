@@ -631,7 +631,7 @@ public final class SettingsFragment extends Fragment {
         versionLabel.setOnTouchListener((v, ev) -> {
             switch (ev.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
-                    gestureHandler.postDelayed(channelDialogRunnable, 2000);
+                    gestureHandler.postDelayed(channelDialogRunnable, 1000);
                     return true;
                 case MotionEvent.ACTION_MOVE:
                     if (Math.abs(ev.getY() - v.getHeight() / 2f) > dp(20)) {

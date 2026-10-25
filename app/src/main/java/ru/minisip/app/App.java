@@ -73,7 +73,6 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     private LogBuffer sipLog;              // SIP log: registration, calls, server responses
     private Update update;                 // Update checker and installer from GitHub Releases
     private LogBuffer updateLog;           // Update log: single instance per app
-    private boolean manualStrict;          // "Always strict" toggle: persistent override
     private String sipHost, sipUser, sipPass;
     private int sipPort;
     private short vpnLossCount = 0;
@@ -292,8 +291,6 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         vpnConnecting = true;
         vpnStatus = "🟡 VPN: connecting...";
         changed();
-        manualStrict = PageStore.prefs(this, page).getBoolean("vpnStrict", false);
-        vpn.setStrict(manualStrict);
         PageStore.setVpnPage(this, page);
         vpn.connect(host, login, password, psk, ca, apps, healthcheckIp, pingIntervalSec);
     }
@@ -319,18 +316,6 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
 
     boolean vpnMobike() {
         return vpn.mobike();
-    }
-
-    boolean isVpnStrict() {
-        return vpn.isStrict();
-    }
-
-    /**
-     * Watchdog mode: true — PBX (strict), false — standard VPN (soft). Applied immediately.
-     */
-    void setVpnStrict(boolean on) {
-        manualStrict = on;
-        vpn.setStrict(on || state != IDLE);
     }
 
     int getVpnLossCount() {
@@ -536,7 +521,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
 
     private void finish(String text) {
         state = IDLE;
-        vpn.setStrict(manualStrict);
+        vpn.setStrict(false);
         if (registered) {
             status = "🟢 Connected | 🔴 " + text;
         } else {
