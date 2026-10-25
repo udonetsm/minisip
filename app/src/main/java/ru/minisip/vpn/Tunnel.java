@@ -1055,7 +1055,7 @@ final class Tunnel {
                 ps.receive(rp);
                 long t = System.currentTimeMillis();
                 if (rp.getLength() >= 28 && srv.equals(rp.getAddress()) && healTries > 0 && !closed.get()
-                        && t - lastIkeRx > deadMs) {
+                        && t - lastEspRx > deadMs) {
                     Log l = log;
                     if (l != null)
                         l.d(why + ": server answers a fresh IKE_SA_INIT, old path/SA is dead: reconnect");
@@ -1080,7 +1080,7 @@ final class Tunnel {
         // от реального начала тишины (lastEspRx), а не от первого heal: heal мог опоздать (hangMs
         // требует новых отправок), а без MOBIKE heal всё равно ничего не лечит — там окно короче.
         long giveUp = (ike != null && ike.mobike) ? HEAL_GIVE_UP_MS : HEAL_GIVE_UP_PLAIN_MS;
-	if (now - healSince >= giveUp) {
+	if (now - lastEspRx >= giveUp) {
             if (l != null)
                 l.d(why + ": no ESP for " + (now - lastEspRx) / 1000 + "s: reconnect");
             lost(why);
@@ -1092,7 +1092,8 @@ final class Tunnel {
         if (n > 1 && now - lastHealAct < HEAL_MIN_GAP_MS) {
             if (l != null) l.d(why + ": heal throttled (last attempt "
                     + (now - lastHealAct) + "ms ago)");
-            return false;
+            healTries--;
+	    return false;
         }
         lastHealAct = now;
         if (n > 1) probePath(why);
