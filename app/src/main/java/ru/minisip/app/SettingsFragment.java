@@ -69,6 +69,7 @@ import java.util.Set;
 
 import ru.minisip.R;
 import ru.minisip.log.LogFile;
+import ru.minisip.log.LogBuffer;
 import ru.minisip.update.Update;
 
 /**
@@ -80,13 +81,8 @@ public final class SettingsFragment extends Fragment {
     private static final String ARG_PAGE = "page";
     private final Handler gestureHandler = new Handler(Looper.getMainLooper());
     private App app;
-    /**
-     * Bridges LogBuffer updates to the VPN log area on the main thread.
-     */
-    private final Runnable vpnLogUpdate = () -> {
-        LogArea a = this.vpnLog;
-        if (a != null && app != null) a.setText(app.vpnLog().text());
-    };
+    
+    
     /**
      * Bridges LogBuffer updates to call history display.
      */
@@ -118,19 +114,13 @@ public final class SettingsFragment extends Fragment {
      */
     private final Runnable renderer = this::render;
     private LinearLayout vpnMainSpoilerContainer, vpnAdvancedSpoilerContainer, sipSpoilerContainer;
-    private LogArea sipLog, vpnLog;
-    /**
-     * Bridges LogBuffer updates to the SIP log area.
-     */
-    private final Runnable sipLogUpdate = () -> {
-        LogArea a = sipLog;
-        if (a != null && app != null) a.setText(app.sipLog().text());
-    };
+    private LogView sipLog;
+    private LogView vpnLog;
     /**
      * Version label view; long press opens update channel dialog.
      */
     private TextView versionLabel;
-    private LogArea updateLog;
+    private LogView updateLog;
     /**
      * Runnable posted on long press to trigger update channel dialog.
      */
@@ -281,7 +271,7 @@ public final class SettingsFragment extends Fragment {
 
         // --- Block 1: PBX Server Settings ---
         Block sipBlock = createBlock(0);
-        sipLog = title(sipBlock.container, "SIP server settings", 0);
+        sipLog = title(sipBlock.container, "SIP server settings", 0, app.sipLog());
 
         sipSpoilerContainer = new LinearLayout(ctx);
         sipSpoilerContainer.setOrientation(LinearLayout.VERTICAL);
@@ -533,7 +523,7 @@ public final class SettingsFragment extends Fragment {
 
         // --- Block 3: VPN Settings ---
         Block vpnBlock = createBlock(2);
-        vpnLog = titleVpn(vpnBlock.container, "VPN settings (IKEv2)", 0);
+        vpnLog = titleVpn(vpnBlock.container, "VPN settings (IKEv2)", 0, app.vpnLog());
 
         vpnMainSpoilerContainer = new LinearLayout(ctx);
         vpnMainSpoilerContainer.setOrientation(LinearLayout.VERTICAL);
@@ -650,7 +640,7 @@ public final class SettingsFragment extends Fragment {
         vlp.gravity = Gravity.CENTER;
         verRow.addView(versionLabel, vlp);
 
-        updateLog = new LogArea(ctx);
+        updateLog = new LogView(ctx, app.updateLog());
         LinearLayout logGroup = new LinearLayout(ctx);
         logGroup.setOrientation(LinearLayout.HORIZONTAL);
         logGroup.setGravity(Gravity.CENTER_VERTICAL);
@@ -774,31 +764,23 @@ public final class SettingsFragment extends Fragment {
         load(vpnHealthcheck, "vpnHealthcheck");
         load(vpnPingInterval, "vpnPingInterval");
         if (vpnLog != null) {
-            vpnLog.onEnable = vpnLogUpdate;
             vpnLog.onClear = () -> app.vpnLog().clear();
-            vpnLog.onSave = () -> saveLog("vpn", vpnLog);
-            vpnLog.setText(app.vpnLog().text());
-            app.vpnLog().setListener(vpnLogUpdate);
+            vpnLog.onSave = () -> saveLogText("vpn", app.vpnLog().text());
+            vpnLog.setActive(vpnLog.toggle.isChecked());
         }
         if (app != null) {
             updateCallHistory(app.callLog().text());
             app.callLog().setListener(callLogUpdate);
         }
         if (sipLog != null) {
-            sipLog.onEnable = sipLogUpdate;
             sipLog.onClear = () -> app.sipLog().clear();
-            sipLog.onSave = () -> saveLog("sip", sipLog);
-            sipLog.setText(app.sipLog().text());
-            app.sipLog().setListener(sipLogUpdate);
+            sipLog.onSave = () -> saveLogText("sip", app.sipLog().text());
+            sipLog.setActive(sipLog.toggle.isChecked());
         }
         if (updateLog != null) {
-            updateLog.onEnable = () -> {
-                if (updateLog != null) updateLog.setText(app.updateLog().text());
-            };
             updateLog.onClear = () -> app.updateLog().clear();
-            updateLog.onSave = () -> saveLog("update", updateLog);
-            updateLog.setText(app.updateLog().text());
-            app.updateLog().setListener(updateLog.onEnable);
+            updateLog.onSave = () -> saveLogText("update", app.updateLog().text());
+            updateLog.setActive(updateLog.toggle.isChecked());
         }
         app.onChange = renderer;     // visible settings page subscribes to App state changes
         render();
@@ -808,10 +790,10 @@ public final class SettingsFragment extends Fragment {
 
     @Override
     public void onPause() {
-        if (app != null) app.vpnLog().setListener(null);
+        if (vpnLog != null) vpnLog.setActive(false);
         if (app != null) app.callLog().setListener(null);
-        if (app != null) app.sipLog().setListener(null);
-        if (app != null) app.updateLog().setListener(null);
+        if (sipLog != null) sipLog.setActive(false);
+        if (updateLog != null) updateLog.setActive(false);
         if (app.onChange == renderer) app.onChange = null;
         super.onPause();
     }
@@ -1458,9 +1440,9 @@ public final class SettingsFragment extends Fragment {
         return t;
     }
 
-    private LogArea title(LinearLayout parent, String text, int top) {
+    private LogView title(LinearLayout parent, String text, int top, LogBuffer buffer) {
         Context ctx = parent.getContext();
-        LogArea area = new LogArea(ctx);
+        LogView area = new LogView(ctx, buffer);
 
         LinearLayout head = new LinearLayout(ctx);
         head.setOrientation(LinearLayout.HORIZONTAL);
@@ -1487,9 +1469,9 @@ public final class SettingsFragment extends Fragment {
     /**
      * Creates VPN block title header with log toggle widget.
      */
-    private LogArea titleVpn(LinearLayout parent, String text, int top) {
+   private LogView titleVpn(LinearLayout parent, String text, int top, LogBuffer buffer) {
         Context ctx = parent.getContext();
-        LogArea area = new LogArea(ctx);
+        LogView area = new LogView(ctx, buffer);
 
         LinearLayout head = new LinearLayout(ctx);
         head.setOrientation(LinearLayout.HORIZONTAL);
@@ -1522,11 +1504,7 @@ public final class SettingsFragment extends Fragment {
         return b;
     }
 
-    private void saveLog(String prefix, LogArea area) {
-        saveLogText(prefix, area.text.getText().toString());
-    }
-
-    private void saveLogText(String prefix, String text) {
+   private void saveLogText(String prefix, String text) {
         if (text.trim().isEmpty()) {
             Toast.makeText(requireContext(), "Log is empty", Toast.LENGTH_SHORT).show();
             return;
@@ -1585,188 +1563,6 @@ public final class SettingsFragment extends Fragment {
         Block(MaterialCardView card, LinearLayout container) {
             this.card = card;
             this.container = container;
-        }
-    }
-
-    /**
-     * UI panel component holding log text field and control buttons.
-     */
-    private final class LogArea {
-        final LinearLayout panel;
-        EditText text;
-        final Switch toggle;
-        volatile boolean enabled = false;
-        Runnable onEnable;
-        Runnable onClear;
-        Runnable onSave;
-
-        LogArea(Context ctx) {
-            panel = new LinearLayout(ctx);
-            panel.setOrientation(LinearLayout.VERTICAL);
-            panel.setVisibility(View.GONE);
-
-            int cp = dp(6);
-            toggle = new Switch(ctx);
-            toggle.setPadding(cp, dp(2), cp, dp(2));
-            toggle.setOnCheckedChangeListener((v, checked) -> {
-                enabled = checked;
-                panel.setVisibility(checked ? View.VISIBLE : View.GONE);
-                if (checked && onEnable != null) onEnable.run();
-            });
-            text = new EditText(ctx);
-            text.setKeyListener(null);
-            text.setTextIsSelectable(true);
-            text.setGravity(Gravity.TOP | Gravity.START);
-            text.setTextAppearance(android.R.style.TextAppearance_Small);
-            text.setHint("Log is empty");
-            text.setPadding(dp(8), dp(8), dp(8), dp(8));
-            text.setMinHeight(dp(44));
-            text.setMaxHeight(dp(300));
-            text.setMovementMethod(new ScrollingMovementMethod());
-            text.setVerticalScrollBarEnabled(true);
-            text.setFocusable(true);
-            text.setFocusableInTouchMode(true);
-            text.setOnTouchListener((v, ev) -> {
-                switch (ev.getActionMasked()) {
-                    case MotionEvent.ACTION_DOWN:
-                        v.getParent().requestDisallowInterceptTouchEvent(true);
-                        break;
-                    case MotionEvent.ACTION_UP:
-                    case MotionEvent.ACTION_CANCEL:
-                        v.getParent().requestDisallowInterceptTouchEvent(false);
-                        break;
-                }
-                return false;
-            });
-
-            GradientDrawable bg = new GradientDrawable();
-            bg.setColor(0x14808080);
-            bg.setStroke(dp(1), 0x33808080);
-            bg.setCornerRadius(dp(8));
-            text.setBackground(bg);
-
-            LinearLayout band = new LinearLayout(ctx);
-            band.setOrientation(LinearLayout.HORIZONTAL);
-            View left = new View(ctx);
-            band.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.085f));
-            band.addView(text, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.83f));
-            View right = new View(ctx);
-            band.addView(right, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.085f));
-
-	    LinearLayout.LayoutParams bandLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            bandLp.topMargin = dp(8);
-            panel.addView(band, bandLp);
-
-            LinearLayout footer = new LinearLayout(ctx);
-            footer.setOrientation(LinearLayout.HORIZONTAL);
-            footer.setGravity(Gravity.CENTER_VERTICAL);
-
-            TextView up = new TextView(ctx);
-            up.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_expand_less, 0, 0, 0);
-            up.setContentDescription("Scroll to top");
-            up.setPadding(cp, dp(2), cp, dp(2));
-            up.setClickable(true);
-            up.setFocusable(true);
-            up.setOnClickListener(v -> scrollToTop());
-            footer.addView(up);
-
-            TextView down = new TextView(ctx);
-            down.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_expand_more, 0, 0, 0);
-            down.setContentDescription("Scroll to bottom");
-            down.setPadding(cp, dp(2), cp, dp(2));
-            down.setClickable(true);
-            down.setFocusable(true);
-            down.setOnClickListener(v -> scrollToBottom());
-            footer.addView(down);
-
-            View footerSpacer = new View(ctx);
-            footer.addView(footerSpacer, new LinearLayout.LayoutParams(0, 0, 1f));
-
-            TextView save = new TextView(ctx);
-            save.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_save, 0, 0, 0);
-            save.setContentDescription("Save log");
-            save.setPadding(cp, dp(2), cp, dp(2));
-            save.setClickable(true);
-            save.setFocusable(true);
-            save.setOnClickListener(v -> {
-                new MaterialAlertDialogBuilder(ctx)
-                        .setTitle("Save log")
-                        .setItems(new String[]{"Copy to clipboard", "Save to file"}, (d, which) -> {
-                            if (which == 0) {
-                                ClipboardManager cm = (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
-                                if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("log", text.getText()));
-                            } else {
-                                if (onSave != null) onSave.run();
-                            }
-                        })
-                        .setNegativeButton("Cancel", null)
-                        .show();
-            });
-            footer.addView(save);
-
-            TextView clear = new TextView(ctx);
-            clear.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_delete, 0, 0, 0);
-            clear.setContentDescription("Clear log");
-            clear.setPadding(cp, dp(2), cp, dp(2));
-            clear.setClickable(true);
-            clear.setFocusable(true);
-            clear.setOnClickListener(v -> {
-                MainActivity.showCustomConfirmDialog(ctx,
-                        "Clear log",
-                        "Delete all log records?",
-                        () -> {
-                            text.setText("");
-                            if (onClear != null) onClear.run();
-                        },
-                        null);
-            });
-            footer.addView(clear);
-
-            LinearLayout footerBand = new LinearLayout(ctx);
-            footerBand.setOrientation(LinearLayout.HORIZONTAL);
-            View fLeft = new View(ctx);
-            footerBand.addView(fLeft, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.085f));
-            footerBand.addView(footer, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.83f));
-            View fRight = new View(ctx);
-            footerBand.addView(fRight, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.085f));
-            panel.addView(footerBand);
-        }
-
-        void setText(String s) {
-            text.post(() -> {
-                if (!enabled) return;
-                boolean near = isNearBottom();
-                text.setText(s);
-                if (near) text.post(this::scrollToBottom);
-            });
-        }
-
-        private boolean isNearBottom() {
-            Layout l = text.getLayout();
-            int lc = text.getLineCount();
-            if (l == null || lc == 0) return true;
-            int view = text.getHeight() - text.getPaddingTop() - text.getPaddingBottom();
-            if (view <= 0) return true;
-            int keepTop = l.getLineTop(Math.max(0, lc - 4));
-            return keepTop < text.getScrollY() + view - 1;
-        }
-
-        private int maxScroll() {
-            Layout l = text.getLayout();
-            if (l == null) return 0;
-            int content = l.getLineTop(text.getLineCount());
-            int view = text.getHeight() - text.getPaddingTop() - text.getPaddingBottom();
-            return Math.max(0, content - view);
-        }
-
-        private void scrollToBottom() {
-            int max = maxScroll();
-            if (max > 0) text.scrollTo(0, max);
-        }
-
-        private void scrollToTop() {
-            text.scrollTo(0, 0);
         }
     }
 
