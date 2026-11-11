@@ -113,7 +113,8 @@ public final class MainActivity extends AppCompatActivity {
 
         final App app = (App) getApplication();
         app.addChangeListener(appChangeListener);
-        updateLockScreenFlags();
+        StatusService.start(this);
+	updateLockScreenFlags();
 
         pager = new ViewPager2(this);
         pager.setId(PAGER_ID);
@@ -247,7 +248,8 @@ public final class MainActivity extends AppCompatActivity {
     @Override
     public void onRequestPermissionsResult(int code, @NonNull String[] perms, @NonNull int[] res) {
         super.onRequestPermissionsResult(code, perms, res);
-        if (code == 1) askBatteryOnce();
+        if (code == 1) StatusService.start(this);
+	if (code == 1) askBatteryOnce();
     }
 
     private void askBatteryOnce() {

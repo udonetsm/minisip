@@ -147,6 +147,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
                     });
         } catch (RuntimeException ignored) {
         }
+	StatusService.start(this);
     }
 
     /**
@@ -236,6 +237,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
      */
     String toggleVpnFromTile(Context ctx) {
         if (vpnUp || vpnConnecting) {
+            if (state != IDLE) return "VPN: can't be turned off during a call";
             if (lastPage < 0) return "VPN: nothing to disconnect";
             vpnDisconnect(lastPage);
             return null;
@@ -307,6 +309,16 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         if (lastPage != page) return;
         vpnAttempts = 0;
         vpn.disconnect();
+    }
+
+    /**
+     * Restarts the running VPN tunnel from scratch. Allowed during a call.
+     * Returns a user-facing message on failure, or null on success.
+     */
+    String reconnectVpn() {
+        if (!(vpnUp || vpnConnecting)) return "VPN: not connected";
+        vpn.reconnect();
+        return null;
     }
 
     String vpnDpd() {
@@ -534,10 +546,11 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
 
     private void changed() {
         if (onChange != null) onChange.run();
-        for (Runnable r : changeListeners) {
+                for (Runnable r : changeListeners) {
             r.run();
         }
         TileService.requestListeningState(this, new ComponentName(this, VpnTileService.class));
+        StatusService.refresh(this);
     }
 
 

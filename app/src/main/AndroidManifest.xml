@@ -45,6 +45,15 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
+        <service
+            android:name=".app.StatusService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Persistent status notification with VPN controls" />
+        </service>
+
         <!-- Системный VPN: tun-интерфейс без root. Класс public лишь потому, что его создаёт система. -->
         <service
             android:name=".vpn.TunService"

@@ -31,7 +31,8 @@ public final class VpnTileService extends TileService {
     @Override
     public void onClick() {
         super.onClick();
-        // If VPN consent is already granted, toggle directly without launching an Activity.
+        StatusService.start(this);
+	// If VPN consent is already granted, toggle directly without launching an Activity.
         // This keeps the Quick Settings panel from collapsing.
         if (VpnService.prepare(this) == null) {
             App app = (App) getApplication();
@@ -44,7 +45,7 @@ public final class VpnTileService extends TileService {
             // then re-sync once the operation settles. requestListeningState in
             // App.changed() is rate-limited and may not re-invoke onStartListening.
             Tile t = getQsTile();
-            if (t != null) {
+            if (msg == null && t != null) {
                 t.setState(wasActive ? Tile.STATE_INACTIVE : Tile.STATE_ACTIVE);
                 t.updateTile();
             }

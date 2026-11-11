@@ -18,19 +18,11 @@ public final class CallService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        NotificationManager nm = getSystemService(NotificationManager.class);
-        nm.createNotificationChannel(
-                new NotificationChannel(CHANNEL, "Call", NotificationManager.IMPORTANCE_LOW));
-        Notification n = new Notification.Builder(this, CHANNEL)
-                .setSmallIcon(android.R.drawable.sym_call_outgoing)
-                .setContentTitle("MiniSIP")
-                .setContentText("Call in progress")
-                .setOngoing(true)
-                .build();
+        Notification n = StatusService.build(this);
         if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+            startForeground(StatusService.NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
         } else {
-            startForeground(1, n);
+            startForeground(StatusService.NOTIF_ID, n);
         }
         return START_STICKY;
     }

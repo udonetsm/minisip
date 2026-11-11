@@ -183,7 +183,7 @@ final class VpnImpl implements Vpn {
         try {
             ctx.startService(svc);
         } catch (IllegalStateException e) {
-            ctx.startForegroundService(svc);
+            abandon("cannot start VPN service in background");
         }
     }
 
@@ -214,6 +214,16 @@ final class VpnImpl implements Vpn {
     public synchronized void disconnect() {
         want = false;
         cancel("disconnected");
+    }
+
+    /**
+     * Restarts the current session from scratch: the tunnel is stopped and recover() starts anew.
+     * onDown is not reported, SIP stays untouched. No-op if no session is running.
+     */
+    @Override
+    public synchronized void reconnect() {
+        if (!running || want || svc == null) return;   // service not ready yet: nothing to restart
+        restart("user reconnect");
     }
 
     /**

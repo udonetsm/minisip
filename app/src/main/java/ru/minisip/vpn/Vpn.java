@@ -78,6 +78,13 @@ public interface Vpn {
      */
     void disconnect();
 
+    /**
+     * Restarts the current session from scratch without reporting onDown.
+     * No-op if no session is running.
+     */
+    default void reconnect() {
+    }
+
     default boolean mobike() {
         return false;
     }
