@@ -146,6 +146,17 @@ To prevent state race conditions and recursive routing conflicts, MiniSIP enforc
   - If `VpnService.prepare(this) == null` (consent already granted) — calls `App.toggleVpnFromTile(this)` directly, keeping the QS panel open. The tile flips optimistically, then re-syncs after 1.5 s.
   - Otherwise — launches `TileProxyActivity` via `startActivityAndCollapse` so the system can display the VPN consent dialog (Android 14+ uses the `PendingIntent` overload).
 
+#### [`StatusService.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/StatusService.java)
+- `static void start(Context ctx)`: Starts foreground status service.
+- `static void refresh(Context ctx)`: Updates the persistent status notification when state changes.
+- `static Notification build(Context ctx)`: Builds notification with action buttons (Connect, Disconnect, Reconnect).
+
+#### [`LogView.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/LogView.java)
+- Manages RecyclerView-based log UI panel, subscribing to `LogBuffer.Delta` events for incremental row rendering, `FollowPolicy` auto-scroll management, new records badge, and export/clear actions.
+
+#### [`FollowPolicy.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/FollowPolicy.java)
+- Pure Java policy (`DETACH_LINES = 3.0`, `FOLLOW_LINES = 0.1`) determining whether log view follows new lines on user scroll. Fully unit-testable on JVM.
+
 #### Control, gesture and event reference (`ru.minisip.app`)
 
 This table is the authoritative reference for every interactive control exposed by the `ru.minisip.app` package. It complements the per-class method lists above and should be kept in sync with `SettingsFragment.onCreateView`, `MainActivity` and `PageStore`.

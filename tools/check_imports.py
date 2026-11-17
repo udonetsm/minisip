@@ -74,7 +74,7 @@ if has_cycle():
 
 # --- 3: сигнатуры публичных интерфейсов ---
 OK_TYPES = {"void", "int", "long", "boolean", "String", "byte[]", "short[]", "Context",
-            "Listener", "Udp", "Media", "Sip", "Screen", "Vpn", "Update", "LogSink", "LogBuffer", "Runnable", "int...", "Object", "Result", "File"}
+            "Listener", "Udp", "Media", "Sip", "Screen", "Vpn", "Update", "LogSink", "LogBuffer", "Delta", "Runnable", "int...", "Object", "Result", "File"}
 for pkg, names in IFACE.items():
     for name in names:
         f = ROOT / pkg / f"{name}.java"

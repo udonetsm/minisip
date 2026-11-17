@@ -112,6 +112,17 @@ MiniSIP реализован на основе декларативного ра
   - Если `VpnService.prepare(this) == null` (согласие уже получено) — вызывает `App.toggleVpnFromTile(this)` напрямую, шторка Quick Settings не закрывается. Плитка переключается оптимистично и синхронизируется через 1.5 с.
   - Иначе — запускает `TileProxyActivity` через `startActivityAndCollapse`, чтобы система показала диалог согласия VPN (Android 14+ использует `PendingIntent`-перегрузку).
 
+#### [`StatusService.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/StatusService.java)
+- `static void start(Context ctx)`: Запуск foreground-сервиса статуса.
+- `static void refresh(Context ctx)`: Обновление постоянного уведомления статуса при изменении состояния.
+- `static Notification build(Context ctx)`: Построение уведомления с интерактивными кнопками (Connect, Disconnect, Reconnect).
+
+#### [`LogView.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/LogView.java)
+- Управление RecyclerView-панелью логов, подписка на события `LogBuffer.Delta` для инкрементального добавления строк, управление автопрокруткой через `FollowPolicy`, бейдж новых записей и действия сохранения/очистки.
+
+#### [`FollowPolicy.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/FollowPolicy.java)
+- Чистая Java-политика (`DETACH_LINES = 3.0`, `FOLLOW_LINES = 0.1`) для определения, следует ли панели логов следовать за новыми строками при ручной прокрутке. Полностью тестируема на JVM.
+
 #### Справочник управления: кнопки, жесты и события (`ru.minisip.app`)
 
 Таблица — авторитетная шпаргалка по всем интерактивным элементам Android-интерфейса MiniSIP. Она дополняет списки методов выше и должна синхронизироваться с `SettingsFragment.onCreateView`, `MainActivity` и `PageStore`.

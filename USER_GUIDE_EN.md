@@ -22,6 +22,7 @@ Upon initial launch and feature activation, MiniSIP requests the following permi
 3. **Battery Optimization Exclusion (`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`)**: Disabling battery optimization ensures the Android OS does not kill background SIP sockets or VPN keepalive timers.
 4. **VPN Consent**: Tapping `VPN connect` triggers Android's standard `VpnService` permission dialog to create the virtual `tun0` network interface.
 5. **Install Unknown Packages (`REQUEST_INSTALL_PACKAGES`)**: Allows the app to auto-update via GitHub Releases using the integrated `UpdateBar`.
+6. **Persistent Status Notification (`StatusService`)**: Displays current VPN and SIP status in the notification shade with quick action buttons (Connect / Disconnect / Reconnect) for instant control without opening the UI.
 
 ---
 

@@ -717,7 +717,7 @@ def delete(lines, log):
 def silent(lines, log):
     return [
         ("tunnel up", has(lines, "EV up")),
-        ("dead server detected (DPD, then timeout)", "EV down server does not respond" in lines),
+        ("dead server detected (DPD, then timeout)", any(l.startswith("EV down server does not respond") for l in lines)),
     ]
 
 

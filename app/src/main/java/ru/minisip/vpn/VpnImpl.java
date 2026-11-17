@@ -58,18 +58,18 @@ final class VpnImpl implements Vpn {
     private volatile Listener lis = new Listener() {
     };
     private volatile LogSink sink;
-    private volatile Tunnel tunnel;                 // действующий (или поднимающийся) сеанс; null — сеанса нет
-    private TunService svc;                // живой экземпляр сервиса сеанса
+    private volatile Tunnel tunnel;                 // active session; null if no session
+    private TunService svc;                // active session service instance
     private String host, identity, psk, password, ca, apps, healthcheckIp;
     private int pingIntervalSec = 5;
-    private boolean running;               // connect() был, disconnect()/сброса ещё не было
-    private boolean want;                  // connect() был, сервис ещё не ответил
-    private boolean strict;                // идёт звонок: жёсткий watchdog (wake lock держится всегда)
+    private boolean running;               // connect() called, disconnect() not yet called
+    private boolean want;                  // connect() called, service not yet responded
+    private boolean strict;                // call active: strict watchdog (wake lock held continuously)
     private PowerManager.WakeLock wl;
-    private int gen;                       // меняется при connect/disconnect/revoke/рестарте: отменяет циклы
-    private Thread recovery;               // поток подъёма/переподключения; null — не идёт
-    private volatile int migs, heals, silences, kept;   // Mig / Heal / Silence / Kept: события без реконнекта
-    private int reconnects;                // реконнектов с последнего connect(): +1 на каждый обрыв/смену сети
+    private int gen;                       // increments on connect/disconnect/revoke/restart
+    private Thread recovery;               // recovery thread; null if idle
+    private volatile int migs, heals, silences, kept;   // Mig / Heal / Silence / Kept event counters
+    private int reconnects;                // reconnects since last connect()
 
     VpnImpl(Context ctx) {
         this.ctx = ctx.getApplicationContext();
@@ -88,7 +88,7 @@ final class VpnImpl implements Vpn {
     }
 
     /**
-     * Одна точка журнала: logcat и панель лога. Секреты сюда не передавать.
+     * Single log entry: logcat and UI buffer. Do not pass secrets.
      */
     private void log(String m) {
         Log.i(TAG, m);
@@ -111,10 +111,7 @@ final class VpnImpl implements Vpn {
     }
 
     /**
-     * Режим работы. true — идёт звонок: Tunnel жёстко следит за ответами (watchdog рвёт связь).
-     * false — звонка нет: watchdog мягкий (MOBIKE-refresh, потом реконнект). Wake lock в обоих
-     * режимах держится, пока VPN запущен (независимо от strict).
-     * Можно звать в любой момент и сколько угодно раз.
+     * Strict mode configuration.
      */
     @Override
     public synchronized void setStrict(boolean on) {
@@ -127,9 +124,7 @@ final class VpnImpl implements Vpn {
     }
 
     /**
-     * Partial wake lock держим ВСЕГДА, пока VPN запущен (туннель поднят или идёт переподключение),
-     * независимо от режима strict: иначе при сне CPU замолкает поток vpn-keep, NAT-запись
-     * умирает и сервер шлёт ESP на старый порт. Под замком.
+     * Partial wake lock held continuously while VPN is active.
      */
     private void updateWake() {
         if (running) {
@@ -158,10 +153,7 @@ final class VpnImpl implements Vpn {
         Tunnel old = tunnel;
         tunnel = null;
         if (old != null) old.stop("replaced");
-        // Если предыдущий сеанс уже был привязан к живому TunService, гасим его перед запуском
-        // нового. Иначе startService переиспользует тот же экземпляр, serviceReady сработает
-        // повторно, а асинхронный onRevoke от системы может прилететь уже в новую сессию и
-        // её сбросить (гонка).
+        // If previous session was bound to active TunService, stop it before starting new
         if (svc != null) {
             svc = null;
             ctx.stopService(new Intent(ctx, TunService.class));
@@ -251,10 +243,10 @@ final class VpnImpl implements Vpn {
         cancel("VPN was revoked by another VPN");
     }
 
-    // ---------------------------------------------------------------- сеть
+    // ---------------------------------------------------------------- network
 
     /**
-     * Сеть под VPN изменилась (другая, пропала, вернулась). Под замком.
+     * Network under VPN changed.
      */
     private synchronized void networkChanged() {
         log("networkChanged: running=" + running + " want=" + want + " svc=" + (svc != null)
@@ -266,8 +258,7 @@ final class VpnImpl implements Vpn {
         if (t != null) t.setOnline(on);
         if (!on) {
             if (t != null && t.isUp() && t.mobike()) {
-                // MOBIKE: SA и tun переживают пропажу сети; по возвращении сети — migrate. Если сервер
-                // за это время забыл SA, migrate не подтвердится и будет обычный реконнект.
+                // MOBIKE: SA and tun survive network loss; migrate upon return
                 log("network lost: MOBIKE tunnel kept, waiting for the network");
                 kept++;
                 return;
@@ -288,12 +279,12 @@ final class VpnImpl implements Vpn {
                 migs++;
                 t.migrate(ok -> onMigrated(t, g, ok));
             } else if (watch.sameAsMarked()) {
-                t.nudge();                                // та же сеть вернулась: проверить, жив ли путь
+                t.nudge();                                // same network returned: check if path alive
             } else {
                 restart("network changed");
             }
         } else {
-            restart("network changed");                   // идёт подъём или цикл: начинаем заново
+            restart("network changed");                   // connecting or recovering: restart
         }
     }
 
@@ -302,17 +293,17 @@ final class VpnImpl implements Vpn {
         if (ok) {
             log("MOBIKE update done");
             String f = t.iface();
-            if (f != null) lis.onUp(f);                   // App перепривяжет сокеты
+            if (f != null) lis.onUp(f);                   // App rebinds sockets
         } else {
             log("MOBIKE update failed: full reconnect");
             restart("network changed");
         }
     }
 
-    // ---------------------------------------------------------------- управление сеансом
+    // ---------------------------------------------------------------- session lifecycle
 
     /**
-     * Полное переподключение с нуля (старый Tunnel молчит). Под замком.
+     * Full reconnect from scratch.
      */
     private void restart(String reason) {
         log("restart: " + reason);
@@ -324,13 +315,13 @@ final class VpnImpl implements Vpn {
         tunnel = null;
         if (t != null) t.stop(reason);
         reconnects++;
-        lis.onPingLoss(0);                            // новый реконнект: Loss с нуля
-        lis.onReconnecting(reason, 1);                // 1 = начало нового цикла; App считает по нему Recon
+        lis.onPingLoss(0);                            // new reconnect: Loss reset to 0
+        lis.onReconnecting(reason, 1);                // 1 = start of new cycle
         startRecovery(SETTLE_MS, false);
     }
 
     /**
-     * Останавливает сеанс и восстановление, сообщает onDown (под замком).
+     * Stops session and recovery thread, notifies onDown.
      */
     private void cancel(String reason) {
         gen++;
@@ -344,7 +335,7 @@ final class VpnImpl implements Vpn {
             ctx.stopService(new Intent(ctx, TunService.class));
             clear();
             lis.onDown(reason);
-        } else if (t != null) {            // Guard сам скажет onDown, погасит сервис и сбросит состояние
+        } else if (t != null) {            // Guard notifies onDown, stops service and clears state
             t.stop(reason);
         } else {
             ctx.stopService(new Intent(ctx, TunService.class));
@@ -353,7 +344,7 @@ final class VpnImpl implements Vpn {
     }
 
     /**
-     * Окончательный конец (фатальная ошибка): всё в исходное состояние. Под замком.
+     * Permanent failure handling: resets state.
      */
     private void abandon(String reason) {
         gen++;
@@ -369,7 +360,7 @@ final class VpnImpl implements Vpn {
     private void clear() {
         running = false;
         want = false;
-        updateWake();                       // VPN остановлен: wake lock не нужен (strict остаётся как есть)
+        updateWake();                       // VPN stopped: wake lock released
         watch.stop();
         host = identity = password = psk = ca = apps = healthcheckIp = null;
         svc = null;
@@ -380,7 +371,7 @@ final class VpnImpl implements Vpn {
         t.supervised = true;
         t.strict = strict;
         String hc = healthcheckIp == null ? "" : healthcheckIp.trim();
-        t.pingHost = (hc.isEmpty() || hc.equals("0")) ? host : hc;           // если 0 или пусто — пингуем сам сервер
+        t.pingHost = (hc.isEmpty() || hc.equals("0")) ? host : hc;           // fallback to server host if empty or 0
         int intervalSec = (pingIntervalSec <= 0) ? 5 : Math.max(5, Math.min(9, pingIntervalSec));
         t.pingMs = intervalSec * 1000;
         t.log = this::log;
@@ -392,7 +383,7 @@ final class VpnImpl implements Vpn {
         return t;
     }
 
-    private void startRecovery(long firstWait, boolean unused) {   // под замком
+    private void startRecovery(long firstWait, boolean unused) {
         final int g = gen;
         final long w = firstWait;
         Thread t = new Thread(() -> recover(g, w), "vpn-recover");
@@ -402,8 +393,7 @@ final class VpnImpl implements Vpn {
     }
 
     /**
-     * Цикл подъёма. Нет сети — ждём, попытки не тратим. Сетевая неудача — пауза и снова.
-     * Фатальная (пароль, сертификат, алгоритмы, tun) — конец с onDown.
+     * Recovery loop.
      */
     private void recover(int g, long firstWait) {
         long wait = firstWait;
@@ -442,7 +432,7 @@ final class VpnImpl implements Vpn {
                 synchronized (this) {
                     if (g != gen) return;
                     if (tunnel == t) tunnel = null;
-                    if (finished && !gd.retryable) {       // фатально: повторять бессмысленно
+                    if (finished && !gd.retryable) {       // fatal: do not retry
                         abandon(gd.why == null ? "connection failed" : gd.why);
                         return;
                     }
@@ -453,22 +443,22 @@ final class VpnImpl implements Vpn {
                 step = (step + 1) % BACKOFF_MS.length;
             }
         } catch (InterruptedException e) {
-            // отменили (disconnect, новый connect, смена сети)
+            // cancelled (disconnect, new connect, network change)
         }
     }
 
     /**
-     * Пропускает события только от действующего сеанса: старые, заменённые, молчат.
+     * Ignores events from superseded sessions.
      */
     private final class Guard implements Listener, Tunnel.PathEvents {
         final CountDownLatch done = new CountDownLatch(1);
         volatile Tunnel owner;
-        volatile boolean ok;                       // дошла до onUp
-        volatile boolean retryable;                // неудача сетевая, можно повторять
+        volatile boolean ok;                       // reached onUp
+        volatile boolean retryable;                // network failure, can retry
         volatile String why;
 
         /**
-         * Лечение пути и срабатывания детекторов: отдельные счётчики, Recon и Loss не трогаем.
+         * Path recovery event listeners.
          */
         @Override
         public void heal(String why) {
@@ -506,19 +496,18 @@ final class VpnImpl implements Vpn {
             Tunnel o = owner;
             retryable = o != null && o.retryable;
             synchronized (VpnImpl.this) {
-                if (tunnel == owner && ok) {       // поднятый сеанс закрыт окончательно
+                if (tunnel == owner && ok) {       // active session closed
                     tunnel = null;
                     ctx.stopService(new Intent(ctx, TunService.class));
                     clear();
                     lis.onDown(reason);
                 }
-                // неудачная попытка молчит: решает цикл recover()
             }
             done.countDown();
         }
 
         /**
-         * Поднятый сеанс оборвался: переподключаемся.
+         * Active tunnel lost: reconnecting.
          */
         @Override
         public void onReconnecting(String reason) {
@@ -527,7 +516,7 @@ final class VpnImpl implements Vpn {
                 if (tunnel != owner) return;
                 tunnel = null;
                 reconnects++;
-                lis.onPingLoss(0);                    // обрыв поднятого туннеля: Loss с нуля, Recon +1
+                lis.onPingLoss(0);                    // connection drop: Loss reset to 0
                 lis.onReconnecting(reason, 1);
                 startRecovery(SETTLE_MS, false);
             }
