@@ -72,7 +72,11 @@ To prevent state race conditions and recursive routing conflicts, MiniSIP enforc
 - `void onDown(String reason)`: VPN listener callback on tunnel disconnection.
 - `void dial(int page, String number)`: Initiates outgoing SIP call.
 - `void setSpeaker(boolean on)`: Toggles speakerphone audio route.
+- `boolean isSpeakerOn()`: Returns speakerphone state.
 - `void setMute(boolean mute)`: Toggles microphone mute.
+- `boolean isMuted()`: Returns microphone mute state.
+- `long callStartMs()`: Returns call start timestamp (`when`).
+- `String callPeer()`: Returns callee/peer number for call notification person.
 - `boolean isMuted()`: Returns microphone mute state.
 - `void hangup(int page)`: Terminates active call or cancels outgoing call.
 - `void transfer(int page, String target)`: Executes blind transfer (REFER).
@@ -149,7 +153,10 @@ To prevent state race conditions and recursive routing conflicts, MiniSIP enforc
 #### [`StatusService.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/StatusService.java)
 - `static void start(Context ctx)`: Starts foreground status service.
 - `static void refresh(Context ctx)`: Updates the persistent status notification when state changes.
-- `static Notification build(Context ctx)`: Builds notification with action buttons (Connect, Disconnect, Reconnect).
+- `static Notification build(Context ctx)`: Builds notification with action buttons (Connect, Disconnect, Reconnect) or ongoing call notification with `Notification.CallStyle` (Speaker, Mute, Hang up actions) for status bar call chip integration.
+
+#### [`CallActionReceiver.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/CallActionReceiver.java)
+- `void onReceive(Context context, Intent intent)`: Broadcast receiver handling call-control intents (`ACTION_SPEAKER`, `ACTION_MUTE`, `ACTION_HANGUP`) from the ongoing call notification and status bar chip.
 
 #### [`LogView.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/LogView.java)
 - Manages RecyclerView-based log UI panel, subscribing to `LogBuffer.Delta` events for incremental row rendering, `FollowPolicy` auto-scroll management, new records badge, and export/clear actions.

@@ -54,6 +54,11 @@
                 android:value="Persistent status notification with VPN controls" />
         </service>
 
+        <!-- Call notification actions: speaker, mute, hang up. -->
+        <receiver
+            android:name=".app.CallActionReceiver"
+            android:exported="false" />
+
         <!-- Системный VPN: tun-интерфейс без root. Класс public лишь потому, что его создаёт система. -->
         <service
             android:name=".vpn.TunService"

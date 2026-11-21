@@ -3,6 +3,7 @@ package ru.minisip.app;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.Person;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
@@ -13,6 +14,8 @@ import android.os.Build;
 import android.os.IBinder;
 import android.widget.Toast;
 
+import ru.minisip.R;
+
 /**
  * Owns the single persistent foreground notification shown at all times.
  * Buttons depend on state: Connect (VPN off), Disconnect + Reconnect (VPN on),
@@ -22,6 +25,7 @@ public final class StatusService extends Service {
 
     static final int NOTIF_ID = 1;
     private static final String CHANNEL = "status";
+    private static final String CALL_CHANNEL = "call";
     private static final String ACTION_TOGGLE = "ru.minisip.action.TOGGLE";
     private static final String ACTION_RECONNECT = "ru.minisip.action.RECONNECT";
     private static final String ACTION_REFRESH = "ru.minisip.action.REFRESH";
@@ -45,14 +49,14 @@ public final class StatusService extends Service {
      */
     static void refresh(Context ctx) {
         if (!running) return;
-        String t = text((App) ctx.getApplicationContext());
-        if (t.equals(posted)) return;
-        posted = t;
+        String sig = signature((App) ctx.getApplicationContext());
+        if (sig.equals(posted)) return;
+        posted = sig;
         ctx.getSystemService(NotificationManager.class).notify(NOTIF_ID, build(ctx));
     }
 
     /**
-     * Short state line; every button-relevant state is reflected in it, so it doubles as change signature.
+     * Short state line displayed in the notification body.
      */
     private static String text(App app) {
         String vpn;
@@ -60,6 +64,14 @@ public final class StatusService extends Service {
         else if (app.vpnConnecting) vpn = "VPN: connecting";
         else vpn = "VPN: off";
         return app.state != App.IDLE ? vpn + " | Call in progress" : vpn;
+    }
+
+    /**
+     * Change signature for refresh(): must include every state that affects the notification,
+     * including the call controls (speaker / mute), so a toggle re-posts the notification.
+     */
+    private static String signature(App app) {
+        return text(app) + "|" + app.state + "|" + (app.isSpeakerOn() ? "1" : "0") + "|" + (app.isMuted() ? "1" : "0");
     }
 
     private static PendingIntent action(Context ctx, String action, int code) {
@@ -83,6 +95,7 @@ public final class StatusService extends Service {
     @SuppressWarnings("deprecation")
     static Notification build(Context ctx) {
         App app = (App) ctx.getApplicationContext();
+        if (app.state != App.IDLE) return buildCall(ctx, app);
         ctx.getSystemService(NotificationManager.class).createNotificationChannel(
                 new NotificationChannel(CHANNEL, "Status", NotificationManager.IMPORTANCE_LOW));
         Intent open = new Intent(ctx, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -102,6 +115,60 @@ public final class StatusService extends Service {
             b.addAction(0, "Reconnect", action(ctx, ACTION_RECONNECT, 2));
         }
         return b.build();
+    }
+
+    /**
+     * Ongoing-call notification: CallStyle on API 31+, three-action plain builder below.
+     * System UI turns this into the status-bar call chip when the platform supports it.
+     */
+    @SuppressWarnings("deprecation")
+    private static Notification buildCall(Context ctx, App app) {
+        NotificationManager nm = ctx.getSystemService(NotificationManager.class);
+        NotificationChannel call = new NotificationChannel(CALL_CHANNEL, "Call", NotificationManager.IMPORTANCE_HIGH);
+        call.setSound(null, null);
+        call.enableVibration(false);
+        nm.createNotificationChannel(call);
+
+        PendingIntent open = PendingIntent.getActivity(ctx, 0,
+                new Intent(ctx, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent hangup = callAction(ctx, CallActionReceiver.ACTION_HANGUP, 5);
+        PendingIntent speaker = callAction(ctx, CallActionReceiver.ACTION_SPEAKER, 6);
+        PendingIntent mute = callAction(ctx, CallActionReceiver.ACTION_MUTE, 7);
+
+        Notification.Builder b = new Notification.Builder(ctx, CALL_CHANNEL)
+                .setSmallIcon(R.drawable.ic_call)
+                .setContentTitle("MiniSIP")
+                .setContentText(text(app))
+                .setOngoing(true)
+                .setDeleteIntent(action(ctx, ACTION_REFRESH, 4))
+		.setOnlyAlertOnce(true)
+                .setCategory(Notification.CATEGORY_CALL)
+                .setWhen(app.callStartMs())
+                .setShowWhen(true)
+                .setUsesChronometer(app.state == App.TALK)
+                .setContentIntent(open);
+
+        if (Build.VERSION.SDK_INT >= 31) {
+            Person person = new Person.Builder()
+                    .setName(app.callPeer().isEmpty() ? "Call" : app.callPeer())
+                    .setImportant(true)
+                    .build();
+            b.setStyle(Notification.CallStyle.forOngoingCall(person, hangup));
+        }
+        b.addAction(R.drawable.ic_volume_up, app.isSpeakerOn() ? "Phone" : "Speaker", speaker);
+        b.addAction(app.isMuted() ? R.drawable.ic_mic_off : R.drawable.ic_mic, app.isMuted() ? "Unmute" : "Mute", mute);
+        if (Build.VERSION.SDK_INT < 31) b.addAction(R.drawable.ic_call_end, "Hang up", hangup);
+        return b.build();
+    }
+
+    /**
+     * Broadcast PendingIntent for a call action; distinct request codes keep actions apart.
+     */
+    private static PendingIntent callAction(Context ctx, String action, int code) {
+        return PendingIntent.getBroadcast(ctx, code,
+                new Intent(ctx, CallActionReceiver.class).setAction(action),
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
     @Override
@@ -124,7 +191,7 @@ public final class StatusService extends Service {
         } else {
             startForeground(NOTIF_ID, n);
         }
-        posted = text(app);
+        posted = signature(app);
         return START_STICKY;
     }
 

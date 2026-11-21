@@ -1,8 +1,6 @@
 package ru.minisip.app;
 
 import android.app.Notification;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
@@ -14,8 +12,6 @@ import android.os.IBinder;
  */
 public final class CallService extends Service {
 
-    private static final String CHANNEL = "call";
-
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Notification n = StatusService.build(this);
@@ -24,11 +20,20 @@ public final class CallService extends Service {
         } else {
             startForeground(StatusService.NOTIF_ID, n);
         }
-        return START_STICKY;
+        return START_NOT_STICKY;
     }
 
     @Override
     public IBinder onBind(Intent intent) {
         return null;
     }
+
+    @Override
+    public void onDestroy() {
+        // Keep the shared notification (same NOTIF_ID as StatusService) on screen;
+        // StatusService.refresh() replaces its content after the call ends.
+        stopForeground(STOP_FOREGROUND_DETACH);
+        super.onDestroy();
+    } 
+
 }

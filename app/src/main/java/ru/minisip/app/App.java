@@ -38,6 +38,9 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     boolean registered = false;
     boolean connecting = false;
     String status = "🔴 Disconnected";
+    boolean speakerOn = false;      // source of truth for the call notification
+    long callStartMs = 0L;          // 0 outside a call; positive "when" for the chip timer
+    String callPeer = "";           // callee number shown on the call chip; empty outside a call
     boolean vpnUp = false;
     boolean vpnConnecting = false;
     int vpnAttempts = 0;
@@ -480,6 +483,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
             changed();
             return;
         }
+        callPeer = number == null ? "" : number.trim();
         begin(CALLING, "🟢 Connected | 🟡 Calling...");
         sip.call(number);
     }
@@ -488,7 +492,21 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
      * Sets audio output route: true for speakerphone, false for earpiece.
      */
     void setSpeaker(boolean on) {
+        speakerOn = on;
         media.setSpeaker(on);
+        changed();
+    }
+
+    boolean isSpeakerOn() {
+        return speakerOn;
+    }
+
+    long callStartMs() {
+        return callStartMs;
+    }
+
+    String callPeer() {
+        return callPeer;
     }
 
     /**
@@ -496,6 +514,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
      */
     void setMute(boolean mute) {
         media.setMute(mute);
+        changed();
     }
 
     boolean isMuted() {
@@ -525,6 +544,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
     private void begin(int newState, String text) {
         state = newState;
         status = text;
+        callStartMs = System.currentTimeMillis();
         vpn.setStrict(true);
         startForegroundService(new Intent(this, CallService.class));
         screen.start();
@@ -533,6 +553,8 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
 
     private void finish(String text) {
         state = IDLE;
+        callStartMs = 0L;
+        callPeer = "";
         vpn.setStrict(false);
         if (registered) {
             status = "🟢 Connected | 🔴 " + text;
@@ -608,6 +630,7 @@ public final class App extends Application implements Sip.Listener, Vpn.Listener
         main.post(() -> {
             callLog.log("call connected");
             state = TALK;
+            callStartMs = System.currentTimeMillis();
             status = "🟢 Connected | 🟢 Call in progress";
             changed();
         });
