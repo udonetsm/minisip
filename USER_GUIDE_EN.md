@@ -22,7 +22,7 @@ Upon initial launch and feature activation, MiniSIP requests the following permi
 3. **Battery Optimization Exclusion (`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`)**: Disabling battery optimization ensures the Android OS does not kill background SIP sockets or VPN keepalive timers.
 4. **VPN Consent**: Tapping `VPN connect` triggers Android's standard `VpnService` permission dialog to create the virtual `tun0` network interface.
 5. **Install Unknown Packages (`REQUEST_INSTALL_PACKAGES`)**: Allows the app to auto-update via GitHub Releases using the integrated `UpdateBar`.
-6. **Persistent Status Notification (`StatusService`)**: Displays current VPN and SIP status in the notification shade with quick action buttons (Connect / Disconnect / Reconnect) for instant control without opening the UI.
+6. **Persistent Status Notification & Status Bar Call Chip (`StatusService`)**: Displays current VPN and SIP status in the notification shade with quick action buttons (Connect / Disconnect / Reconnect). During an active call, Android automatically constructs an interactive **Status Bar Call Chip** with a timer and a heads-up menu featuring quick actions for Speaker, Mute, and Hang up.
 
 ---
 
@@ -70,6 +70,10 @@ In the **SIP server settings** block, enter:
 - **Call / Hangup**: Initiates or terminates calls using vector drawables `ic_call` and `ic_call_end`. State transitions to `Calling...`, then `Talk`.
 - **Mute**: Toggles microphone input using `ic_mic` and `ic_mic_off`. Active mute highlights the button with a red border.
 - **Spk**: Switches audio output between the loud speakerphone and the earpiece using `ic_volume_up`.
+- **Status Bar Call Chip**: During an active call, Android displays a status bar chip with a live timer. Tapping the chip opens a compact heads-up overlay without expanding the notification shade, providing instant controls:
+  - **Speaker / Phone**: Toggles audio routing (speakerphone vs earpiece).
+  - **Mute / Unmute**: Toggles microphone mute.
+  - **Hang up**: Instantly terminates the call or cancels outgoing dialing.
 - **Refers**: Call transfer directory.
   - Maintains a list of saved transfer contacts (Login + Name).
   - Tapping the transfer action (`ic_transfer`) next to a contact performs an instant **Blind Transfer** via RFC 3515 `REFER`.
@@ -196,6 +200,7 @@ This chapter is a single-source-of-truth cheat-sheet for every interactive eleme
 | **Long-press a card header (SIP / Call / VPN)** | Drags the card to reorder blocks. Order is saved in the page preferences. |
 | **Swipe to the next page** when the last page is already configured | Opens the **Create New Card** dialog. |
 | **Quick Settings tile** | Toggles VPN without opening the app. Long-press to open the profile picker (if you have more than one VPN profile configured). |
+| **Status Bar Call Chip** | Tap during a call to open heads-up menu with **Speaker**, **Mute**, and **Hang up** actions. |
 | First launch | System prompts ask for `RECORD_AUDIO`, `POST_NOTIFICATIONS`, battery-optimization exclusion, and (once) to add the MiniSIP VPN Quick Settings tile. |
 
 ### 8.5 Status colour legend (call history)

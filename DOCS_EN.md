@@ -77,7 +77,6 @@ To prevent state race conditions and recursive routing conflicts, MiniSIP enforc
 - `boolean isMuted()`: Returns microphone mute state.
 - `long callStartMs()`: Returns call start timestamp (`when`).
 - `String callPeer()`: Returns callee/peer number for call notification person.
-- `boolean isMuted()`: Returns microphone mute state.
 - `void hangup(int page)`: Terminates active call or cancels outgoing call.
 - `void transfer(int page, String target)`: Executes blind transfer (REFER).
 - `void onRekey(String info)`: VPN listener callback on IPsec SA rekey.
@@ -90,6 +89,7 @@ To prevent state race conditions and recursive routing conflicts, MiniSIP enforc
 #### [`CallService.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/CallService.java)
 - `int onStartCommand(Intent intent, int flags, int startId)`: Starts foreground service with microphone type.
 - `IBinder onBind(Intent intent)`: Returns null (not bound).
+- `void onDestroy()`: Detaches service from shared notification (`STOP_FOREGROUND_DETACH`), keeping `StatusService` persistent status notification visible.
 
 #### [`MainActivity.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/MainActivity.java)
 - `static void showCustomConfirmDialog(...)`: Displays styled confirmation dialog with custom buttons.
@@ -104,6 +104,8 @@ To prevent state race conditions and recursive routing conflicts, MiniSIP enforc
 - `static int count(Context c)`: Returns total created settings pages.
 - `static void setCount(Context c, int n)`: Saves total settings page count.
 - `static boolean configured(Context c, int page)`: Checks if server and login are configured.
+- `static int vpnPage(Context c)`, `static void setVpnPage(Context c, int page)`: Gets/sets active VPN profile page index.
+- `static boolean vpnConfigured(Context c, int page)`, `static int firstConfiguredVpnPage(Context c)`, `static List<Integer> configuredVpnPages(Context c)`: Resolves configured VPN profile pages for the Quick Settings tile.
 - `static List<Refer> refers(Context c, int page)`: Reads transfer contacts list.
 - `static void setRefers(...)`: Saves transfer contacts list.
 - `static void deletePage(Context c, int pageToDelete)`: Deletes profile page and shifts remaining preference files.

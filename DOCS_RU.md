@@ -68,12 +68,16 @@ MiniSIP реализован на основе декларативного ра
 - `void vpnDenied(int page)`: Обработка отказа разрешений VPN.
 - `void vpnError(...)`: Обработка ошибок VPN.
 - `void onUp(...)`, `void onReconnecting(...)`, `void onDown(...)`: Слушатели состояния VPN.
-- `void dial(...)`, `void setSpeaker(...)`, `void setMute(...)`, `boolean isMuted()`, `void hangup(...)`, `void transfer(...)`: Управление вызовом.
+- `void dial(...)`, `void setSpeaker(...)`, `boolean isSpeakerOn()`, `void setMute(...)`, `boolean isMuted()`, `long callStartMs()`, `String callPeer()`, `void hangup(...)`, `void transfer(...)`: Управление вызовом и состоянием уведомлений.
 - `void onRekey(...)`, `void onPingLoss(...)`, `void onRegistered(...)`, `void onRinging(...)`, `void onConnected(...)`, `void onEnded(...)`: Слушатели SIP/VPN событий.
 
 #### [`CallService.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/CallService.java)
 - `int onStartCommand(...)`: Запуск Foreground Service типа `microphone`.
 - `IBinder onBind(...)`: Возвращает null.
+- `void onDestroy()`: Отсоединяет сервис от системного уведомления (`STOP_FOREGROUND_DETACH`), сохраняя общее постоянное уведомление `StatusService`.
+
+#### [`CallActionReceiver.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/CallActionReceiver.java)
+- `void onReceive(Context context, Intent intent)`: BroadcastReceiver для обработки быстрых команд вызова (`ACTION_SPEAKER`, `ACTION_MUTE`, `ACTION_HANGUP`) из системного чипа вызова и шторки уведомлений.
 
 #### [`MainActivity.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/MainActivity.java)
 - `static void showCustomConfirmDialog(...)`: Диалог с кастомными кнопками.
@@ -87,6 +91,8 @@ MiniSIP реализован на основе декларативного ра
 - `static SharedPreferences prefs(...)`: Получение настроек страницы.
 - `static int count(...)`, `static void setCount(...)`: Количество страниц.
 - `static boolean configured(...)`: Проверка заполнения АТС.
+- `static int vpnPage(...)`, `static void setVpnPage(...)`: Чтение/запись индекса текущей VPN-страницы.
+- `static boolean vpnConfigured(...)`, `static int firstConfiguredVpnPage(...)`, `static List<Integer> configuredVpnPages(...)`: Проверка и выбор сконфигурированных профилей VPN для плитки Quick Settings.
 - `static List<Refer> refers(...)`, `static void setRefers(...)`: Список контактов перевода.
 - `static void deletePage(...)`: Удаление страницы со сдвигом индексов.
 - `Refer(String, String)`, `String label()`: Контакт перевода.
@@ -115,7 +121,7 @@ MiniSIP реализован на основе декларативного ра
 #### [`StatusService.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/StatusService.java)
 - `static void start(Context ctx)`: Запуск foreground-сервиса статуса.
 - `static void refresh(Context ctx)`: Обновление постоянного уведомления статуса при изменении состояния.
-- `static Notification build(Context ctx)`: Построение уведомления с интерактивными кнопками (Connect, Disconnect, Reconnect).
+- `static Notification build(Context ctx)`: Построение уведомления с интерактивными кнопками (Connect, Disconnect, Reconnect) или уведомления вызова `Notification.CallStyle` (для чипа вызова в строке состояния с кнопками «Динамик», «Микрофон», «Завершить»).
 
 #### [`LogView.java`](file:///home/active/android/minisip/app/src/main/java/ru/minisip/app/LogView.java)
 - Управление RecyclerView-панелью логов, подписка на события `LogBuffer.Delta` для инкрементального добавления строк, управление автопрокруткой через `FollowPolicy`, бейдж новых записей и действия сохранения/очистки.
