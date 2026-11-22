@@ -27,8 +27,9 @@
         android:name=".app.App"
         android:label="MiniSIP"
         android:allowBackup="false"
-        android:theme="@style/Theme.Material3.DayNight.NoActionBar">
-
+        android:theme="@style/Theme.Material3.DayNight.NoActionBar"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round">
         <activity
             android:name=".app.MainActivity"
             android:exported="true"

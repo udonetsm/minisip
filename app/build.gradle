@@ -10,7 +10,7 @@ android {
         applicationId 'ru.minisip'
         minSdk 27
         targetSdk 34
-        versionCode 207226
+        versionCode 207227
         versionName '2.0.7'
     }
 
