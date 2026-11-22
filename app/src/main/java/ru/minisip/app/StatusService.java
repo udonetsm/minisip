@@ -185,6 +185,9 @@ public final class StatusService extends Service {
         if (ACTION_TOGGLE.equals(action)) msg = app.toggleVpnFromTile(this);
         else if (ACTION_RECONNECT.equals(action)) msg = app.reconnectVpn();
         if (msg != null) Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+        // Button tap: service is already foreground; a notification built now shows the pre-change
+        // state and can overtake the fresh one posted by refresh(), so leave posting to refresh().
+        if (ACTION_TOGGLE.equals(action) || ACTION_RECONNECT.equals(action)) return START_STICKY;
         Notification n = build(this);
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
