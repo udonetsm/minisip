@@ -34,6 +34,15 @@ public final class TileProxyActivity extends Activity {
     }
 
     private void proceed() {
+        App app = (App) getApplication();
+        if (!(app.vpnUp || app.vpnConnecting) && PageStore.firstConfiguredVpnPage(this) < 0) {
+            android.widget.Toast.makeText(this, "VPN: page not configured", android.widget.Toast.LENGTH_LONG).show();
+            Intent open = new Intent(this, MainActivity.class);
+            open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(open);
+            finish();
+            return;
+        }
         Intent consent = VpnService.prepare(this);
         if (consent != null) {
             // First run or consent was revoked: show the system dialog.
@@ -64,6 +73,14 @@ public final class TileProxyActivity extends Activity {
 
     private void runToggle() {
         App app = (App) getApplication();
+        if (!(app.vpnUp || app.vpnConnecting) && PageStore.firstConfiguredVpnPage(this) < 0) {
+            android.widget.Toast.makeText(this, "VPN: page not configured", android.widget.Toast.LENGTH_LONG).show();
+            Intent open = new Intent(this, MainActivity.class);
+            open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(open);
+            finish();
+            return;
+        }
         String msg = app.toggleVpnFromTile(this);
         if (msg != null) {
             android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show();
@@ -79,6 +96,9 @@ public final class TileProxyActivity extends Activity {
         List<Integer> pages = PageStore.configuredVpnPages(this);
         if (pages.isEmpty()) {
             android.widget.Toast.makeText(this, "No VPN profiles configured", android.widget.Toast.LENGTH_LONG).show();
+            Intent open = new Intent(this, MainActivity.class);
+            open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(open);
             finish();
             return;
         }

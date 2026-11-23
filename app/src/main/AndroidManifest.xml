@@ -101,7 +101,7 @@
         <service
             android:name=".app.VpnTileService"
             android:exported="true"
-            android:icon="@drawable/ic_vpn_tile"
+            android:icon="@drawable/ic_launcher_monochrome"
             android:label="MiniVPN"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>

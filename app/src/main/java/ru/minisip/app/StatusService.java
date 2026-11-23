@@ -182,7 +182,15 @@ public final class StatusService extends Service {
         App app = (App) getApplication();
         String action = intent == null ? null : intent.getAction();
         String msg = null;
-        if (ACTION_TOGGLE.equals(action)) msg = app.toggleVpnFromTile(this);
+        if (ACTION_TOGGLE.equals(action)) {
+            if (!(app.vpnUp || app.vpnConnecting) && PageStore.firstConfiguredVpnPage(this) < 0) {
+                msg = "VPN: page not configured";
+                Intent open = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(open);
+            } else {
+                msg = app.toggleVpnFromTile(this);
+            }
+        }
         else if (ACTION_RECONNECT.equals(action)) msg = app.reconnectVpn();
         if (msg != null) Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
         // Button tap: service is already foreground; a notification built now shows the pre-change

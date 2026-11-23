@@ -8,6 +8,7 @@ import android.graphics.drawable.Icon;
 import android.service.quicksettings.Tile;
 import android.service.quicksettings.TileService;
 import android.widget.Toast;
+import ru.minisip.R;
 
 /**
  * Quick Settings tile that toggles the app-wide VPN without opening the UI.
@@ -24,7 +25,7 @@ public final class VpnTileService extends TileService {
         Application app = getApplication();
         boolean active = app instanceof App && (((App) app).vpnUp || ((App) app).vpnConnecting);
         t.setLabel("MiniSIP VPN");
-        t.setIcon(Icon.createWithResource(this, android.R.drawable.sym_def_app_icon));
+        t.setIcon(Icon.createWithResource(this, R.drawable.ic_launcher_monochrome));
         t.setState(active ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
         t.updateTile();
     }
@@ -32,10 +33,25 @@ public final class VpnTileService extends TileService {
     public void onClick() {
         super.onClick();
         StatusService.start(this);
+        App app = (App) getApplication();
+        boolean isUp = app.vpnUp || app.vpnConnecting;
+        if (!isUp && PageStore.firstConfiguredVpnPage(this) < 0) {
+            Toast.makeText(this, "VPN: page not configured", Toast.LENGTH_LONG).show();
+            Intent intent = new Intent(this, MainActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            PendingIntent pending = PendingIntent.getActivity(
+                    this, 0, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            if (Build.VERSION.SDK_INT >= 34) {
+                startActivityAndCollapse(pending);
+            } else {
+                startActivityAndCollapse(intent);
+            }
+            return;
+        }
 	// If VPN consent is already granted, toggle directly without launching an Activity.
         // This keeps the Quick Settings panel from collapsing.
         if (VpnService.prepare(this) == null) {
-            App app = (App) getApplication();
             final boolean wasActive = app.vpnUp || app.vpnConnecting;
             String msg = app.toggleVpnFromTile(this);
             if (msg != null) {

@@ -238,7 +238,7 @@ public final class MainActivity extends AppCompatActivity {
             sbm.requestAddTileService(
                     new ComponentName(this, VpnTileService.class),
                     "MiniSIP VPN",
-                    Icon.createWithResource(this, R.drawable.ic_vpn_tile),
+                    Icon.createWithResource(this, R.drawable.ic_launcher_monochrome),
                     getMainExecutor(),
                     (result) -> sp.edit().putBoolean("tileOffered", true).apply());
         } catch (RuntimeException ignored) {
