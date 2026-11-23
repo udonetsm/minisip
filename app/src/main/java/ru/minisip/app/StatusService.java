@@ -100,7 +100,7 @@ public final class StatusService extends Service {
                 new NotificationChannel(CHANNEL, "Status", NotificationManager.IMPORTANCE_LOW));
         Intent open = new Intent(ctx, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         Notification.Builder b = new Notification.Builder(ctx, CHANNEL)
-                .setSmallIcon(android.R.drawable.sym_def_app_icon)
+                .setSmallIcon(R.drawable.ic_stat_notify)
                 .setContentTitle("MiniSIP")
                 .setContentText(text(app))
                 .setOngoing(true)
